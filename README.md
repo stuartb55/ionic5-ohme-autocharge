@@ -60,7 +60,24 @@ POLL_INTERVAL=180
 
 ## Usage
 
-**Run continuously** (recommended — detects plug-in events automatically):
+### Docker (recommended)
+
+```bash
+# Start in the background — auto-restarts on crash or reboot
+docker compose up -d
+
+# View live logs
+docker compose logs -f
+
+# Stop
+docker compose down
+```
+
+The container runs the polling loop indefinitely. Docker's `restart: unless-stopped` policy means it comes back automatically after a system reboot or crash — no Task Scheduler or startup scripts needed.
+
+### Python directly
+
+**Run continuously** (detects plug-in events automatically):
 
 ```bash
 python main.py
@@ -72,23 +89,17 @@ python main.py
 python main.py --once
 ```
 
-## Running on startup (Windows)
-
-To have the app start automatically with Windows:
-
-1. Press `Win + R`, type `shell:startup`, press Enter
-2. Create a shortcut to `pythonw main.py` pointing to your project directory
-3. Or add a Task Scheduler entry: Action → `python.exe`, Arguments → `C:\path\to\main.py`
-
 ## Project structure
 
 ```
-├── main.py          # Async polling loop and plug-in event handler
-├── bluelink.py      # Hyundai Bluelink wrapper (hyundai-kia-connect-api)
-├── ohme_client.py   # Ohme charger wrapper (ohme)
-├── config.py        # Loads settings from .env
+├── main.py            # Async polling loop and plug-in event handler
+├── bluelink.py        # Hyundai Bluelink wrapper (hyundai-kia-connect-api)
+├── ohme_client.py     # Ohme charger wrapper (ohme)
+├── config.py          # Loads settings from .env
+├── Dockerfile
+├── docker-compose.yml
 ├── requirements.txt
-├── .env.example     # Credential template
+├── .env.example       # Credential template
 └── .gitignore
 ```
 
