@@ -56,6 +56,11 @@ CHARGE_TARGET=80
 
 # How often to poll Ohme for plug-in events, in seconds (default: 180)
 POLL_INTERVAL=180
+
+# Ntfy notifications (optional) — leave NTFY_TOPIC blank to disable
+NTFY_TOPIC=
+NTFY_URL=https://ntfy.sh
+NTFY_TOKEN=
 ```
 
 ## Usage
@@ -88,6 +93,26 @@ python main.py
 ```bash
 python main.py --once
 ```
+
+## Ntfy notifications
+
+The app can send a push notification via [ntfy](https://ntfy.sh) each time the Ohme charge target is updated. Set `NTFY_TOPIC` in your `.env` to enable it — if left blank, notifications are silently disabled.
+
+```env
+NTFY_TOPIC=your-topic-name
+NTFY_URL=https://your-ntfy-instance.com   # defaults to https://ntfy.sh
+NTFY_TOKEN=your-access-token              # required for self-hosted instances with auth
+```
+
+When running, the startup log will confirm whether notifications are enabled:
+
+```
+Ntfy notifications enabled (url=https://your-ntfy-instance.com, topic=your-topic-name)
+```
+
+On a successful charge target update you will receive a notification such as:
+
+> IONIC 5 plugged in at 62% — Ohme target set to 80%
 
 ## Deploying to Mac Mini (home server)
 
@@ -133,6 +158,7 @@ docker compose -f docker-compose.prod.yml down
 ├── main.py                        # Async polling loop and plug-in event handler
 ├── bluelink.py                    # Hyundai Bluelink wrapper (hyundai-kia-connect-api)
 ├── ohme_client.py                 # Ohme charger wrapper (ohme)
+├── ntfy.py                        # Ntfy push notification client
 ├── config.py                      # Loads settings from .env
 ├── Dockerfile
 ├── docker-compose.yml             # Local development / testing

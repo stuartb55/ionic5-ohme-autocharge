@@ -62,6 +62,10 @@ async def run_loop() -> None:
         config.POLL_INTERVAL,
         config.CHARGE_TARGET,
     )
+    if config.NTFY_TOPIC:
+        logger.info("Ntfy notifications enabled (url=%s, topic=%s)", config.NTFY_URL, config.NTFY_TOPIC)
+    else:
+        logger.info("Ntfy notifications disabled — set NTFY_TOPIC to enable")
 
     client = await ohme_client.make_client()
 
