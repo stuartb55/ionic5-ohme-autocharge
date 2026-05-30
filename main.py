@@ -1,5 +1,5 @@
 """
-Monitors the Ohme charger for a plug-in event, then fetches the IONIC 5's
+Monitors the Ohme charger for a plug-in event, then fetches the vehicle's
 current battery SOC from Hyundai Bluelink and sets the Ohme charge target.
 
 Run continuously:  python main.py
@@ -49,7 +49,8 @@ async def handle_plugin_event(client) -> bool:
     )
     try:
         await ohme_client.set_target(client, current_soc=soc, target_percent=config.CHARGE_TARGET)
-        await ntfy.send(f"IONIC 5 plugged in at {soc}% — Ohme target set to {config.CHARGE_TARGET}%")
+        vehicle_name = client.current_vehicle or "EV"
+        await ntfy.send(f"{vehicle_name} plugged in at {soc}% — Ohme target set to {config.CHARGE_TARGET}%")
         return True
     except Exception:
         logger.exception("Failed to set Ohme charge target — will retry next poll")

@@ -1,0 +1,54 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this project does
+
+Polls the Ohme home charger every N seconds. When it detects the car transitioning from unplugged → plugged in, it fetches the Hyundai IONIC 5's battery SOC from the Hyundai Bluelink EU API and configures Ohme to stop charging at the target percentage (default 80%).
+
+## Commands
+
+```bash
+# Install runtime dependencies
+pip install -r requirements.txt
+
+# Install dev dependencies (includes pytest)
+pip install -r requirements-dev.txt
+
+# Run all tests
+pytest
+
+# Run a single test file
+pytest tests/test_bluelink.py
+
+# Run a single test by name
+pytest tests/test_bluelink.py::test_returns_battery_percentage
+
+# Run the app continuously
+python main.py
+
+# Run once (fetch SOC and set target immediately, then exit — used in CI/smoke tests)
+python main.py --once
+```
+
+## Architecture
+
+The app has five modules that form a thin pipeline:
+
+- **`main.py`** — async polling loop. Tracks plug/unplug state transitions with `was_connected` / `session_handled` flags, calls `handle_plugin_event` on plug-in, resets on unplug. `bluelink.get_battery_percentage()` is synchronous (third-party SDK limitation) so it runs via `asyncio.to_thread`. Ntfy message uses `client.current_vehicle` (populated by `set_target` → `async_update_device_info`).
+- **`ohme_client.py`** — async wrapper around the `ohme` library. `set_target` must call `async_update_device_info` first before other Ohme calls or internal state won't be populated.
+- **`bluelink.py`** — synchronous wrapper around `hyundai_kia_connect_api`. Uses a module-level singleton `_manager` so the `VehicleManager` is created and authenticated only once per process lifetime.
+- **`ntfy.py`** — optional push notifications via ntfy.sh. Silently disabled when `NTFY_TOPIC` is unset.
+- **`config.py`** — loads all settings from env/`.env` at import time. Required vars raise `KeyError` on startup if missing; optional vars have defaults.
+
+## Configuration
+
+Copy `.env.example` to `.env`. Required vars: `HYUNDAI_USERNAME`, `HYUNDAI_PASSWORD`, `HYUNDAI_PIN`, `OHME_EMAIL`, `OHME_PASSWORD`. Optional: `CHARGE_TARGET` (default 80), `POLL_INTERVAL` (default 180s), `NTFY_TOPIC`, `NTFY_URL`, `NTFY_TOKEN`.
+
+## Testing
+
+Tests live in `tests/`. `conftest.py` sets stub env vars before `config.py` is imported — any new required env var must be added there too. All tests mock at the module boundary (patch `bluelink._get_manager`, mock `OhmeApiClient`, etc.) rather than hitting real APIs. `pytest.ini` sets `asyncio_mode = auto` so async tests work without decorators.
+
+## Docker
+
+`docker-compose.yml` is for local dev (builds from source). `docker-compose.prod.yml` is for the Mac Mini home server and pulls the pre-built image from GHCR. CI (`.github/workflows/docker.yml`) runs tests first, then builds and pushes a multi-platform (`linux/amd64` + `linux/arm64`) image on every push to `main`.

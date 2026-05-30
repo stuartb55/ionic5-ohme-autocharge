@@ -5,7 +5,7 @@
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/stuartb55/ionic5-ohme-autocharge/pkgs/container/ionic5-ohme-autocharge)
 [![Platforms](https://img.shields.io/badge/platform-linux%2Famd64%20%7C%20linux%2Farm64-lightgrey)](https://github.com/stuartb55/ionic5-ohme-autocharge/pkgs/container/ionic5-ohme-autocharge)
 
-Automatically sets your **Ohme Pro** home charger to charge your **Hyundai** to a target battery percentage (default 80%) — without manual intervention.
+Automatically sets your **Ohme Pro** home charger to charge your **Hyundai EV** to a target battery percentage (default 80%) — without manual intervention.
 
 When the car is plugged in, the app fetches the current battery state-of-charge from the Hyundai Bluelink API and configures the Ohme charger to stop at your target level.
 
@@ -83,7 +83,7 @@ docker compose logs -f
 docker compose down
 ```
 
-The container runs the polling loop indefinitely. Docker's `restart: unless-stopped` policy means it comes back automatically after a system reboot or crash — no Task Scheduler or startup scripts needed.
+The container runs the polling loop indefinitely. Docker's `restart: unless-stopped` policy means it comes back automatically after a system reboot or crash — no startup scripts needed.
 
 ### Python directly
 
@@ -117,13 +117,15 @@ Ntfy notifications enabled (url=https://your-ntfy-instance.com, topic=your-topic
 
 On a successful charge target update you will receive a notification such as:
 
-> IONIC 5 plugged in at 62% — Ohme target set to 80%
+> Hyundai IONIQ 5 (2021-) plugged in at 62% — Ohme target set to 80%
 
-## Deploying to Mac Mini (home server)
+The vehicle name is read automatically from your Ohme account.
 
-Every push to `main` triggers a GitHub Actions workflow that builds a multi-platform image (`linux/amd64` + `linux/arm64`) and pushes it to the GitHub Container Registry. The Mac Mini pulls the pre-built image — no code or build tools required.
+## Deploying to a home server
 
-**One-time setup on the Mac Mini:**
+Every push to `main` triggers a GitHub Actions workflow that builds a multi-platform image (`linux/amd64` + `linux/arm64`) and pushes it to the GitHub Container Registry. A home server can pull this pre-built image — no code or build tools required on the server itself.
+
+**One-time setup on the server:**
 
 ```bash
 # Create a folder for the config
@@ -167,7 +169,7 @@ docker compose -f docker-compose.prod.yml down
 ├── config.py                      # Loads settings from .env
 ├── Dockerfile
 ├── docker-compose.yml             # Local development / testing
-├── docker-compose.prod.yml        # Mac Mini: pulls pre-built image from GHCR
+├── docker-compose.prod.yml        # Home server: pulls pre-built image from GHCR
 ├── .github/workflows/docker.yml   # Builds multi-platform image on every push to main
 ├── requirements.txt
 ├── .env.example                   # Credential template
