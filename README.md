@@ -1,5 +1,10 @@
 # Hyundai → Ohme Auto-Charge
 
+[![CI](https://github.com/stuartb55/ionic5-ohme-autocharge/actions/workflows/docker.yml/badge.svg)](https://github.com/stuartb55/ionic5-ohme-autocharge/actions/workflows/docker.yml)
+[![Python](https://img.shields.io/badge/python-3.12+-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/stuartb55/ionic5-ohme-autocharge/pkgs/container/ionic5-ohme-autocharge)
+[![Platforms](https://img.shields.io/badge/platform-linux%2Famd64%20%7C%20linux%2Farm64-lightgrey)](https://github.com/stuartb55/ionic5-ohme-autocharge/pkgs/container/ionic5-ohme-autocharge)
+
 Automatically sets your **Ohme Pro** home charger to charge your **Hyundai** to a target battery percentage (default 80%) — without manual intervention.
 
 When the car is plugged in, the app fetches the current battery state-of-charge from the Hyundai Bluelink API and configures the Ohme charger to stop at your target level.
