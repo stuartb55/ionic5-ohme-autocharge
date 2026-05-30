@@ -89,17 +89,57 @@ python main.py
 python main.py --once
 ```
 
+## Deploying to Mac Mini (home server)
+
+Every push to `main` triggers a GitHub Actions workflow that builds a multi-platform image (`linux/amd64` + `linux/arm64`) and pushes it to the GitHub Container Registry. The Mac Mini pulls the pre-built image — no code or build tools required.
+
+**One-time setup on the Mac Mini:**
+
+```bash
+# Create a folder for the config
+mkdir ~/autocharge && cd ~/autocharge
+
+# Copy your .env across (fill in credentials as per .env.example)
+scp yourwindowspc:path/to/hyundai/.env .
+
+# Download the production compose file
+curl -O https://raw.githubusercontent.com/stuartb55/ionic5-ohme-autocharge/main/docker-compose.prod.yml
+
+# Start
+docker compose -f docker-compose.prod.yml up -d
+```
+
+> **Note:** After the first push to `main`, go to `https://github.com/stuartb55?tab=packages`, find the `ionic5-ohme-autocharge` package, and set its visibility to **Public** — this allows the Mac Mini to pull the image without logging in to GHCR.
+
+**Updating after a code change:**
+
+```bash
+docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d
+```
+
+**Useful commands:**
+
+```bash
+# View live logs
+docker compose -f docker-compose.prod.yml logs -f
+
+# Stop
+docker compose -f docker-compose.prod.yml down
+```
+
 ## Project structure
 
 ```
-├── main.py            # Async polling loop and plug-in event handler
-├── bluelink.py        # Hyundai Bluelink wrapper (hyundai-kia-connect-api)
-├── ohme_client.py     # Ohme charger wrapper (ohme)
-├── config.py          # Loads settings from .env
+├── main.py                        # Async polling loop and plug-in event handler
+├── bluelink.py                    # Hyundai Bluelink wrapper (hyundai-kia-connect-api)
+├── ohme_client.py                 # Ohme charger wrapper (ohme)
+├── config.py                      # Loads settings from .env
 ├── Dockerfile
-├── docker-compose.yml
+├── docker-compose.yml             # Local development / testing
+├── docker-compose.prod.yml        # Mac Mini: pulls pre-built image from GHCR
+├── .github/workflows/docker.yml   # Builds multi-platform image on every push to main
 ├── requirements.txt
-├── .env.example       # Credential template
+├── .env.example                   # Credential template
 └── .gitignore
 ```
 

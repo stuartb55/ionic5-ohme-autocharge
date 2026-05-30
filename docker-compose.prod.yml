@@ -1,0 +1,10 @@
+services:
+  autocharge:
+    image: ghcr.io/stuartb55/ionic5-ohme-autocharge:latest
+    env_file: .env
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
