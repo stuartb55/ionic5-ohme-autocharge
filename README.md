@@ -1,6 +1,6 @@
-# IONIC 5 → Ohme Auto-Charge
+# Hyundai → Ohme Auto-Charge
 
-Automatically sets your **Ohme Pro** home charger to charge your **Hyundai IONIC 5** to a target battery percentage (default 80%) — without manual intervention.
+Automatically sets your **Ohme Pro** home charger to charge your **Hyundai** to a target battery percentage (default 80%) — without manual intervention.
 
 When the car is plugged in, the app fetches the current battery state-of-charge from the Hyundai Bluelink API and configures the Ohme charger to stop at your target level.
 
