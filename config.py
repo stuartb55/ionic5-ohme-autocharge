@@ -12,3 +12,6 @@ OHME_PASSWORD = os.environ["OHME_PASSWORD"]
 
 CHARGE_TARGET = int(os.getenv("CHARGE_TARGET", "80"))
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "180"))
+
+NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")
+NTFY_URL = os.getenv("NTFY_URL", "https://ntfy.sh")

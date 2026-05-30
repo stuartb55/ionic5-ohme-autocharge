@@ -12,6 +12,7 @@ import logging
 
 import bluelink
 import ohme_client
+import notify
 import config
 
 logging.basicConfig(
@@ -47,7 +48,9 @@ async def handle_plugin_event(client) -> None:
     )
     try:
         await ohme_client.set_target(client, current_soc=soc, target_percent=config.CHARGE_TARGET)
-        logger.info("Done. Ohme will charge from %s%% to %s%%.", soc, config.CHARGE_TARGET)
+        msg = f"IONIC 5 plugged in at {soc}% — Ohme target set to {config.CHARGE_TARGET}%"
+        logger.info(msg)
+        await notify.send(msg)
     except Exception:
         logger.exception("Failed to set Ohme charge target")
 
