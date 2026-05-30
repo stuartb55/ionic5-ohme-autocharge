@@ -15,3 +15,4 @@ POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "180"))
 
 NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")
 NTFY_URL = os.getenv("NTFY_URL", "https://ntfy.sh")
+NTFY_TOKEN = os.getenv("NTFY_TOKEN", "")
