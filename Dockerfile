@@ -5,6 +5,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir --root-user-action=ignore -r requirements.txt
 
-COPY config.py bluelink.py ohme_client.py main.py ./
+COPY config.py bluelink.py ohme_client.py notify.py main.py ./
 
 CMD ["python", "-u", "main.py"]
