@@ -1,0 +1,107 @@
+# IONIC 5 → Ohme Auto-Charge
+
+Automatically sets your **Ohme Pro** home charger to charge your **Hyundai IONIC 5** to a target battery percentage (default 80%) — without manual intervention.
+
+When the car is plugged in, the app fetches the current battery state-of-charge from the Hyundai Bluelink API and configures the Ohme charger to stop at your target level.
+
+## How it works
+
+1. Polls the Ohme API every 3 minutes (configurable)
+2. Detects when the car transitions from unplugged → plugged in
+3. Fetches the current battery % from Hyundai Bluelink (EU)
+4. Tells Ohme the current SOC and sets the charge target (default 80%)
+5. Resets after unplug, ready for the next session
+
+## Prerequisites
+
+- Python 3.10+
+- Hyundai Bluelink account (European region)
+- Ohme account (the email/password used in the Ohme app)
+
+## Setup
+
+**1. Clone the repository**
+
+```bash
+git clone https://github.com/stuartb55/ionic5-ohme-autocharge.git
+cd ionic5-ohme-autocharge
+```
+
+**2. Install dependencies**
+
+```bash
+pip install -r requirements.txt
+```
+
+**3. Configure credentials**
+
+Copy `.env.example` to `.env` and fill in your details:
+
+```bash
+cp .env.example .env
+```
+
+```env
+# Hyundai Bluelink credentials (European account)
+HYUNDAI_USERNAME=your_email@example.com
+HYUNDAI_PASSWORD=your_password
+HYUNDAI_PIN=1234
+
+# Ohme account credentials
+OHME_EMAIL=your_email@example.com
+OHME_PASSWORD=your_password
+
+# Charge target percentage (default: 80)
+CHARGE_TARGET=80
+
+# How often to poll Ohme for plug-in events, in seconds (default: 180)
+POLL_INTERVAL=180
+```
+
+## Usage
+
+**Run continuously** (recommended — detects plug-in events automatically):
+
+```bash
+python main.py
+```
+
+**Run once** (fetches SOC and sets target immediately, then exits):
+
+```bash
+python main.py --once
+```
+
+## Running on startup (Windows)
+
+To have the app start automatically with Windows:
+
+1. Press `Win + R`, type `shell:startup`, press Enter
+2. Create a shortcut to `pythonw main.py` pointing to your project directory
+3. Or add a Task Scheduler entry: Action → `python.exe`, Arguments → `C:\path\to\main.py`
+
+## Project structure
+
+```
+├── main.py          # Async polling loop and plug-in event handler
+├── bluelink.py      # Hyundai Bluelink wrapper (hyundai-kia-connect-api)
+├── ohme_client.py   # Ohme charger wrapper (ohme)
+├── config.py        # Loads settings from .env
+├── requirements.txt
+├── .env.example     # Credential template
+└── .gitignore
+```
+
+## Dependencies
+
+| Package | Purpose |
+|---|---|
+| [hyundai-kia-connect-api](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api) | Reads battery SOC from Hyundai Bluelink (EU) |
+| [ohme](https://github.com/dan-r/ohmepy) | Controls the Ohme home charger |
+| [python-dotenv](https://github.com/theskumar/python-dotenv) | Loads credentials from `.env` |
+
+## Notes
+
+- The Hyundai API returns **cached** vehicle state. If your car has been parked without a connection for a long time, the SOC reading may be slightly stale. For normal daily use (drive home → plug in) this is not an issue.
+- If the SOC is already at or above the target when you plug in, the app logs this and takes no action — Ohme will continue with whatever schedule you have set.
+- Ohme credentials are your Ohme app email/password (authenticated via Google Identity Toolkit).
