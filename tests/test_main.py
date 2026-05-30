@@ -1,7 +1,8 @@
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import config
-from main import handle_plugin_event
+from main import handle_plugin_event, run_loop
 
 
 def _mock_ohme_client():
@@ -64,3 +65,49 @@ async def test_no_ohme_call_when_soc_at_or_above_target(monkeypatch):
         await handle_plugin_event(_mock_ohme_client())
 
     mock_set_target.assert_not_called()
+
+
+# --- run_loop startup behaviour ---
+
+def _make_loop_client(target_soc: int):
+    """Return a mock Ohme client for run_loop tests."""
+    client = MagicMock()
+    client.close = AsyncMock()
+    client.target_soc = target_soc
+    return client
+
+
+async def test_no_reconfigure_on_restart_when_target_already_correct(monkeypatch):
+    """Container restart mid-charge should not reconfigure Ohme if target is already set."""
+    monkeypatch.setattr(config, "CHARGE_TARGET", 80)
+    client = _make_loop_client(target_soc=80, )
+
+    with patch("ohme_client.make_client", new=AsyncMock(return_value=client)), \
+         patch("ohme_client.is_connected", side_effect=lambda m: m != "DISCONNECTED"), \
+         patch("ohme_client.get_session_mode", new=AsyncMock(return_value="SMART_CHARGE")), \
+         patch("main.handle_plugin_event", new=AsyncMock(return_value=True)) as mock_handle, \
+         patch("asyncio.sleep", side_effect=asyncio.CancelledError()):
+        try:
+            await run_loop()
+        except asyncio.CancelledError:
+            pass
+
+    mock_handle.assert_not_called()
+
+
+async def test_reconfigures_on_restart_when_target_is_wrong(monkeypatch):
+    """If the target doesn't match on startup, reconfiguration should still fire."""
+    monkeypatch.setattr(config, "CHARGE_TARGET", 80)
+    client = _make_loop_client(target_soc=100, )
+
+    with patch("ohme_client.make_client", new=AsyncMock(return_value=client)), \
+         patch("ohme_client.is_connected", side_effect=lambda m: m != "DISCONNECTED"), \
+         patch("ohme_client.get_session_mode", new=AsyncMock(return_value="SMART_CHARGE")), \
+         patch("main.handle_plugin_event", new=AsyncMock(return_value=True)) as mock_handle, \
+         patch("asyncio.sleep", side_effect=asyncio.CancelledError()):
+        try:
+            await run_loop()
+        except asyncio.CancelledError:
+            pass
+
+    mock_handle.assert_called_once()
