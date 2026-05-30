@@ -34,7 +34,7 @@ async def test_sets_ohme_target_and_sends_notification_when_below_target(monkeyp
 
     with patch("bluelink.get_battery_percentage", return_value=62), \
          patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target, \
-         patch("notify.send", new=AsyncMock()) as mock_notify:
+         patch("ntfy.send", new=AsyncMock()) as mock_notify:
         result = await handle_plugin_event(client)
 
     assert result is True
@@ -49,7 +49,7 @@ async def test_returns_false_when_ohme_fails_and_does_not_notify(monkeypatch):
 
     with patch("bluelink.get_battery_percentage", return_value=62), \
          patch("ohme_client.set_target", new=AsyncMock(side_effect=Exception("Ohme API error"))), \
-         patch("notify.send", new=AsyncMock()) as mock_notify:
+         patch("ntfy.send", new=AsyncMock()) as mock_notify:
         result = await handle_plugin_event(_mock_ohme_client())
 
     assert result is False

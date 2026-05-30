@@ -12,7 +12,7 @@ import logging
 
 import bluelink
 import ohme_client
-import notify
+import ntfy
 import config
 
 logging.basicConfig(
@@ -49,7 +49,7 @@ async def handle_plugin_event(client) -> bool:
     )
     try:
         await ohme_client.set_target(client, current_soc=soc, target_percent=config.CHARGE_TARGET)
-        await notify.send(f"IONIC 5 plugged in at {soc}% — Ohme target set to {config.CHARGE_TARGET}%")
+        await ntfy.send(f"IONIC 5 plugged in at {soc}% — Ohme target set to {config.CHARGE_TARGET}%")
         return True
     except Exception:
         logger.exception("Failed to set Ohme charge target — will retry next poll")
