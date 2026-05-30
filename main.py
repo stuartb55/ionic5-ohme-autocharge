@@ -23,15 +23,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def handle_plugin_event(client) -> None:
-    """Called once per session when the car transitions from unplugged → plugged in."""
+async def handle_plugin_event(client) -> bool:
+    """Called once per session when the car transitions from unplugged → plugged in.
+    Returns True only when Ohme has been successfully updated (or no update was needed)."""
     logger.info("Plug-in detected — fetching battery SOC from Bluelink...")
     try:
         # hyundai_kia_connect_api is synchronous; run it in a thread to avoid blocking the loop
         soc = await asyncio.to_thread(bluelink.get_battery_percentage)
     except Exception:
-        logger.exception("Failed to fetch SOC from Hyundai Bluelink")
-        return
+        logger.exception("Failed to fetch SOC from Hyundai Bluelink — will retry next poll")
+        return False
 
     if soc >= config.CHARGE_TARGET:
         logger.info(
@@ -39,7 +40,7 @@ async def handle_plugin_event(client) -> None:
             soc,
             config.CHARGE_TARGET,
         )
-        return
+        return True
 
     logger.info(
         "SOC %s%% is below target %s%% — configuring Ohme...",
@@ -48,11 +49,11 @@ async def handle_plugin_event(client) -> None:
     )
     try:
         await ohme_client.set_target(client, current_soc=soc, target_percent=config.CHARGE_TARGET)
-        msg = f"IONIC 5 plugged in at {soc}% — Ohme target set to {config.CHARGE_TARGET}%"
-        logger.info(msg)
-        await notify.send(msg)
+        await notify.send(f"IONIC 5 plugged in at {soc}% — Ohme target set to {config.CHARGE_TARGET}%")
+        return True
     except Exception:
-        logger.exception("Failed to set Ohme charge target")
+        logger.exception("Failed to set Ohme charge target — will retry next poll")
+        return False
 
 
 async def run_loop() -> None:
@@ -78,8 +79,7 @@ async def run_loop() -> None:
                     session_handled = False
 
                 if now_connected and not session_handled:
-                    await handle_plugin_event(client)
-                    session_handled = True
+                    session_handled = await handle_plugin_event(client)
 
                 if not now_connected and was_connected:
                     logger.info("Car unplugged (mode=%s). Waiting for next session.", mode)

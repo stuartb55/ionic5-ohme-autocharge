@@ -12,8 +12,9 @@ async def send(message: str) -> None:
 
     url = f"{config.NTFY_URL}/{config.NTFY_TOPIC}"
     headers = {"Authorization": f"Bearer {config.NTFY_TOKEN}"} if config.NTFY_TOKEN else {}
+    timeout = aiohttp.ClientTimeout(total=10)
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(url, data=message.encode(), headers=headers) as resp:
                 if resp.status != 200:
                     logger.warning("ntfy returned HTTP %s", resp.status)

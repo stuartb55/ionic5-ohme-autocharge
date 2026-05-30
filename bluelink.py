@@ -28,7 +28,14 @@ def get_battery_percentage() -> int:
     vm.check_and_refresh_token()
     vm.update_all_vehicles_with_cached_state()
 
+    if not vm.vehicles:
+        raise RuntimeError("No vehicles found on this Hyundai account")
+
     vehicle = next(iter(vm.vehicles.values()))
     soc = vehicle.ev_battery_percentage
+
+    if soc is None:
+        raise RuntimeError("Vehicle did not report a battery percentage — try again shortly")
+
     logger.info("Hyundai battery SOC: %s%%", soc)
     return soc
