@@ -49,7 +49,7 @@ async def test_set_target_calls_methods_in_correct_order():
 
     await ohme_client.set_target(client, current_soc=62, target_percent=80)
 
-    assert call_order == ["update_device_info", "get_charge_session", "set_soc", "set_target"]
+    assert call_order == ["update_device_info", "get_charge_session", "set_soc", "set_target", "get_charge_session"]
 
 
 async def test_set_target_passes_correct_values():

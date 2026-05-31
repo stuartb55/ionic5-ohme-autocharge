@@ -32,6 +32,7 @@ async def set_target(client: OhmeApiClient, current_soc: int, target_percent: in
     await client.async_set_state_of_charge(current_soc)
     topup = target_percent - current_soc
     await client.async_set_target(target_percent=topup)
+    await client.async_get_charge_session()  # refresh so client.slots reflects the new schedule
     logger.info(
         "Ohme target set: current SOC=%s%%, target=%s%%, top-up=%s%%",
         current_soc,

@@ -5,8 +5,10 @@ import config
 from main import handle_plugin_event, run_loop
 
 
-def _mock_ohme_client():
-    return MagicMock()
+def _mock_ohme_client(slots=None):
+    client = MagicMock()
+    client.slots = slots or []
+    return client
 
 
 async def test_returns_false_when_bluelink_fails():
@@ -41,8 +43,26 @@ async def test_sets_ohme_target_and_sends_notification_when_below_target(monkeyp
     assert result is True
     mock_set_target.assert_called_once_with(client, current_soc=62, target_percent=80)
     mock_notify.assert_called_once()
-    assert "62%" in mock_notify.call_args[0][0]
-    assert "80%" in mock_notify.call_args[0][0]
+    msg = mock_notify.call_args[0][0]
+    assert "62%" in msg
+    assert "80%" in msg
+    assert "Charge schedule" not in msg  # no slots on this client
+
+
+async def test_notification_includes_charge_schedule_when_slots_available(monkeypatch):
+    from unittest.mock import MagicMock as MM
+    monkeypatch.setattr(config, "CHARGE_TARGET", 80)
+    slot = MM()
+    slot.__str__ = lambda self: "01:00-03:30"
+    client = _mock_ohme_client(slots=[slot])
+
+    with patch("bluelink.get_battery_percentage", return_value=62), \
+         patch("ohme_client.set_target", new=AsyncMock()), \
+         patch("ntfy.send", new=AsyncMock()) as mock_notify:
+        await handle_plugin_event(client)
+
+    msg = mock_notify.call_args[0][0]
+    assert "Charge schedule: 01:00-03:30" in msg
 
 
 async def test_returns_false_when_ohme_fails_and_does_not_notify(monkeypatch):

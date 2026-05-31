@@ -50,7 +50,11 @@ async def handle_plugin_event(client) -> bool:
     try:
         await ohme_client.set_target(client, current_soc=soc, target_percent=config.CHARGE_TARGET)
         vehicle_name = client.current_vehicle or "EV"
-        await ntfy.send(f"{vehicle_name} plugged in at {soc}% — Ohme target set to {config.CHARGE_TARGET}%")
+        msg = f"{vehicle_name} plugged in at {soc}% → {config.CHARGE_TARGET}%"
+        schedule = ", ".join(str(s) for s in client.slots)
+        if schedule:
+            msg += f". Charge schedule: {schedule}"
+        await ntfy.send(msg)
         return True
     except Exception:
         logger.exception("Failed to set Ohme charge target — will retry next poll")
