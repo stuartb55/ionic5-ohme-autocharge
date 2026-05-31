@@ -78,23 +78,7 @@ async def run_loop() -> None:
         initial_mode = await ohme_client.get_session_mode(client)
         was_connected = ohme_client.is_connected(initial_mode)
         if was_connected:
-            current_target = 0
-            try:
-                current_target = client.target_soc
-                session_handled = (current_target == config.CHARGE_TARGET)
-            except Exception:
-                session_handled = False
-            if session_handled:
-                logger.info(
-                    "Car already connected with correct target (%s%%) — skipping reconfiguration",
-                    config.CHARGE_TARGET,
-                )
-            else:
-                logger.info(
-                    "Car already connected but target is %s%% (expected %s%%) — will reconfigure",
-                    current_target,
-                    config.CHARGE_TARGET,
-                )
+            logger.info("Car already connected on startup — will reconfigure Ohme on next poll")
     except Exception:
         logger.warning("Could not determine initial charge state — will treat as disconnected")
         was_connected = False

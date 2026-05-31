@@ -56,4 +56,4 @@ async def test_set_target_passes_correct_values():
     client = _mock_client()
     await ohme_client.set_target(client, current_soc=55, target_percent=80)
     client.async_set_state_of_charge.assert_called_once_with(55)
-    client.async_set_target.assert_called_once_with(target_percent=80)
+    client.async_set_target.assert_called_once_with(target_percent=25)  # top-up = 80 - 55
