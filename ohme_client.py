@@ -24,12 +24,10 @@ def is_connected(mode: str) -> bool:
 
 
 async def set_target(client: OhmeApiClient, current_soc: int, target_percent: int) -> None:
-    """Push the current battery SOC to Ohme and set the charge-to target."""
-    # async_update_device_info must run first to populate _cars (needed for set_state_of_charge)
-    # and serial (needed for internal API calls).
+    """Calculate charge needed and set Ohme to add that amount (does not send SOC to charger)."""
+    # async_update_device_info must run first to populate _cars and serial (needed for internal API calls).
     await client.async_update_device_info()
     await client.async_get_charge_session()
-    await client.async_set_state_of_charge(current_soc)
     topup = target_percent - current_soc
     await client.async_set_target(target_percent=topup)
     await client.async_get_charge_session()  # refresh so client.slots reflects the new schedule

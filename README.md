@@ -14,7 +14,7 @@ When the car is plugged in, the app fetches the current battery state-of-charge 
 1. Polls the Ohme API every 3 minutes (configurable)
 2. Detects when the car transitions from unplugged → plugged in
 3. Fetches the current battery % from Hyundai Bluelink (EU)
-4. Tells Ohme the current SOC and sets the charge target (default 80%)
+4. Calculates how much charge is needed to reach the target (default 80%) and tells Ohme to add that amount
 5. Resets after unplug, ready for the next session
 
 ## Prerequisites

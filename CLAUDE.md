@@ -36,7 +36,7 @@ python main.py --once
 The app has five modules that form a thin pipeline:
 
 - **`main.py`** — async polling loop. Tracks plug/unplug state transitions with `was_connected` / `session_handled` flags, calls `handle_plugin_event` on plug-in, resets on unplug. `bluelink.get_battery_percentage()` is synchronous (third-party SDK limitation) so it runs via `asyncio.to_thread`. Ntfy message uses `client.current_vehicle` (populated by `set_target` → `async_update_device_info`).
-- **`ohme_client.py`** — async wrapper around the `ohme` library. `set_target` must call `async_update_device_info` first before other Ohme calls or internal state won't be populated.
+- **`ohme_client.py`** — async wrapper around the `ohme` library. `set_target` calculates the top-up amount needed (target - current SOC) and sends only that to Ohme (does NOT send the current SOC itself, as Ohme interprets it as "energy already added"). Must call `async_update_device_info` first before other Ohme calls or internal state won't be populated.
 - **`bluelink.py`** — synchronous wrapper around `hyundai_kia_connect_api`. Uses a module-level singleton `_manager` so the `VehicleManager` is created and authenticated only once per process lifetime.
 - **`ntfy.py`** — optional push notifications via ntfy.sh. Silently disabled when `NTFY_TOPIC` is unset.
 - **`config.py`** — loads all settings from env/`.env` at import time. Required vars raise `KeyError` on startup if missing; optional vars have defaults.
