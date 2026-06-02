@@ -9,6 +9,8 @@ Automatically sets your **Ohme Pro** home charger to charge your **Hyundai EV** 
 
 When the car is plugged in, the app fetches the current battery state-of-charge from the Hyundai Bluelink API and configures the Ohme charger to stop at your target level.
 
+It also ships with a **web dashboard** (a single-page app served by nginx) showing live vehicle/charger status, the allocated charge schedule, and historical energy & savings statistics.
+
 ## How it works
 
 1. Polls the Ohme API every 3 minutes (configurable)
@@ -83,7 +85,14 @@ docker compose logs -f
 docker compose down
 ```
 
-The container runs the polling loop indefinitely. Docker's `restart: unless-stopped` policy means it comes back automatically after a system reboot or crash — no startup scripts needed.
+`docker compose up -d` starts **two** services:
+
+| Service    | Description                                              | Port |
+|------------|----------------------------------------------------------|------|
+| `backend`  | FastAPI app — runs the polling loop **and** serves `/api` | 8000 |
+| `frontend` | nginx serving the dashboard SPA, proxying `/api` to the backend | 8080 |
+
+Open the dashboard at **http://localhost:8080**. Docker's `restart: unless-stopped` policy means both services come back automatically after a reboot or crash — no startup scripts needed.
 
 ### Python directly
 
@@ -98,6 +107,49 @@ python main.py
 ```bash
 python main.py --once
 ```
+
+**Run the web API** (also runs the polling loop; interactive docs at `/docs`):
+
+```bash
+uvicorn api:app --host 0.0.0.0 --port 8000
+```
+
+## Web dashboard
+
+The dashboard is a React + TypeScript single-page app (in `frontend/`) served by a
+hardened, non-root nginx image. It polls the backend and renders three sections:
+
+1. **Vehicle & charger status** — a state-of-charge ring (with target marker),
+   connection state, live charge rate (kW / A), and energy added this session.
+2. **Schedule** — a timeline of the allocated charging slots, showing when charging
+   is active vs paused (off-peak tariff windows), plus a slot-by-slot breakdown.
+3. **Statistics & savings** — total energy charged, money saved vs the standard
+   tariff, average price per kWh, CO₂ saved, and a daily energy/savings chart over a
+   selectable 7/30/90-day window.
+
+> All figures come straight from the Ohme/Bluelink APIs. Metrics those APIs don't
+> expose (e.g. a "scheduling success rate") are intentionally omitted rather than
+> faked.
+
+### Frontend development
+
+```bash
+cd frontend
+npm install
+npm run dev      # Vite dev server on :5173, proxies /api to http://localhost:8000
+npm run test     # Vitest component + MSW integration tests
+npm run lint
+npm run build    # type-check + production build to dist/
+```
+
+### API endpoints
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/health` | Liveness probe |
+| `GET /api/status` | Vehicle SOC, connection state, charge rate, target, session energy |
+| `GET /api/schedule` | Allocated charge slots + next slot times |
+| `GET /api/statistics?days=N` | Energy, savings, cost, CO₂ and a daily series (N = 1–90) |
 
 ## Ntfy notifications
 
@@ -141,7 +193,7 @@ curl -O https://raw.githubusercontent.com/stuartb55/ionic5-ohme-autocharge/main/
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-> **Note:** After the first push to `main`, go to `https://github.com/stuartb55?tab=packages`, find the `ionic5-ohme-autocharge` package, and set its visibility to **Public** — this allows the Mac Mini to pull the image without logging in to GHCR.
+> **Note:** After the first push to `main`, go to `https://github.com/stuartb55?tab=packages`, find the `ionic5-ohme-autocharge` **and** `ionic5-ohme-autocharge-ui` packages, and set their visibility to **Public** — this allows the Mac Mini to pull the images without logging in to GHCR. The dashboard is then available on **port 8080** of the server.
 
 **Updating after a code change:**
 
@@ -162,18 +214,29 @@ docker compose -f docker-compose.prod.yml down
 ## Project structure
 
 ```
-├── main.py                        # Async polling loop and plug-in event handler
+├── main.py                        # Async polling loop and plug-in event handler (CLI)
+├── api.py                         # FastAPI app: runs the poll loop + serves /api
+├── state.py                       # In-memory snapshot shared by loop and API
 ├── bluelink.py                    # Hyundai Bluelink wrapper (hyundai-kia-connect-api)
 ├── ohme_client.py                 # Ohme charger wrapper (ohme)
 ├── ntfy.py                        # Ntfy push notification client
 ├── config.py                      # Loads settings from .env
-├── Dockerfile
-├── docker-compose.yml             # Local development / testing
-├── docker-compose.prod.yml        # Home server: pulls pre-built image from GHCR
-├── .github/workflows/docker.yml   # Builds multi-platform image on every push to main
+├── Dockerfile                     # Backend image (uvicorn)
+├── docker-compose.yml             # Local dev: builds backend + frontend
+├── docker-compose.prod.yml        # Home server: pulls pre-built images from GHCR
+├── .github/workflows/docker.yml   # Tests + multi-platform image builds on push to main
 ├── requirements.txt
 ├── .env.example                   # Credential template
-└── .gitignore
+├── tests/                         # pytest suite (backend + API)
+└── frontend/                      # React + TypeScript dashboard SPA
+    ├── src/
+    │   ├── api/                    # Typed API client + polling hook
+    │   ├── components/             # Dashboard sections + SVG charts
+    │   ├── utils/                  # Formatting + schedule timeline maths
+    │   └── test/                   # MSW mocks + integration test
+    ├── Dockerfile                  # Multi-stage build → non-root nginx
+    ├── nginx.conf                  # Security headers, /api proxy, SPA fallback
+    └── package.json
 ```
 
 ## Dependencies

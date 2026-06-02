@@ -1,7 +1,26 @@
+# Local development stack — builds both images from source.
+# The frontend (nginx) proxies /api to the backend service over the internal
+# network, so only the UI port is published to the host.
 services:
-  autocharge:
+  backend:
     build: .
     env_file: .env
+    restart: unless-stopped
+    # Exposed on the host for convenience during development (docs at /docs).
+    ports:
+      - "8000:8000"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "8080:8080"
     restart: unless-stopped
     logging:
       driver: json-file

@@ -1,3 +1,5 @@
 hyundai-kia-connect-api>=3.0.0
 ohme>=1.9.1
 python-dotenv>=1.0.0
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0

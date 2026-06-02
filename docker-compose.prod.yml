@@ -1,7 +1,22 @@
+# Production stack for the Mac Mini home server — pulls pre-built images from GHCR.
+# Only the UI is published; the backend stays on the internal network.
 services:
-  autocharge:
+  backend:
     image: ghcr.io/stuartb55/ionic5-ohme-autocharge:latest
     env_file: .env
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frontend:
+    image: ghcr.io/stuartb55/ionic5-ohme-autocharge-ui:latest
+    depends_on:
+      - backend
+    ports:
+      - "8080:8080"
     restart: unless-stopped
     logging:
       driver: json-file
