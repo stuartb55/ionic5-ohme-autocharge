@@ -1,5 +1,10 @@
 FROM python:3.12-slim
 
+# Don't write .pyc files (the app dir is root-owned and the process runs as a
+# non-root user) and keep stdout/stderr unbuffered for prompt container logs.
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
 # Create a non-root user to run the service.

@@ -31,21 +31,28 @@ export function usePolling<T>(
   const refetch = useCallback(() => setTick((t) => t + 1), []);
 
   useEffect(() => {
-    const controller = new AbortController();
     let cancelled = false;
+    let runId = 0;
+    let inFlight: AbortController | null = null;
 
     const run = async () => {
+      // Abort any still-in-flight request and tag this run, so a slow earlier
+      // response can never overwrite the data from a newer tick.
+      inFlight?.abort();
+      const controller = new AbortController();
+      inFlight = controller;
+      const myRun = ++runId;
       try {
         const result = await fetcherRef.current(controller.signal);
-        if (cancelled) return;
+        if (cancelled || myRun !== runId) return;
         setData(result);
         setError(null);
         setLastUpdated(new Date());
       } catch (err) {
-        if (cancelled || controller.signal.aborted) return;
+        if (cancelled || controller.signal.aborted || myRun !== runId) return;
         setError(err instanceof Error ? err : new Error(String(err)));
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && myRun === runId) setLoading(false);
       }
     };
 
@@ -53,7 +60,7 @@ export function usePolling<T>(
     const id = window.setInterval(run, intervalMs);
     return () => {
       cancelled = true;
-      controller.abort();
+      inFlight?.abort();
       window.clearInterval(id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

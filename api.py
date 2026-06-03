@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 # Comma-separated list of allowed CORS origins. Empty (default) means same-origin
 # only — which is the production setup, where nginx serves the SPA and proxies /api.
-CORS_ORIGINS = [o for o in os.getenv("CORS_ORIGINS", "").split(",") if o]
+CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 # Set to "1" in tests to construct the app without starting the background loop.
 DISABLE_POLLING = os.getenv("AUTOCHARGE_DISABLE_POLLING") == "1"
 
@@ -120,8 +120,13 @@ async def poll_loop() -> None:
                 if now_connected and not was_connected:
                     session_handled = False
                 if now_connected and not session_handled:
-                    async with store.client_lock:
-                        session_handled = await main.handle_plugin_event(client)
+                    # Deliberately NOT under client_lock: handle_plugin_event makes a
+                    # slow Bluelink SOC fetch (in a thread) that doesn't use the Ohme
+                    # client, so holding the lock here would stall /api/statistics for
+                    # the whole plug-in event. Its Ohme writes (set_target) touch state
+                    # disjoint from the charge-summary call, so this is safe to run
+                    # unlocked, and the loop awaits it before the next snapshot build.
+                    session_handled = await main.handle_plugin_event(client)
                 if not now_connected and was_connected:
                     logger.info("Car unplugged (mode=%s)", mode)
                     session_handled = False

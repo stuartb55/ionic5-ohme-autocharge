@@ -26,8 +26,10 @@ export function BatteryRing({ percent, target, size = 220 }: Props) {
   const dash = (value / 100) * circumference;
   const color = ringColor(value);
 
-  // Target marker angle (degrees from top, clockwise).
-  const targetAngle = target != null ? (target / 100) * 360 - 90 : null;
+  // Target marker angle (degrees from top, clockwise). Clamp so a misconfigured
+  // target (>100 or <0) can't place the marker off the ring.
+  const clampedTarget = target != null ? Math.min(100, Math.max(0, target)) : null;
+  const targetAngle = clampedTarget != null ? (clampedTarget / 100) * 360 - 90 : null;
   const markerRad = targetAngle != null ? (targetAngle * Math.PI) / 180 : 0;
 
   return (
