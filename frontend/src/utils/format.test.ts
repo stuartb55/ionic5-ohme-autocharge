@@ -30,7 +30,7 @@ describe('formatPricePerKwh', () => {
     expect(formatPricePerKwh(0.125, 'GBP')).toBe('12.5p');
     expect(formatPricePerKwh(0.3, 'GBP')).toBe('30.0p');
   });
-  it('falls back to money formatting for other currencies', () => {
+  it('falls back to money formatting when currency is null', () => {
     expect(formatPricePerKwh(0.125, null)).toBe('0.13');
   });
 });
