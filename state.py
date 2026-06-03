@@ -53,11 +53,19 @@ class AppState:
         self.client: Any = None
         self.client_lock = asyncio.Lock()
         self.ready = False  # True once the first successful poll has populated state
+        # Real vehicle SOC captured from Bluelink at the last plug-in event. The
+        # Ohme client's own `battery` reading is unreliable, so the snapshot
+        # prefers this value when available.
+        self.last_soc: Optional[int] = None
 
     def update(self, snapshot: StatusSnapshot) -> None:
         self.status = snapshot
         if snapshot.error is None:
             self.ready = True
+
+    def record_soc(self, soc: int) -> None:
+        """Remember the real vehicle SOC fetched from Bluelink at plug-in."""
+        self.last_soc = soc
 
 
 # Module-level singleton imported by api.py and tests.

@@ -25,6 +25,7 @@ def reset_state():
     store.status = StatusSnapshot()
     store.client = None
     store.ready = False
+    store.last_soc = None
     api._summary_cache.update(key=None, value=None, at=0.0)
     yield
 
@@ -158,28 +159,44 @@ def test_statistics_502_on_upstream_error(client):
 # --- snapshot builder ----------------------------------------------------------
 
 
-def test_build_snapshot_translates_client():
+def _charging_client():
     from ohme.models import ChargerPower, ChargerStatus
 
     client = MagicMock()
     client.current_vehicle = "IONIQ 5"
-    client.battery = 55
+    client.battery = 33  # Ohme's unreliable internal estimate
     client.status = ChargerStatus.CHARGING
     client.available = True
     client.device_info = {"model": "Home Pro"}
     client.power = ChargerPower(watts=7400, amps=32, volts=230)
-    client.target_soc = 80
+    client.target_soc = 35  # the top-up amount we sent, NOT the real target
     client.energy = 1000
     client.slots = []
     client.next_slot_start = None
     client.next_slot_end = None
+    return client
 
-    snap = api.build_snapshot(client, connected=True)
+
+def test_build_snapshot_prefers_bluelink_soc_and_config_target():
+    import config
+
+    store.last_soc = 70  # real SOC captured from Bluelink at plug-in
+    snap = api.build_snapshot(_charging_client(), connected=True)
+
     assert snap.vehicle_name == "IONIQ 5"
-    assert snap.battery_percent == 55
+    # Real SOC, not Ohme's 33% estimate.
+    assert snap.battery_percent == 70
+    # Configured target, not Ohme's 35% top-up value.
+    assert snap.target_percent == config.CHARGE_TARGET
     assert snap.charger_status == "charging"
     assert snap.power_watts == 7400
     assert snap.error is None
+
+
+def test_build_snapshot_falls_back_to_client_battery_before_first_plugin():
+    store.last_soc = None
+    snap = api.build_snapshot(_charging_client(), connected=True)
+    assert snap.battery_percent == 33
 
 
 def test_build_snapshot_with_error():
