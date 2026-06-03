@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatKwh, formatMoney, formatPower, relativeTime, statusLabel } from './format';
+import { formatKwh, formatMoney, formatPower, formatPricePerKwh, relativeTime, statusLabel } from './format';
 
 describe('formatPower', () => {
   it('converts watts to kW', () => {
@@ -22,6 +22,16 @@ describe('formatMoney', () => {
   });
   it('falls back gracefully for null currency', () => {
     expect(formatMoney(8.4, null)).toBe('8.40');
+  });
+});
+
+describe('formatPricePerKwh', () => {
+  it('shows GBP per-kWh prices in pence', () => {
+    expect(formatPricePerKwh(0.125, 'GBP')).toBe('12.5p');
+    expect(formatPricePerKwh(0.3, 'GBP')).toBe('30.0p');
+  });
+  it('falls back to money formatting when currency is null', () => {
+    expect(formatPricePerKwh(0.125, null)).toBe('0.13');
   });
 });
 

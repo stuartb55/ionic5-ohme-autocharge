@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
   test:
@@ -50,8 +52,63 @@ jobs:
       - name: Production build
         run: npm run build
 
+  # Build both images and confirm the containers actually boot and serve their
+  # health endpoints. Polling is disabled so this needs no Ohme/Hyundai
+  # credentials and makes no external calls — it only proves the app runs.
+  smoke:
+    needs: [test, frontend-test]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build -t autocharge-backend:ci .
+
+      - name: Build frontend image
+        run: docker build -t autocharge-frontend:ci ./frontend
+
+      - name: Start backend container
+        run: |
+          docker run -d --name backend -p 8000:8000 \
+            -e AUTOCHARGE_DISABLE_POLLING=1 \
+            -e HYUNDAI_USERNAME=ci -e HYUNDAI_PASSWORD=ci -e HYUNDAI_PIN=0000 \
+            -e OHME_EMAIL=ci@example.com -e OHME_PASSWORD=ci \
+            autocharge-backend:ci
+
+      - name: Wait for backend health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/api/health; then echo " — backend OK"; exit 0; fi
+            sleep 2
+          done
+          echo "backend never became healthy"; docker logs backend; exit 1
+
+      - name: Start frontend container
+        run: docker run -d --name frontend -p 8080:8080 autocharge-frontend:ci
+
+      - name: Wait for frontend health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/healthz; then echo " — frontend OK"; exit 0; fi
+            sleep 2
+          done
+          echo "frontend never became healthy"; docker logs frontend; exit 1
+
+      - name: Container logs (on failure)
+        if: failure()
+        run: |
+          echo "=== backend ==="; docker logs backend || true
+          echo "=== frontend ==="; docker logs frontend || true
+
+      - name: Tear down
+        if: always()
+        run: docker rm -f backend frontend || true
+
   build-backend:
-    needs: test
+    needs: smoke
+    # Only publish from pushes to main, never from pull requests.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -84,7 +141,9 @@ jobs:
           cache-to: type=gha,mode=max
 
   build-frontend:
-    needs: frontend-test
+    needs: smoke
+    # Only publish from pushes to main, never from pull requests.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
