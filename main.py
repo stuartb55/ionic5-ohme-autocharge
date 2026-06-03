@@ -14,6 +14,7 @@ import bluelink
 import ohme_client
 import ntfy
 import config
+from state import store
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,6 +34,10 @@ async def handle_plugin_event(client) -> bool:
     except Exception:
         logger.exception("Failed to fetch SOC from Hyundai Bluelink — will retry next poll")
         return False
+
+    # Remember the real SOC so the dashboard shows it instead of Ohme's
+    # unreliable internal battery estimate.
+    store.record_soc(soc)
 
     if soc >= config.CHARGE_TARGET:
         logger.info(

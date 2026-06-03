@@ -67,7 +67,9 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
 
     return StatusSnapshot(
         vehicle_name=client.current_vehicle,
-        battery_percent=(client.battery or None),
+        # Prefer the real Bluelink SOC captured at plug-in; Ohme's own `battery`
+        # estimate is unreliable. Fall back to it only until the first plug-in.
+        battery_percent=(store.last_soc if store.last_soc is not None else (client.battery or None)),
         charger_status=status_value,
         connected=connected,
         charger_online=bool(client.available),
@@ -75,7 +77,9 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
         power_watts=float(power.watts or 0),
         power_amps=float(power.amps or 0),
         power_volts=power.volts,
-        target_percent=(client.target_soc or config.CHARGE_TARGET),
+        # The configured target. NB: client.target_soc holds the *top-up* amount
+        # (target − SOC) we send to Ohme, not the absolute target, so never use it.
+        target_percent=config.CHARGE_TARGET,
         session_energy_wh=float(client.energy or 0),
         slots=[s.to_dict() for s in client.slots],
         next_slot_start=_iso(client.next_slot_start),
