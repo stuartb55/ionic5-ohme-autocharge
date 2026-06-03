@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { StatisticsResponse } from '../api/types';
-import { formatKwh, formatMoney } from '../utils/format';
+import { formatKwh, formatMoney, formatPricePerKwh } from '../utils/format';
 import { EnergyBarChart } from './EnergyBarChart';
 
 interface Props {
@@ -60,7 +60,7 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
           value={formatMoney(totals.savingsVsStandard, currency)}
           highlight
         />
-        <StatCard label="Avg. price / kWh" value={formatMoney(totals.averageKwhPrice, currency)} />
+        <StatCard label="Avg. price / kWh" value={formatPricePerKwh(totals.averageKwhPrice, currency)} />
         <StatCard label="CO₂ saved vs petrol" value={`${totals.carbonSavedKgVsGasCar} kg`} />
       </div>
 

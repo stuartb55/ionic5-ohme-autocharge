@@ -37,6 +37,19 @@ export function formatMoney(amount: number, currency: string | null): string {
   return `${amount.toFixed(2)}${currency ? NBSP + currency : ''}`;
 }
 
+/**
+ * Per-kWh energy price. Unit rates are conventionally quoted in the minor
+ * currency unit (pence for GBP), so e.g. 0.125 GBP renders as "12.5p" rather
+ * than the misleading "£0.13" that whole-currency formatting would produce.
+ * Falls back to standard money formatting for non-GBP currencies.
+ */
+export function formatPricePerKwh(amount: number, currency: string | null): string {
+  if (currency === 'GBP') {
+    return `${(amount * 100).toFixed(1)}p`;
+  }
+  return formatMoney(amount, currency);
+}
+
 /** "01:00" from an ISO timestamp, in the viewer's locale time. */
 export function formatTime(iso: string): string {
   const d = new Date(iso);
