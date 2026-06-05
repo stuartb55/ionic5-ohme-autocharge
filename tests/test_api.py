@@ -105,6 +105,8 @@ def test_statistics_503_when_no_client(client):
 
 
 def test_statistics_parses_summary(client):
+    # Ohme returns Money amounts in minor units (pence for GBP); the backend
+    # converts to pounds.
     mock_client = MagicMock()
     mock_client.async_get_charge_summary = AsyncMock(
         return_value={
@@ -112,9 +114,9 @@ def test_statistics_parses_summary(client):
             "totalStats": {
                 "energyChargedTotalWh": 42000,
                 "costStats": {
-                    "moneyCostTotal": {"currencyCode": "GBP", "amount": "5.25"},
-                    "moneySavedVsStandardTariff": {"currencyCode": "GBP", "amount": "8.40"},
-                    "averageKwhPrice": {"currencyCode": "GBP", "amount": "0.125"},
+                    "moneyCostTotal": {"currencyCode": "GBP", "amount": "525"},
+                    "moneySavedVsStandardTariff": {"currencyCode": "GBP", "amount": "840"},
+                    "averageKwhPrice": {"currencyCode": "GBP", "amount": "7.284"},
                 },
                 "carbonStats": {"carbonSavedVsGasCarGrams": 12000},
             },
@@ -123,8 +125,8 @@ def test_statistics_parses_summary(client):
                     "startTime": 1748822400000,
                     "energyChargedTotalWh": 18500,
                     "costStats": {
-                        "moneyCostTotal": {"currencyCode": "GBP", "amount": "2.30"},
-                        "moneySavedVsStandardTariff": {"currencyCode": "GBP", "amount": "3.70"},
+                        "moneyCostTotal": {"currencyCode": "GBP", "amount": "230"},
+                        "moneySavedVsStandardTariff": {"currencyCode": "GBP", "amount": "370"},
                     },
                 }
             ],
@@ -137,11 +139,15 @@ def test_statistics_parses_summary(client):
     assert body["rangeDays"] == 7
     assert body["currency"] == "GBP"
     assert body["totals"]["energyKwh"] == 42.0
-    assert body["totals"]["savingsVsStandard"] == 8.4
+    assert body["totals"]["costTotal"] == 5.25  # 525p -> £5.25
+    assert body["totals"]["savingsVsStandard"] == 8.4  # 840p -> £8.40
+    # 7.284p/kWh -> £0.07284, rounded to 4dp. The frontend renders this as "7.3p".
+    assert body["totals"]["averageKwhPrice"] == 0.0728
     assert body["totals"]["carbonSavedKgVsGasCar"] == 12.0
     assert len(body["daily"]) == 1
     assert body["daily"][0]["energyKwh"] == 18.5
-    assert body["daily"][0]["savings"] == 3.7
+    assert body["daily"][0]["cost"] == 2.3  # 230p -> £2.30
+    assert body["daily"][0]["savings"] == 3.7  # 370p -> £3.70
 
 
 def test_statistics_validates_days_range(client):

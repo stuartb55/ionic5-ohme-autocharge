@@ -239,15 +239,22 @@ if CORS_ORIGINS:
 _summary_cache: dict[str, Any] = {"key": None, "value": None, "at": 0.0}
 
 
+# Ohme returns Money amounts in the currency's *minor* unit (pence for GBP), so
+# e.g. a 7.284 p/kWh price comes back as amount "7.284" and a £13.97 cost as
+# "1396.663". Divide by 100 to convert to major units (pounds) here, once, so the
+# whole pipeline downstream works in pounds. (This app is GBP-only.)
+_MINOR_UNITS_PER_MAJOR = 100
+
+
 def _money(node: Any) -> tuple[float, Optional[str]]:
-    """Return (amount, currencyCode) from an Ohme Money dict."""
+    """Return (amount_in_major_units, currencyCode) from an Ohme Money dict."""
     if not isinstance(node, dict):
         return 0.0, None
     try:
         amount = float(node.get("amount") or 0)
     except (TypeError, ValueError):
         amount = 0.0
-    return amount, node.get("currencyCode")
+    return amount / _MINOR_UNITS_PER_MAJOR, node.get("currencyCode")
 
 
 def parse_summary(summary: dict[str, Any], days: int) -> dict[str, Any]:
