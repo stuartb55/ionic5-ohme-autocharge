@@ -96,6 +96,16 @@ describe('Dashboard integration', () => {
     await waitFor(() => expect(statusCalls).toBeGreaterThan(initial));
   });
 
+  it('switches the daily chart to the Cost metric', async () => {
+    render(<Dashboard />);
+    await screen.findByRole('img', { name: /daily energyKwh bar chart/i });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Cost' }));
+
+    expect(screen.getByRole('img', { name: /daily cost bar chart/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Daily cost' })).toBeInTheDocument();
+  });
+
   it('shows an error banner when the backend is unreachable', async () => {
     server.use(http.get('*/api/status', () => HttpResponse.error()));
     render(<Dashboard />);
