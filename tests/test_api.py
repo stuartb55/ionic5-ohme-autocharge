@@ -6,12 +6,14 @@ statistics endpoint by mocking the client's ``async_get_charge_summary``.
 """
 
 import logging
-from unittest.mock import AsyncMock, MagicMock
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 import api
+import settings
 from state import StatusSnapshot, store
 
 
@@ -27,7 +29,10 @@ def reset_state():
     store.client = None
     store.ready = False
     store.last_soc = None
+    store.charge_target_override = None
     api._summary_cache.update(key=None, value=None, at=0.0)
+    if os.path.exists(settings.SETTINGS_PATH):
+        os.remove(settings.SETTINGS_PATH)
     yield
 
 
@@ -155,6 +160,62 @@ def test_statistics_502_on_upstream_error(client):
     mock_client.async_get_charge_summary = AsyncMock(side_effect=RuntimeError("boom"))
     store.client = mock_client
     assert client.get("/api/statistics").status_code == 502
+
+
+# --- charge target -------------------------------------------------------------
+
+
+def test_set_target_updates_store_and_persists(client):
+    resp = client.put("/api/settings/target", json={"targetPercent": 65})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["targetPercent"] == 65
+    assert body["persisted"] is True
+    # The runtime override is now in effect…
+    assert store.charge_target == 65
+    # …and survives a "restart" (reload from the persisted file).
+    assert settings.load_target() == 65
+
+
+def test_set_target_reflected_in_status(client):
+    _populate_snapshot()  # ready snapshot with target 80
+    client.put("/api/settings/target", json={"targetPercent": 70})
+    body = client.get("/api/status").json()
+    assert body["config"]["chargeTarget"] == 70
+    assert body["charger"]["targetPercent"] == 70
+
+
+@pytest.mark.parametrize("bad", [0, 9, 101, 150, -5])
+def test_set_target_rejects_out_of_range(client, bad):
+    resp = client.put("/api/settings/target", json={"targetPercent": bad})
+    assert resp.status_code == 422
+    assert store.charge_target_override is None
+
+
+def test_set_target_reapplies_to_ohme_when_plugged_in(client):
+    mock_client = MagicMock()
+    store.client = mock_client
+    store.last_soc = 50
+    store.status = StatusSnapshot(connected=True)
+    store.ready = True
+
+    with patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
+        body = client.put("/api/settings/target", json={"targetPercent": 90}).json()
+
+    assert body["applied"] is True
+    mock_set_target.assert_awaited_once_with(mock_client, current_soc=50, target_percent=90)
+
+
+def test_set_target_does_not_reapply_when_disconnected(client):
+    store.client = MagicMock()
+    store.last_soc = 50
+    store.status = StatusSnapshot(connected=False)
+
+    with patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
+        body = client.put("/api/settings/target", json={"targetPercent": 90}).json()
+
+    assert body["applied"] is False
+    mock_set_target.assert_not_called()
 
 
 # --- snapshot builder ----------------------------------------------------------

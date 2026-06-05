@@ -15,6 +15,11 @@ RUN pip install --no-cache-dir --root-user-action=ignore -r requirements.txt
 
 COPY *.py ./
 
+# Writable directory for runtime-adjustable settings (e.g. the charge target).
+# Owned by the runtime user; mount a volume here to persist across restarts.
+RUN mkdir -p /app/data && chown appuser:appuser /app/data
+VOLUME ["/app/data"]
+
 USER appuser
 
 EXPOSE 8000

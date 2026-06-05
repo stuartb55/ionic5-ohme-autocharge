@@ -12,6 +12,8 @@ import asyncio
 from dataclasses import dataclass, field, asdict
 from typing import Any, Optional
 
+import config
+
 
 @dataclass
 class StatusSnapshot:
@@ -57,6 +59,18 @@ class AppState:
         # Ohme client's own `battery` reading is unreliable, so the snapshot
         # prefers this value when available.
         self.last_soc: Optional[int] = None
+        # Runtime charge-target override set from the dashboard. None means "use
+        # the CHARGE_TARGET env default"; see the `charge_target` property.
+        self.charge_target_override: Optional[int] = None
+
+    @property
+    def charge_target(self) -> int:
+        """The active charge target: the runtime override if set, else the env default."""
+        return self.charge_target_override if self.charge_target_override is not None else config.CHARGE_TARGET
+
+    def set_charge_target(self, value: int) -> None:
+        """Set the runtime charge-target override (does not persist; see settings.save_target)."""
+        self.charge_target_override = int(value)
 
     def update(self, snapshot: StatusSnapshot) -> None:
         self.status = snapshot

@@ -60,6 +60,25 @@ describe('Dashboard integration', () => {
     }
   });
 
+  it('saves a new charge target via the API', async () => {
+    let putBody: { targetPercent: number } | null = null;
+    server.use(
+      http.put('*/api/settings/target', async ({ request }) => {
+        putBody = (await request.json()) as { targetPercent: number };
+        return HttpResponse.json({ ...putBody, persisted: true, applied: false });
+      }),
+    );
+
+    render(<Dashboard />);
+    // Status section renders the editor with the fixture target (80%).
+    await screen.findByText('Target 80%');
+
+    await userEvent.click(screen.getByRole('button', { name: /increase target/i }));
+    await userEvent.click(screen.getByRole('button', { name: /save 85%/i }));
+
+    await waitFor(() => expect(putBody).toEqual({ targetPercent: 85 }));
+  });
+
   it('shows an error banner when the backend is unreachable', async () => {
     server.use(http.get('*/api/status', () => HttpResponse.error()));
     render(<Dashboard />);
