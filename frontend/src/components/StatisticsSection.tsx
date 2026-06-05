@@ -1,7 +1,13 @@
 import { useState } from 'react';
 import type { StatisticsResponse } from '../api/types';
 import { formatKwh, formatMoney, formatPricePerKwh } from '../utils/format';
-import { EnergyBarChart } from './EnergyBarChart';
+import { EnergyBarChart, type ChartMetric } from './EnergyBarChart';
+
+const METRIC_OPTIONS: { value: ChartMetric; label: string; heading: string }[] = [
+  { value: 'energyKwh', label: 'Energy', heading: 'Daily energy' },
+  { value: 'savings', label: 'Savings', heading: 'Daily savings' },
+  { value: 'cost', label: 'Cost', heading: 'Daily cost' },
+];
 
 interface Props {
   stats: StatisticsResponse;
@@ -29,8 +35,9 @@ function StatCard({
 }
 
 export function StatisticsSection({ stats, days, onDaysChange }: Props) {
-  const [metric, setMetric] = useState<'energyKwh' | 'savings'>('energyKwh');
+  const [metric, setMetric] = useState<ChartMetric>('energyKwh');
   const { totals, currency } = stats;
+  const heading = METRIC_OPTIONS.find((o) => o.value === metric)?.heading ?? 'Daily energy';
 
   return (
     <section className="card" aria-labelledby="stats-heading">
@@ -65,16 +72,18 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
       </div>
 
       <header style={{ marginBottom: 'var(--space-4)' }}>
-        <h2 style={{ fontSize: '0.92rem' }}>
-          {metric === 'energyKwh' ? 'Daily energy' : 'Daily savings'}
-        </h2>
+        <h2 style={{ fontSize: '0.92rem' }}>{heading}</h2>
         <div className="chart-toolbar" role="group" aria-label="Chart metric">
-          <button type="button" aria-pressed={metric === 'energyKwh'} onClick={() => setMetric('energyKwh')}>
-            Energy
-          </button>
-          <button type="button" aria-pressed={metric === 'savings'} onClick={() => setMetric('savings')}>
-            Savings
-          </button>
+          {METRIC_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              aria-pressed={metric === opt.value}
+              onClick={() => setMetric(opt.value)}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
       </header>
 

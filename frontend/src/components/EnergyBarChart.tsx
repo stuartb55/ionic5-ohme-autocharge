@@ -1,18 +1,26 @@
 import type { DailyStat } from '../api/types';
-import { formatDateShort } from '../utils/format';
+import { formatDateShort, formatMoney } from '../utils/format';
+
+export type ChartMetric = 'energyKwh' | 'savings' | 'cost';
 
 interface Props {
   daily: DailyStat[];
-  metric: 'energyKwh' | 'savings';
+  metric: ChartMetric;
   currency: string | null;
 }
+
+const METRIC_COLOR: Record<ChartMetric, string> = {
+  energyKwh: 'var(--brand)',
+  savings: 'var(--success)',
+  cost: 'var(--warning)',
+};
 
 const W = 720;
 const H = 200;
 const PAD_BOTTOM = 24;
 const PAD_TOP = 8;
 
-export function EnergyBarChart({ daily, metric }: Props) {
+export function EnergyBarChart({ daily, metric, currency }: Props) {
   if (!daily.length) {
     return <p className="empty">No charging history in this period yet.</p>;
   }
@@ -23,7 +31,9 @@ export function EnergyBarChart({ daily, metric }: Props) {
   const slot = W / n;
   const barW = Math.min(48, slot * 0.6);
   const chartH = H - PAD_BOTTOM - PAD_TOP;
-  const color = metric === 'savings' ? 'var(--success)' : 'var(--brand)';
+  const color = METRIC_COLOR[metric];
+  const formatValue = (v: number) =>
+    metric === 'energyKwh' ? `${v} kWh` : formatMoney(v, currency);
 
   // Label density: avoid overlap when many days.
   const labelStep = Math.ceil(n / 12);
@@ -40,8 +50,7 @@ export function EnergyBarChart({ daily, metric }: Props) {
             <g key={i}>
               <rect x={x} y={y} width={barW} height={Math.max(0, h)} rx={4} fill={color}>
                 <title>
-                  {d.date ?? ''}: {v}
-                  {metric === 'energyKwh' ? ' kWh' : ''}
+                  {d.date ?? ''}: {formatValue(v)}
                 </title>
               </rect>
               {i % labelStep === 0 && (
