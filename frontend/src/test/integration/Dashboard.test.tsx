@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Dashboard } from '../../components/Dashboard';
 import { server } from '../mocks/server';
 import { statisticsFixture } from '../fixtures';
@@ -43,6 +43,21 @@ describe('Dashboard integration', () => {
     await userEvent.click(within(ranges).getByRole('button', { name: '30d' }));
 
     await waitFor(() => expect(requested).toContain('30'));
+  });
+
+  it('shows time since the backend last polled Ohme, not since the browser fetched', async () => {
+    // statusFixture.updatedAt is 2026-06-02T00:05:00+01:00; pretend "now" is 3
+    // minutes later. The label must reflect that backend poll time (3m ago), not
+    // the browser fetch which just happened (~0s ago).
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-06-02T00:08:00+01:00'));
+    try {
+      render(<Dashboard />);
+      await screen.findByText('Hyundai IONIQ 5');
+      expect(screen.getByText(/Updated 3m ago/i)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shows an error banner when the backend is unreachable', async () => {

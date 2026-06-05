@@ -5,6 +5,7 @@ drive the read endpoints by injecting a snapshot into ``state.store`` and the
 statistics endpoint by mocking the client's ``async_get_charge_summary``.
 """
 
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -203,3 +204,40 @@ def test_build_snapshot_with_error():
     snap = api.build_snapshot(MagicMock(), connected=False, error="poll_failed")
     assert snap.error == "poll_failed"
     assert snap.updated_at is not None
+
+
+# --- access-log filter ---------------------------------------------------------
+
+
+def _access_record(method: str, path: str, status: int) -> logging.LogRecord:
+    return logging.LogRecord(
+        name="uvicorn.access",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg='%s - "%s %s HTTP/%s" %d',
+        args=("172.0.0.1:1234", method, path, "1.1", status),
+        exc_info=None,
+    )
+
+
+@pytest.mark.parametrize("path", ["/api/health", "/api/status", "/api/schedule", "/api/statistics"])
+def test_quiet_filter_drops_successful_polling_gets(path):
+    assert api._quiet_access_filter.filter(_access_record("GET", path, 200)) is False
+
+
+def test_quiet_filter_keeps_polling_endpoint_errors():
+    assert api._quiet_access_filter.filter(_access_record("GET", "/api/health", 503)) is True
+
+
+def test_quiet_filter_keeps_other_paths_and_methods():
+    assert api._quiet_access_filter.filter(_access_record("GET", "/api/other", 200)) is True
+    assert api._quiet_access_filter.filter(_access_record("POST", "/api/status", 200)) is True
+
+
+def test_quiet_filter_ignores_query_string():
+    assert api._quiet_access_filter.filter(_access_record("GET", "/api/statistics?days=7", 200)) is False
+
+
+def test_quiet_filter_installed_on_startup(client):
+    assert api._quiet_access_filter in logging.getLogger("uvicorn.access").filters
