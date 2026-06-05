@@ -24,6 +24,16 @@ export function Dashboard() {
   const statsFetcher = useCallback((signal: AbortSignal) => api.getStatistics(days, signal), [days]);
   const stats = usePolling(statsFetcher, STATS_INTERVAL, [days]);
 
+  // Persist a new charge target, then refetch status so the UI reflects it.
+  const { refetch: refetchStatus } = status;
+  const handleSetTarget = useCallback(
+    async (target: number) => {
+      await api.setTarget(target);
+      refetchStatus();
+    },
+    [refetchStatus],
+  );
+
   // Keep the "updated Xs ago" label fresh without refetching.
   useEffect(() => {
     const id = window.setInterval(() => forceTick((t) => t + 1), 5_000);
@@ -61,7 +71,11 @@ export function Dashboard() {
       )}
 
       <div className="sections">
-        {status.data ? <StatusSection status={status.data} /> : <SectionSkeleton height={260} />}
+        {status.data ? (
+          <StatusSection status={status.data} onSetTarget={handleSetTarget} />
+        ) : (
+          <SectionSkeleton height={260} />
+        )}
         {schedule.data ? <ScheduleSection schedule={schedule.data} /> : <SectionSkeleton height={180} />}
         {stats.data ? (
           <StatisticsSection stats={stats.data} days={days} onDaysChange={setDays} />

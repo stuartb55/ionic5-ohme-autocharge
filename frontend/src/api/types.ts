@@ -35,6 +35,14 @@ export interface StatusResponse {
   ready: boolean;
 }
 
+export interface TargetUpdateResponse {
+  targetPercent: number;
+  /** Whether the new target was written to the persistent settings file. */
+  persisted: boolean;
+  /** Whether the new target was pushed to Ohme immediately (car plugged in). */
+  applied: boolean;
+}
+
 export interface ChargeSlot {
   start: string;
   end: string;

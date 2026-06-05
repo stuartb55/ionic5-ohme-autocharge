@@ -26,11 +26,13 @@ from typing import Any, Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
 import config
 import main
 import ohme_client
+import settings
 from state import StatusSnapshot, store
 
 logger = logging.getLogger(__name__)
@@ -112,9 +114,10 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
         power_watts=float(power.watts or 0),
         power_amps=float(power.amps or 0),
         power_volts=power.volts,
-        # The configured target. NB: client.target_soc holds the *top-up* amount
-        # (target − SOC) we send to Ohme, not the absolute target, so never use it.
-        target_percent=config.CHARGE_TARGET,
+        # The active target (runtime override or env default). NB: client.target_soc
+        # holds the *top-up* amount (target − SOC) we send to Ohme, not the absolute
+        # target, so never use it.
+        target_percent=store.charge_target,
         session_energy_wh=float(client.energy or 0),
         slots=[s.to_dict() for s in client.slots],
         next_slot_start=_iso(client.next_slot_start),
@@ -125,10 +128,11 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
 
 async def poll_loop() -> None:
     """Background task: detect plug-in events and refresh the status snapshot."""
+    main.load_persisted_target()
     logger.info(
         "API poll loop starting (interval=%ss, target=%s%%)",
         config.POLL_INTERVAL,
-        config.CHARGE_TARGET,
+        store.charge_target,
     )
     client = await ohme_client.make_client()
     store.client = client
@@ -229,7 +233,7 @@ if CORS_ORIGINS:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=CORS_ORIGINS,
-        allow_methods=["GET"],
+        allow_methods=["GET", "PUT"],
         allow_headers=["*"],
     )
 
@@ -304,9 +308,50 @@ def parse_summary(summary: dict[str, Any], days: int) -> dict[str, Any]:
 # --- endpoints -----------------------------------------------------------------
 
 
+class TargetUpdate(BaseModel):
+    """Request body for PUT /api/settings/target."""
+
+    targetPercent: int = Field(ge=settings.TARGET_MIN, le=settings.TARGET_MAX)
+
+
+async def _reapply_target_if_connected(target: int) -> bool:
+    """Push a newly-set target to Ohme immediately if the car is plugged in.
+
+    Returns True only if Ohme was reconfigured. Best-effort: failure here doesn't
+    fail the request — the target still takes effect on the next plug-in/poll.
+    """
+    client = store.client
+    soc = store.last_soc
+    if client is None or not store.status.connected or soc is None or soc >= target:
+        return False
+    try:
+        async with store.client_lock:
+            await ohme_client.set_target(client, current_soc=soc, target_percent=target)
+        return True
+    except Exception:  # noqa: BLE001 - never let an Ohme hiccup fail the settings write
+        logger.warning("Could not re-apply charge target to Ohme", exc_info=True)
+        return False
+
+
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
     return {"status": "ok", "ready": store.ready}
+
+
+@app.put("/api/settings/target")
+async def set_charge_target(update: TargetUpdate) -> JSONResponse:
+    target = update.targetPercent
+    store.set_charge_target(target)
+    persisted = settings.save_target(target)
+    applied = await _reapply_target_if_connected(target)
+    # Reflect the new target in the cached snapshot so a subsequent GET /api/status
+    # sees it immediately rather than after the next poll.
+    if store.ready:
+        store.status.target_percent = target
+    logger.info(
+        "Charge target set to %s%% (persisted=%s, applied=%s)", target, persisted, applied
+    )
+    return JSONResponse({"targetPercent": target, "persisted": persisted, "applied": applied})
 
 
 @app.get("/api/status")
@@ -330,7 +375,7 @@ async def get_status() -> JSONResponse:
             "sessionEnergyKwh": round(store.status.session_energy_wh / 1000, 2),
         },
         "config": {
-            "chargeTarget": config.CHARGE_TARGET,
+            "chargeTarget": store.charge_target,
             "pollIntervalSeconds": config.POLL_INTERVAL,
         },
         "updatedAt": store.status.updated_at,
