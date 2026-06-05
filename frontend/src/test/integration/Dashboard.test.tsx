@@ -4,7 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 import { Dashboard } from '../../components/Dashboard';
 import { server } from '../mocks/server';
-import { statisticsFixture } from '../fixtures';
+import { statisticsFixture, statusFixture } from '../fixtures';
 
 describe('Dashboard integration', () => {
   it('renders all three sections wired to the API', async () => {
@@ -77,6 +77,23 @@ describe('Dashboard integration', () => {
     await userEvent.click(screen.getByRole('button', { name: /save 85%/i }));
 
     await waitFor(() => expect(putBody).toEqual({ targetPercent: 85 }));
+  });
+
+  it('refetches when the refresh button is clicked', async () => {
+    let statusCalls = 0;
+    server.use(
+      http.get('*/api/status', () => {
+        statusCalls += 1;
+        return HttpResponse.json(statusFixture);
+      }),
+    );
+
+    render(<Dashboard />);
+    await screen.findByText('Hyundai IONIQ 5');
+    const initial = statusCalls;
+
+    await userEvent.click(screen.getByRole('button', { name: /refresh now/i }));
+    await waitFor(() => expect(statusCalls).toBeGreaterThan(initial));
   });
 
   it('shows an error banner when the backend is unreachable', async () => {
