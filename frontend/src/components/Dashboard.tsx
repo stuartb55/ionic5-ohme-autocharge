@@ -31,7 +31,12 @@ export function Dashboard() {
   }, []);
 
   const offline = status.error && !status.data;
-  const fresh = status.lastUpdated && Date.now() - status.lastUpdated.getTime() < STATUS_INTERVAL * 2;
+  // Show how long ago the *backend* last polled Ohme (updatedAt), not when the
+  // browser last fetched the cached snapshot. The backend only refreshes every
+  // pollIntervalSeconds, so judge freshness against that cadence (with slack).
+  const lastPolled = status.data?.updatedAt ? new Date(status.data.updatedAt) : null;
+  const pollMs = (status.data?.config.pollIntervalSeconds ?? 180) * 1_000;
+  const fresh = lastPolled != null && Date.now() - lastPolled.getTime() < pollMs * 2;
 
   return (
     <div className="app">
@@ -42,7 +47,7 @@ export function Dashboard() {
         </div>
         <div className="app-meta">
           <span className={`live-dot ${fresh ? '' : 'stale'}`} aria-hidden="true" />
-          <span>Updated {relativeTime(status.lastUpdated)}</span>
+          <span>Updated {relativeTime(lastPolled)}</span>
         </div>
       </header>
 
