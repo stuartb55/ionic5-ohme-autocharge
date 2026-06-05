@@ -6,6 +6,7 @@ import { Banner } from './Banner';
 import { ScheduleSection } from './ScheduleSection';
 import { StatisticsSection } from './StatisticsSection';
 import { StatusSection } from './StatusSection';
+import { ThemeToggle } from './ThemeToggle';
 
 const STATUS_INTERVAL = 15_000;
 const SCHEDULE_INTERVAL = 30_000;
@@ -86,6 +87,7 @@ export function Dashboard() {
           >
             <span aria-hidden="true">⟳</span>
           </button>
+          <ThemeToggle />
         </div>
       </header>
 
