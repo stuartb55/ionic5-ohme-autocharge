@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { usePolling } from '../api/usePolling';
 import { relativeTime } from '../utils/format';
+import { RefreshButton } from './RefreshButton';
 import { Banner } from './Banner';
 import { ScheduleSection } from './ScheduleSection';
 import { StatisticsSection } from './StatisticsSection';
@@ -24,11 +25,32 @@ export function Dashboard() {
   const statsFetcher = useCallback((signal: AbortSignal) => api.getStatistics(days, signal), [days]);
   const stats = usePolling(statsFetcher, STATS_INTERVAL, [days]);
 
+  const [refreshing, setRefreshing] = useState(false);
+  const spinTimer = useRef<number | undefined>(undefined);
+
+  // refetch() from usePolling is stable, so this is safe to capture.
+  const refetchStatus = status.refetch;
+  const refetchSchedule = schedule.refetch;
+  const refetchStats = stats.refetch;
+
+  const handleRefresh = useCallback(() => {
+    refetchStatus();
+    refetchSchedule();
+    refetchStats();
+    // Brief spin so the click registers visually even when the new data is
+    // identical to what's already on screen.
+    setRefreshing(true);
+    window.clearTimeout(spinTimer.current);
+    spinTimer.current = window.setTimeout(() => setRefreshing(false), 800);
+  }, [refetchStatus, refetchSchedule, refetchStats]);
+
   // Keep the "updated Xs ago" label fresh without refetching.
   useEffect(() => {
     const id = window.setInterval(() => forceTick((t) => t + 1), 5_000);
     return () => window.clearInterval(id);
   }, []);
+
+  useEffect(() => () => window.clearTimeout(spinTimer.current), []);
 
   const offline = status.error && !status.data;
   const fresh = status.lastUpdated && Date.now() - status.lastUpdated.getTime() < STATUS_INTERVAL * 2;
@@ -43,6 +65,7 @@ export function Dashboard() {
         <div className="app-meta">
           <span className={`live-dot ${fresh ? '' : 'stale'}`} aria-hidden="true" />
           <span>Updated {relativeTime(status.lastUpdated)}</span>
+          <RefreshButton onRefresh={handleRefresh} spinning={refreshing} />
         </div>
       </header>
 

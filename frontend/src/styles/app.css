@@ -61,6 +61,32 @@ body {
   box-shadow: 0 0 0 4px var(--success-soft);
   display: inline-block;
 }
+.refresh-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin-left: var(--space-1);
+  padding: 0;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.refresh-button:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-subtle);
+}
+.refresh-button:disabled { cursor: progress; }
+.refresh-button svg { display: block; }
+.refresh-button[data-spinning] svg { animation: spin 0.8s linear infinite; }
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 .live-dot.stale {
   background: var(--idle);
   box-shadow: 0 0 0 4px var(--idle-soft);
@@ -383,7 +409,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .skeleton, .badge.charging .pip { animation: none; }
+  .skeleton, .badge.charging .pip, .refresh-button[data-spinning] svg { animation: none; }
 }
 
 /* --- responsive --- */
