@@ -35,6 +35,41 @@ from state import StatusSnapshot, store
 
 logger = logging.getLogger(__name__)
 
+# Read-only endpoints that are polled constantly (the container HEALTHCHECK hits
+# /api/health every 30s; the SPA refreshes the others on a timer). A successful
+# GET to any of these is pure noise in the container log and buries the plug-in
+# events we actually care about, so we drop those access-log lines. Anything that
+# errors (status >= 400) is still logged.
+_QUIET_ACCESS_PATHS = frozenset(
+    {"/api/health", "/api/status", "/api/schedule", "/api/statistics"}
+)
+
+
+class _QuietAccessLogFilter(logging.Filter):
+    """Suppress uvicorn access-log lines for successful GETs to polling endpoints.
+
+    uvicorn logs each request as ``'%s - "%s %s HTTP/%s" %d'`` with
+    ``record.args == (client_addr, method, full_path, http_version, status)``.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if not isinstance(args, tuple) or len(args) < 5:
+            return True
+        method, full_path, status = args[1], args[2], args[4]
+        if method != "GET":
+            return True
+        try:
+            if int(status) >= 400:
+                return True
+        except (TypeError, ValueError):
+            return True
+        path = str(full_path).split("?", 1)[0]
+        return path not in _QUIET_ACCESS_PATHS
+
+
+_quiet_access_filter = _QuietAccessLogFilter()
+
 # Comma-separated list of allowed CORS origins. Empty (default) means same-origin
 # only — which is the production setup, where nginx serves the SPA and proxies /api.
 CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
@@ -149,6 +184,12 @@ async def poll_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Added here (not at import time) so it survives uvicorn configuring its own
+    # loggers, which happens after the app module is imported.
+    access_logger = logging.getLogger("uvicorn.access")
+    if _quiet_access_filter not in access_logger.filters:
+        access_logger.addFilter(_quiet_access_filter)
+
     task: Optional[asyncio.Task] = None
     if not DISABLE_POLLING:
         task = asyncio.create_task(poll_loop())
