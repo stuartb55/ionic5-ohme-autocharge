@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { usePolling } from '../api/usePolling';
 import { relativeTime } from '../utils/format';
-import { RefreshButton } from './RefreshButton';
 import { Banner } from './Banner';
 import { ScheduleSection } from './ScheduleSection';
 import { StatisticsSection } from './StatisticsSection';
 import { StatusSection } from './StatusSection';
+import { ThemeToggle } from './ThemeToggle';
 
 const STATUS_INTERVAL = 15_000;
 const SCHEDULE_INTERVAL = 30_000;
@@ -25,18 +25,28 @@ export function Dashboard() {
   const statsFetcher = useCallback((signal: AbortSignal) => api.getStatistics(days, signal), [days]);
   const stats = usePolling(statsFetcher, STATS_INTERVAL, [days]);
 
+  // refetch() from usePolling is stable, so these are safe to capture.
+  const { refetch: refetchStatus } = status;
+  const { refetch: refetchSchedule } = schedule;
+  const { refetch: refetchStats } = stats;
+
+  // Persist a new charge target, then refetch status so the UI reflects it.
+  const handleSetTarget = useCallback(
+    async (target: number) => {
+      await api.setTarget(target);
+      refetchStatus();
+    },
+    [refetchStatus],
+  );
+
+  // Manual refresh: ask the backend to pull a fresh live reading from Ohme,
+  // then refetch every section. Even if the force-refresh fails we still
+  // refetch so the button does something (shows whatever the backend has).
+  // The button spins until the next status result lands (cleared by the effect
+  // below) or a safety timeout.
   const [refreshing, setRefreshing] = useState(false);
-  const spinTimer = useRef<number | undefined>(undefined);
-
-  // refetch() from usePolling is stable, so this is safe to capture.
-  const refetchStatus = status.refetch;
-  const refetchSchedule = schedule.refetch;
-  const refetchStats = stats.refetch;
-
   const handleRefresh = useCallback(() => {
-    // Ask the backend for a fresh live reading, then refetch the cached
-    // snapshot. If the force-refresh fails we still refetch so the button does
-    // something useful (shows whatever the backend currently has).
+    setRefreshing(true);
     void api
       .refresh()
       .catch(() => undefined)
@@ -45,12 +55,13 @@ export function Dashboard() {
         refetchSchedule();
         refetchStats();
       });
-    // Brief spin so the click registers visually even when the new data is
-    // identical to what's already on screen.
-    setRefreshing(true);
-    window.clearTimeout(spinTimer.current);
-    spinTimer.current = window.setTimeout(() => setRefreshing(false), 800);
+    window.setTimeout(() => setRefreshing(false), 5_000);
   }, [refetchStatus, refetchSchedule, refetchStats]);
+
+  const lastFetchedMs = status.lastUpdated?.getTime();
+  useEffect(() => {
+    setRefreshing(false);
+  }, [lastFetchedMs]);
 
   // Keep the "updated Xs ago" label fresh without refetching.
   useEffect(() => {
@@ -58,10 +69,13 @@ export function Dashboard() {
     return () => window.clearInterval(id);
   }, []);
 
-  useEffect(() => () => window.clearTimeout(spinTimer.current), []);
-
   const offline = status.error && !status.data;
-  const fresh = status.lastUpdated && Date.now() - status.lastUpdated.getTime() < STATUS_INTERVAL * 2;
+  // Show how long ago the *backend* last polled Ohme (updatedAt), not when the
+  // browser last fetched the cached snapshot. The backend only refreshes every
+  // pollIntervalSeconds, so judge freshness against that cadence (with slack).
+  const lastPolled = status.data?.updatedAt ? new Date(status.data.updatedAt) : null;
+  const pollMs = (status.data?.config.pollIntervalSeconds ?? 180) * 1_000;
+  const fresh = lastPolled != null && Date.now() - lastPolled.getTime() < pollMs * 2;
 
   return (
     <div className="app">
@@ -72,8 +86,18 @@ export function Dashboard() {
         </div>
         <div className="app-meta">
           <span className={`live-dot ${fresh ? '' : 'stale'}`} aria-hidden="true" />
-          <span>Updated {relativeTime(status.lastUpdated)}</span>
-          <RefreshButton onRefresh={handleRefresh} spinning={refreshing} />
+          <span>Updated {relativeTime(lastPolled)}</span>
+          <button
+            type="button"
+            className={`refresh-btn ${refreshing ? 'spinning' : ''}`}
+            onClick={handleRefresh}
+            disabled={refreshing}
+            aria-label="Refresh now"
+            title="Refresh now"
+          >
+            <span aria-hidden="true">⟳</span>
+          </button>
+          <ThemeToggle />
         </div>
       </header>
 
@@ -87,7 +111,11 @@ export function Dashboard() {
       )}
 
       <div className="sections">
-        {status.data ? <StatusSection status={status.data} /> : <SectionSkeleton height={260} />}
+        {status.data ? (
+          <StatusSection status={status.data} onSetTarget={handleSetTarget} />
+        ) : (
+          <SectionSkeleton height={260} />
+        )}
         {schedule.data ? <ScheduleSection schedule={schedule.data} /> : <SectionSkeleton height={180} />}
         {stats.data ? (
           <StatisticsSection stats={stats.data} days={days} onDaysChange={setDays} />

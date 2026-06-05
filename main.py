@@ -14,6 +14,7 @@ import bluelink
 import ohme_client
 import ntfy
 import config
+import settings
 from state import store
 
 logging.basicConfig(
@@ -22,6 +23,14 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+
+def load_persisted_target() -> None:
+    """Apply any persisted charge target to the store at startup."""
+    persisted = settings.load_target()
+    if persisted is not None:
+        store.set_charge_target(persisted)
+        logger.info("Loaded persisted charge target: %s%%", persisted)
 
 
 async def handle_plugin_event(client) -> bool:
@@ -39,23 +48,25 @@ async def handle_plugin_event(client) -> bool:
     # unreliable internal battery estimate.
     store.record_soc(soc)
 
-    if soc >= config.CHARGE_TARGET:
+    target = store.charge_target
+
+    if soc >= target:
         logger.info(
             "SOC %s%% already at or above target %s%% — no action needed",
             soc,
-            config.CHARGE_TARGET,
+            target,
         )
         return True
 
     logger.info(
         "SOC %s%% is below target %s%% — configuring Ohme...",
         soc,
-        config.CHARGE_TARGET,
+        target,
     )
     try:
-        await ohme_client.set_target(client, current_soc=soc, target_percent=config.CHARGE_TARGET)
+        await ohme_client.set_target(client, current_soc=soc, target_percent=target)
         vehicle_name = client.current_vehicle or "EV"
-        msg = f"{vehicle_name} plugged in at {soc}% → {config.CHARGE_TARGET}%"
+        msg = f"{vehicle_name} plugged in at {soc}% → {target}%"
         schedule = ", ".join(str(s) for s in client.slots)
         if schedule:
             msg += f". Charge schedule: {schedule}"
@@ -67,10 +78,11 @@ async def handle_plugin_event(client) -> bool:
 
 
 async def run_loop() -> None:
+    load_persisted_target()
     logger.info(
         "Starting poll loop (interval=%ss, target=%s%%)",
         config.POLL_INTERVAL,
-        config.CHARGE_TARGET,
+        store.charge_target,
     )
     if config.NTFY_TOPIC:
         logger.info("Ntfy notifications enabled (url=%s, topic=%s)", config.NTFY_URL, config.NTFY_TOPIC)
@@ -123,6 +135,7 @@ async def run_loop() -> None:
 async def run_once() -> None:
     """Single execution: fetch SOC and set Ohme target regardless of plug state."""
     logger.info("Running in one-shot mode")
+    load_persisted_target()
     client = await ohme_client.make_client()
     try:
         await handle_plugin_event(client)

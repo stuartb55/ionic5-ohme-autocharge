@@ -9,6 +9,9 @@ services:
     # Exposed on the host for convenience during development (docs at /docs).
     ports:
       - "8000:8000"
+    # Persist runtime settings (e.g. the charge target) across restarts.
+    volumes:
+      - autocharge-data:/app/data
     logging:
       driver: json-file
       options:
@@ -27,3 +30,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  autocharge-data:

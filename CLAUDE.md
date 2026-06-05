@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Polls the Ohme home charger every N seconds. When it detects the car transitioning from unplugged → plugged in, it fetches the Hyundai IONIC 5's battery SOC from the Hyundai Bluelink EU API and configures Ohme to stop charging at the target percentage (default 80%).
 
+## Git workflow
+
+Always start a new branch for each distinct feature or fix — one branch (and one PR) per change. Never reuse an existing branch for an unrelated change, and never reuse a branch whose PR has already been merged (new commits won't be added to a merged PR; they need a fresh branch and PR).
+
 ## Commands
 
 ```bash
@@ -40,10 +44,11 @@ The app has five modules that form a thin pipeline:
 - **`bluelink.py`** — synchronous wrapper around `hyundai_kia_connect_api`. Uses a module-level singleton `_manager` so the `VehicleManager` is created and authenticated only once per process lifetime.
 - **`ntfy.py`** — optional push notifications via ntfy.sh. Silently disabled when `NTFY_TOPIC` is unset.
 - **`config.py`** — loads all settings from env/`.env` at import time. Required vars raise `KeyError` on startup if missing; optional vars have defaults.
+- **`settings.py`** — runtime-adjustable settings persisted to a JSON file (`SETTINGS_PATH`). Currently just the charge target, which the dashboard can change via `PUT /api/settings/target`. The active target lives on `state.store` (`charge_target` property / `set_charge_target`): the runtime override if set, else `config.CHARGE_TARGET`. `main.handle_plugin_event` and `api.build_snapshot` read `store.charge_target`, never `config.CHARGE_TARGET` directly. Persistence is best-effort — if the file can't be written the target stays in memory only.
 
 ## Configuration
 
-Copy `.env.example` to `.env`. Required vars: `HYUNDAI_USERNAME`, `HYUNDAI_PASSWORD`, `HYUNDAI_PIN`, `OHME_EMAIL`, `OHME_PASSWORD`. Optional: `CHARGE_TARGET` (default 80), `POLL_INTERVAL` (default 180s), `NTFY_TOPIC`, `NTFY_URL`, `NTFY_TOKEN`.
+Copy `.env.example` to `.env`. Required vars: `HYUNDAI_USERNAME`, `HYUNDAI_PASSWORD`, `HYUNDAI_PIN`, `OHME_EMAIL`, `OHME_PASSWORD`. Optional: `CHARGE_TARGET` (default 80, the initial/fallback target), `POLL_INTERVAL` (default 180s), `SETTINGS_PATH` (default `/app/data/settings.json`; a named volume is mounted there in both compose files so a dashboard-changed target survives restarts), `NTFY_TOPIC`, `NTFY_URL`, `NTFY_TOKEN`, `CORS_ORIGINS`.
 
 ## Testing
 

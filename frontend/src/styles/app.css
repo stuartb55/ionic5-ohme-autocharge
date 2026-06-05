@@ -61,35 +61,85 @@ body {
   box-shadow: 0 0 0 4px var(--success-soft);
   display: inline-block;
 }
-.refresh-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  margin-left: var(--space-1);
-  padding: 0;
-  color: var(--text-muted);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  cursor: pointer;
-}
-.refresh-button:hover:not(:disabled) {
-  color: var(--text);
-  border-color: var(--text-subtle);
-}
-.refresh-button:disabled { cursor: progress; }
-.refresh-button svg { display: block; }
-.refresh-button[data-spinning] svg { animation: spin 0.8s linear infinite; }
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
 .live-dot.stale {
   background: var(--idle);
   box-shadow: 0 0 0 4px var(--idle-soft);
+}
+.refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.refresh-btn:hover:not(:disabled) {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+.refresh-btn:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.theme-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  padding: 2px;
+}
+.theme-option {
+  width: 26px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.theme-option:hover {
+  color: var(--text);
+}
+.theme-option[aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--brand);
+  box-shadow: var(--shadow-sm);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.refresh-btn.spinning span {
+  display: inline-block;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .refresh-btn.spinning span {
+    animation: none;
+  }
 }
 
 /* --- layout --- */
@@ -149,6 +199,78 @@ body {
 .battery-caption .target {
   color: var(--text-muted);
   font-size: 0.85rem;
+}
+
+/* --- charge target editor --- */
+.target-editor {
+  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+.target-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.target-stepper .target-value {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  min-width: 92px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.target-stepper .step {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.target-stepper .step:hover:not(:disabled) {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+.target-stepper .step:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.target-actions {
+  display: inline-flex;
+  gap: var(--space-2);
+}
+.target-actions .save,
+.target-actions .cancel {
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  border: 1px solid var(--border);
+}
+.target-actions .save {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+.target-actions .save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.target-actions .cancel {
+  background: transparent;
+  color: var(--text-muted);
+}
+.target-error {
+  color: var(--danger);
+  font-size: 0.78rem;
 }
 
 .tiles {
@@ -409,7 +531,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .skeleton, .badge.charging .pip, .refresh-button[data-spinning] svg { animation: none; }
+  .skeleton, .badge.charging .pip { animation: none; }
 }
 
 /* --- responsive --- */

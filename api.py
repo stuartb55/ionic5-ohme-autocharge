@@ -26,14 +26,51 @@ from typing import Any, Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
 import config
 import main
 import ohme_client
+import settings
 from state import StatusSnapshot, store
 
 logger = logging.getLogger(__name__)
+
+# Read-only endpoints that are polled constantly (the container HEALTHCHECK hits
+# /api/health every 30s; the SPA refreshes the others on a timer). A successful
+# GET to any of these is pure noise in the container log and buries the plug-in
+# events we actually care about, so we drop those access-log lines. Anything that
+# errors (status >= 400) is still logged.
+_QUIET_ACCESS_PATHS = frozenset(
+    {"/api/health", "/api/status", "/api/schedule", "/api/statistics"}
+)
+
+
+class _QuietAccessLogFilter(logging.Filter):
+    """Suppress uvicorn access-log lines for successful GETs to polling endpoints.
+
+    uvicorn logs each request as ``'%s - "%s %s HTTP/%s" %d'`` with
+    ``record.args == (client_addr, method, full_path, http_version, status)``.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if not isinstance(args, tuple) or len(args) < 5:
+            return True
+        method, full_path, status = args[1], args[2], args[4]
+        if method != "GET":
+            return True
+        try:
+            if int(status) >= 400:
+                return True
+        except (TypeError, ValueError):
+            return True
+        path = str(full_path).split("?", 1)[0]
+        return path not in _QUIET_ACCESS_PATHS
+
+
+_quiet_access_filter = _QuietAccessLogFilter()
 
 # Comma-separated list of allowed CORS origins. Empty (default) means same-origin
 # only — which is the production setup, where nginx serves the SPA and proxies /api.
@@ -77,9 +114,10 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
         power_watts=float(power.watts or 0),
         power_amps=float(power.amps or 0),
         power_volts=power.volts,
-        # The configured target. NB: client.target_soc holds the *top-up* amount
-        # (target − SOC) we send to Ohme, not the absolute target, so never use it.
-        target_percent=config.CHARGE_TARGET,
+        # The active target (runtime override or env default). NB: client.target_soc
+        # holds the *top-up* amount (target − SOC) we send to Ohme, not the absolute
+        # target, so never use it.
+        target_percent=store.charge_target,
         session_energy_wh=float(client.energy or 0),
         slots=[s.to_dict() for s in client.slots],
         next_slot_start=_iso(client.next_slot_start),
@@ -90,10 +128,11 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
 
 async def poll_loop() -> None:
     """Background task: detect plug-in events and refresh the status snapshot."""
+    main.load_persisted_target()
     logger.info(
         "API poll loop starting (interval=%ss, target=%s%%)",
         config.POLL_INTERVAL,
-        config.CHARGE_TARGET,
+        store.charge_target,
     )
     client = await ohme_client.make_client()
     store.client = client
@@ -149,6 +188,12 @@ async def poll_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Added here (not at import time) so it survives uvicorn configuring its own
+    # loggers, which happens after the app module is imported.
+    access_logger = logging.getLogger("uvicorn.access")
+    if _quiet_access_filter not in access_logger.filters:
+        access_logger.addFilter(_quiet_access_filter)
+
     task: Optional[asyncio.Task] = None
     if not DISABLE_POLLING:
         task = asyncio.create_task(poll_loop())
@@ -188,7 +233,7 @@ if CORS_ORIGINS:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=CORS_ORIGINS,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "PUT"],
         allow_headers=["*"],
     )
 
@@ -198,15 +243,22 @@ if CORS_ORIGINS:
 _summary_cache: dict[str, Any] = {"key": None, "value": None, "at": 0.0}
 
 
+# Ohme returns Money amounts in the currency's *minor* unit (pence for GBP), so
+# e.g. a 7.284 p/kWh price comes back as amount "7.284" and a £13.97 cost as
+# "1396.663". Divide by 100 to convert to major units (pounds) here, once, so the
+# whole pipeline downstream works in pounds. (This app is GBP-only.)
+_MINOR_UNITS_PER_MAJOR = 100
+
+
 def _money(node: Any) -> tuple[float, Optional[str]]:
-    """Return (amount, currencyCode) from an Ohme Money dict."""
+    """Return (amount_in_major_units, currencyCode) from an Ohme Money dict."""
     if not isinstance(node, dict):
         return 0.0, None
     try:
         amount = float(node.get("amount") or 0)
     except (TypeError, ValueError):
         amount = 0.0
-    return amount, node.get("currencyCode")
+    return amount / _MINOR_UNITS_PER_MAJOR, node.get("currencyCode")
 
 
 def parse_summary(summary: dict[str, Any], days: int) -> dict[str, Any]:
@@ -256,9 +308,50 @@ def parse_summary(summary: dict[str, Any], days: int) -> dict[str, Any]:
 # --- endpoints -----------------------------------------------------------------
 
 
+class TargetUpdate(BaseModel):
+    """Request body for PUT /api/settings/target."""
+
+    targetPercent: int = Field(ge=settings.TARGET_MIN, le=settings.TARGET_MAX)
+
+
+async def _reapply_target_if_connected(target: int) -> bool:
+    """Push a newly-set target to Ohme immediately if the car is plugged in.
+
+    Returns True only if Ohme was reconfigured. Best-effort: failure here doesn't
+    fail the request — the target still takes effect on the next plug-in/poll.
+    """
+    client = store.client
+    soc = store.last_soc
+    if client is None or not store.status.connected or soc is None or soc >= target:
+        return False
+    try:
+        async with store.client_lock:
+            await ohme_client.set_target(client, current_soc=soc, target_percent=target)
+        return True
+    except Exception:  # noqa: BLE001 - never let an Ohme hiccup fail the settings write
+        logger.warning("Could not re-apply charge target to Ohme", exc_info=True)
+        return False
+
+
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
     return {"status": "ok", "ready": store.ready}
+
+
+@app.put("/api/settings/target")
+async def set_charge_target(update: TargetUpdate) -> JSONResponse:
+    target = update.targetPercent
+    store.set_charge_target(target)
+    persisted = settings.save_target(target)
+    applied = await _reapply_target_if_connected(target)
+    # Reflect the new target in the cached snapshot so a subsequent GET /api/status
+    # sees it immediately rather than after the next poll.
+    if store.ready:
+        store.status.target_percent = target
+    logger.info(
+        "Charge target set to %s%% (persisted=%s, applied=%s)", target, persisted, applied
+    )
+    return JSONResponse({"targetPercent": target, "persisted": persisted, "applied": applied})
 
 
 @app.get("/api/status")
@@ -282,7 +375,7 @@ async def get_status() -> JSONResponse:
             "sessionEnergyKwh": round(store.status.session_energy_wh / 1000, 2),
         },
         "config": {
-            "chargeTarget": config.CHARGE_TARGET,
+            "chargeTarget": store.charge_target,
             "pollIntervalSeconds": config.POLL_INTERVAL,
         },
         "updatedAt": store.status.updated_at,

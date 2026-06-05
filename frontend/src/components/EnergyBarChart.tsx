@@ -8,16 +8,16 @@ interface Props {
   currency: string | null;
 }
 
+const METRIC_COLOR: Record<ChartMetric, string> = {
+  energyKwh: 'var(--brand)',
+  savings: 'var(--success)',
+  cost: 'var(--warning)',
+};
+
 const W = 720;
 const H = 200;
 const PAD_BOTTOM = 24;
 const PAD_TOP = 8;
-
-const METRIC_COLOR: Record<ChartMetric, string> = {
-  energyKwh: 'var(--brand)',
-  savings: 'var(--success)',
-  cost: 'var(--accent)',
-};
 
 export function EnergyBarChart({ daily, metric, currency }: Props) {
   if (!daily.length) {

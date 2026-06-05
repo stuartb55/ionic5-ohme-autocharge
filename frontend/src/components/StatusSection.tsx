@@ -2,6 +2,7 @@ import type { StatusResponse } from '../api/types';
 import { formatKwh, formatPower } from '../utils/format';
 import { BatteryRing } from './BatteryRing';
 import { ConnectionBadge } from './ConnectionBadge';
+import { TargetEditor } from './TargetEditor';
 
 function Tile({ label, value, unit }: { label: string; value: string; unit?: string }) {
   return (
@@ -15,7 +16,13 @@ function Tile({ label, value, unit }: { label: string; value: string; unit?: str
   );
 }
 
-export function StatusSection({ status }: { status: StatusResponse }) {
+export function StatusSection({
+  status,
+  onSetTarget,
+}: {
+  status: StatusResponse;
+  onSetTarget?: (target: number) => Promise<void>;
+}) {
   const { vehicle, charger } = status;
   const target = charger.targetPercent ?? status.config.chargeTarget;
 
@@ -34,7 +41,11 @@ export function StatusSection({ status }: { status: StatusResponse }) {
           <BatteryRing percent={vehicle.batteryPercent} target={target} />
           <div className="battery-caption">
             <div className="vehicle">{vehicle.name ?? 'Vehicle'}</div>
-            <div className="target">Target {target}%</div>
+            {onSetTarget ? (
+              <TargetEditor value={target} onSave={onSetTarget} />
+            ) : (
+              <div className="target">Target {target}%</div>
+            )}
           </div>
         </div>
 

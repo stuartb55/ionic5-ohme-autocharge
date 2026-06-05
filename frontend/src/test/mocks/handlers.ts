@@ -10,6 +10,10 @@ export const handlers = [
     const days = Number(new URL(request.url).searchParams.get('days') ?? 7);
     return HttpResponse.json({ ...statisticsFixture, rangeDays: days });
   }),
+  http.put('*/api/settings/target', async ({ request }) => {
+    const body = (await request.json()) as { targetPercent: number };
+    return HttpResponse.json({ targetPercent: body.targetPercent, persisted: true, applied: false });
+  }),
   http.post('*/api/refresh', () =>
     HttpResponse.json({ ok: true, updatedAt: statusFixture.updatedAt, ready: true }),
   ),

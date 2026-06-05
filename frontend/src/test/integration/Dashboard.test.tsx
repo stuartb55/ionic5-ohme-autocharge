@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Dashboard } from '../../components/Dashboard';
 import { server } from '../mocks/server';
 import { statisticsFixture, statusFixture } from '../fixtures';
@@ -45,6 +45,40 @@ describe('Dashboard integration', () => {
     await waitFor(() => expect(requested).toContain('30'));
   });
 
+  it('shows time since the backend last polled Ohme, not since the browser fetched', async () => {
+    // statusFixture.updatedAt is 2026-06-02T00:05:00+01:00; pretend "now" is 3
+    // minutes later. The label must reflect that backend poll time (3m ago), not
+    // the browser fetch which just happened (~0s ago).
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-06-02T00:08:00+01:00'));
+    try {
+      render(<Dashboard />);
+      await screen.findByText('Hyundai IONIQ 5');
+      expect(screen.getByText(/Updated 3m ago/i)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('saves a new charge target via the API', async () => {
+    let putBody: { targetPercent: number } | null = null;
+    server.use(
+      http.put('*/api/settings/target', async ({ request }) => {
+        putBody = (await request.json()) as { targetPercent: number };
+        return HttpResponse.json({ ...putBody, persisted: true, applied: false });
+      }),
+    );
+
+    render(<Dashboard />);
+    // Status section renders the editor with the fixture target (80%).
+    await screen.findByText('Target 80%');
+
+    await userEvent.click(screen.getByRole('button', { name: /increase target/i }));
+    await userEvent.click(screen.getByRole('button', { name: /save 85%/i }));
+
+    await waitFor(() => expect(putBody).toEqual({ targetPercent: 85 }));
+  });
+
   it('forces a backend refresh then refetches when the button is clicked', async () => {
     let statusHits = 0;
     let refreshHits = 0;
@@ -63,10 +97,20 @@ describe('Dashboard integration', () => {
     await screen.findByText('Hyundai IONIQ 5');
     const initialStatusHits = statusHits;
 
-    await userEvent.click(screen.getByRole('button', { name: /refresh data/i }));
+    await userEvent.click(screen.getByRole('button', { name: /refresh now/i }));
 
     await waitFor(() => expect(refreshHits).toBe(1));
     await waitFor(() => expect(statusHits).toBeGreaterThan(initialStatusHits));
+  });
+
+  it('switches the daily chart to the Cost metric', async () => {
+    render(<Dashboard />);
+    await screen.findByRole('img', { name: /daily energyKwh bar chart/i });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Cost' }));
+
+    expect(screen.getByRole('img', { name: /daily cost bar chart/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Daily cost' })).toBeInTheDocument();
   });
 
   it('shows an error banner when the backend is unreachable', async () => {

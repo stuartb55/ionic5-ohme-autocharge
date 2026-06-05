@@ -5,12 +5,15 @@ drive the read endpoints by injecting a snapshot into ``state.store`` and the
 statistics endpoint by mocking the client's ``async_get_charge_summary``.
 """
 
-from unittest.mock import AsyncMock, MagicMock
+import logging
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 import api
+import settings
 from state import StatusSnapshot, store
 
 
@@ -26,7 +29,10 @@ def reset_state():
     store.client = None
     store.ready = False
     store.last_soc = None
+    store.charge_target_override = None
     api._summary_cache.update(key=None, value=None, at=0.0)
+    if os.path.exists(settings.SETTINGS_PATH):
+        os.remove(settings.SETTINGS_PATH)
     yield
 
 
@@ -104,6 +110,8 @@ def test_statistics_503_when_no_client(client):
 
 
 def test_statistics_parses_summary(client):
+    # Ohme returns Money amounts in minor units (pence for GBP); the backend
+    # converts to pounds.
     mock_client = MagicMock()
     mock_client.async_get_charge_summary = AsyncMock(
         return_value={
@@ -111,9 +119,9 @@ def test_statistics_parses_summary(client):
             "totalStats": {
                 "energyChargedTotalWh": 42000,
                 "costStats": {
-                    "moneyCostTotal": {"currencyCode": "GBP", "amount": "5.25"},
-                    "moneySavedVsStandardTariff": {"currencyCode": "GBP", "amount": "8.40"},
-                    "averageKwhPrice": {"currencyCode": "GBP", "amount": "0.125"},
+                    "moneyCostTotal": {"currencyCode": "GBP", "amount": "525"},
+                    "moneySavedVsStandardTariff": {"currencyCode": "GBP", "amount": "840"},
+                    "averageKwhPrice": {"currencyCode": "GBP", "amount": "7.284"},
                 },
                 "carbonStats": {"carbonSavedVsGasCarGrams": 12000},
             },
@@ -122,8 +130,8 @@ def test_statistics_parses_summary(client):
                     "startTime": 1748822400000,
                     "energyChargedTotalWh": 18500,
                     "costStats": {
-                        "moneyCostTotal": {"currencyCode": "GBP", "amount": "2.30"},
-                        "moneySavedVsStandardTariff": {"currencyCode": "GBP", "amount": "3.70"},
+                        "moneyCostTotal": {"currencyCode": "GBP", "amount": "230"},
+                        "moneySavedVsStandardTariff": {"currencyCode": "GBP", "amount": "370"},
                     },
                 }
             ],
@@ -136,11 +144,15 @@ def test_statistics_parses_summary(client):
     assert body["rangeDays"] == 7
     assert body["currency"] == "GBP"
     assert body["totals"]["energyKwh"] == 42.0
-    assert body["totals"]["savingsVsStandard"] == 8.4
+    assert body["totals"]["costTotal"] == 5.25  # 525p -> £5.25
+    assert body["totals"]["savingsVsStandard"] == 8.4  # 840p -> £8.40
+    # 7.284p/kWh -> £0.07284, rounded to 4dp. The frontend renders this as "7.3p".
+    assert body["totals"]["averageKwhPrice"] == 0.0728
     assert body["totals"]["carbonSavedKgVsGasCar"] == 12.0
     assert len(body["daily"]) == 1
     assert body["daily"][0]["energyKwh"] == 18.5
-    assert body["daily"][0]["savings"] == 3.7
+    assert body["daily"][0]["cost"] == 2.3  # 230p -> £2.30
+    assert body["daily"][0]["savings"] == 3.7  # 370p -> £3.70
 
 
 def test_statistics_validates_days_range(client):
@@ -193,6 +205,62 @@ def test_refresh_502_on_upstream_error(client):
     assert client.post("/api/refresh").status_code == 502
 
 
+# --- charge target -------------------------------------------------------------
+
+
+def test_set_target_updates_store_and_persists(client):
+    resp = client.put("/api/settings/target", json={"targetPercent": 65})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["targetPercent"] == 65
+    assert body["persisted"] is True
+    # The runtime override is now in effect…
+    assert store.charge_target == 65
+    # …and survives a "restart" (reload from the persisted file).
+    assert settings.load_target() == 65
+
+
+def test_set_target_reflected_in_status(client):
+    _populate_snapshot()  # ready snapshot with target 80
+    client.put("/api/settings/target", json={"targetPercent": 70})
+    body = client.get("/api/status").json()
+    assert body["config"]["chargeTarget"] == 70
+    assert body["charger"]["targetPercent"] == 70
+
+
+@pytest.mark.parametrize("bad", [0, 9, 101, 150, -5])
+def test_set_target_rejects_out_of_range(client, bad):
+    resp = client.put("/api/settings/target", json={"targetPercent": bad})
+    assert resp.status_code == 422
+    assert store.charge_target_override is None
+
+
+def test_set_target_reapplies_to_ohme_when_plugged_in(client):
+    mock_client = MagicMock()
+    store.client = mock_client
+    store.last_soc = 50
+    store.status = StatusSnapshot(connected=True)
+    store.ready = True
+
+    with patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
+        body = client.put("/api/settings/target", json={"targetPercent": 90}).json()
+
+    assert body["applied"] is True
+    mock_set_target.assert_awaited_once_with(mock_client, current_soc=50, target_percent=90)
+
+
+def test_set_target_does_not_reapply_when_disconnected(client):
+    store.client = MagicMock()
+    store.last_soc = 50
+    store.status = StatusSnapshot(connected=False)
+
+    with patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
+        body = client.put("/api/settings/target", json={"targetPercent": 90}).json()
+
+    assert body["applied"] is False
+    mock_set_target.assert_not_called()
+
+
 # --- snapshot builder ----------------------------------------------------------
 
 
@@ -240,3 +308,40 @@ def test_build_snapshot_with_error():
     snap = api.build_snapshot(MagicMock(), connected=False, error="poll_failed")
     assert snap.error == "poll_failed"
     assert snap.updated_at is not None
+
+
+# --- access-log filter ---------------------------------------------------------
+
+
+def _access_record(method: str, path: str, status: int) -> logging.LogRecord:
+    return logging.LogRecord(
+        name="uvicorn.access",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg='%s - "%s %s HTTP/%s" %d',
+        args=("172.0.0.1:1234", method, path, "1.1", status),
+        exc_info=None,
+    )
+
+
+@pytest.mark.parametrize("path", ["/api/health", "/api/status", "/api/schedule", "/api/statistics"])
+def test_quiet_filter_drops_successful_polling_gets(path):
+    assert api._quiet_access_filter.filter(_access_record("GET", path, 200)) is False
+
+
+def test_quiet_filter_keeps_polling_endpoint_errors():
+    assert api._quiet_access_filter.filter(_access_record("GET", "/api/health", 503)) is True
+
+
+def test_quiet_filter_keeps_other_paths_and_methods():
+    assert api._quiet_access_filter.filter(_access_record("GET", "/api/other", 200)) is True
+    assert api._quiet_access_filter.filter(_access_record("POST", "/api/status", 200)) is True
+
+
+def test_quiet_filter_ignores_query_string():
+    assert api._quiet_access_filter.filter(_access_record("GET", "/api/statistics?days=7", 200)) is False
+
+
+def test_quiet_filter_installed_on_startup(client):
+    assert api._quiet_access_filter in logging.getLogger("uvicorn.access").filters

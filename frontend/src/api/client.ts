@@ -1,4 +1,9 @@
-import type { ScheduleResponse, StatisticsResponse, StatusResponse } from './types';
+import type {
+  ScheduleResponse,
+  StatisticsResponse,
+  StatusResponse,
+  TargetUpdateResponse,
+} from './types';
 
 // Same-origin relative base: in production nginx proxies /api to the backend;
 // in dev Vite's proxy does the same. Override with VITE_API_BASE if needed.
@@ -17,6 +22,19 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     signal,
     headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) {
+    throw new ApiError(`Request to ${path} failed`, res.status);
+  }
+  return (await res.json()) as T;
+}
+
+async function putJson<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'PUT',
+    signal,
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     throw new ApiError(`Request to ${path} failed`, res.status);
@@ -47,6 +65,8 @@ export const api = {
   getSchedule: (signal?: AbortSignal) => getJson<ScheduleResponse>('/api/schedule', signal),
   getStatistics: (days = 7, signal?: AbortSignal) =>
     getJson<StatisticsResponse>(`/api/statistics?days=${days}`, signal),
+  setTarget: (targetPercent: number, signal?: AbortSignal) =>
+    putJson<TargetUpdateResponse>('/api/settings/target', { targetPercent }, signal),
   // Ask the backend to pull a fresh live reading from Ohme, then the caller
   // refetches the read endpoints to display it.
   refresh: (signal?: AbortSignal) => postJson<RefreshResponse>('/api/refresh', signal),
