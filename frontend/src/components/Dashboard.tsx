@@ -26,6 +26,8 @@ export function Dashboard() {
 
   // Persist a new charge target, then refetch status so the UI reflects it.
   const { refetch: refetchStatus } = status;
+  const { refetch: refetchSchedule } = schedule;
+  const { refetch: refetchStats } = stats;
   const handleSetTarget = useCallback(
     async (target: number) => {
       await api.setTarget(target);
@@ -33,6 +35,22 @@ export function Dashboard() {
     },
     [refetchStatus],
   );
+
+  // Manual refresh: refetch every section at once. The button spins until the
+  // next status result lands (cleared by the effect below) or a safety timeout.
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    refetchStatus();
+    refetchSchedule();
+    refetchStats();
+    window.setTimeout(() => setRefreshing(false), 5_000);
+  }, [refetchStatus, refetchSchedule, refetchStats]);
+
+  const lastFetchedMs = status.lastUpdated?.getTime();
+  useEffect(() => {
+    setRefreshing(false);
+  }, [lastFetchedMs]);
 
   // Keep the "updated Xs ago" label fresh without refetching.
   useEffect(() => {
@@ -58,6 +76,16 @@ export function Dashboard() {
         <div className="app-meta">
           <span className={`live-dot ${fresh ? '' : 'stale'}`} aria-hidden="true" />
           <span>Updated {relativeTime(lastPolled)}</span>
+          <button
+            type="button"
+            className={`refresh-btn ${refreshing ? 'spinning' : ''}`}
+            onClick={handleRefresh}
+            disabled={refreshing}
+            aria-label="Refresh now"
+            title="Refresh now"
+          >
+            <span aria-hidden="true">⟳</span>
+          </button>
         </div>
       </header>
 
