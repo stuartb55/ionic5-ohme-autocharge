@@ -45,22 +45,28 @@ describe('Dashboard integration', () => {
     await waitFor(() => expect(requested).toContain('30'));
   });
 
-  it('refetches all sections when the refresh button is clicked', async () => {
+  it('forces a backend refresh then refetches when the button is clicked', async () => {
     let statusHits = 0;
+    let refreshHits = 0;
     server.use(
       http.get('*/api/status', () => {
         statusHits += 1;
         return HttpResponse.json(statusFixture);
       }),
+      http.post('*/api/refresh', () => {
+        refreshHits += 1;
+        return HttpResponse.json({ ok: true, updatedAt: statusFixture.updatedAt, ready: true });
+      }),
     );
 
     render(<Dashboard />);
     await screen.findByText('Hyundai IONIQ 5');
-    const initialHits = statusHits;
+    const initialStatusHits = statusHits;
 
     await userEvent.click(screen.getByRole('button', { name: /refresh data/i }));
 
-    await waitFor(() => expect(statusHits).toBeGreaterThan(initialHits));
+    await waitFor(() => expect(refreshHits).toBe(1));
+    await waitFor(() => expect(statusHits).toBeGreaterThan(initialStatusHits));
   });
 
   it('shows an error banner when the backend is unreachable', async () => {

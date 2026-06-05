@@ -24,9 +24,30 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function postJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    signal,
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) {
+    throw new ApiError(`Request to ${path} failed`, res.status);
+  }
+  return (await res.json()) as T;
+}
+
+export interface RefreshResponse {
+  ok: boolean;
+  updatedAt: string | null;
+  ready: boolean;
+}
+
 export const api = {
   getStatus: (signal?: AbortSignal) => getJson<StatusResponse>('/api/status', signal),
   getSchedule: (signal?: AbortSignal) => getJson<ScheduleResponse>('/api/schedule', signal),
   getStatistics: (days = 7, signal?: AbortSignal) =>
     getJson<StatisticsResponse>(`/api/statistics?days=${days}`, signal),
+  // Ask the backend to pull a fresh live reading from Ohme, then the caller
+  // refetches the read endpoints to display it.
+  refresh: (signal?: AbortSignal) => postJson<RefreshResponse>('/api/refresh', signal),
 };

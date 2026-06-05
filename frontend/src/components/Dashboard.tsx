@@ -34,9 +34,17 @@ export function Dashboard() {
   const refetchStats = stats.refetch;
 
   const handleRefresh = useCallback(() => {
-    refetchStatus();
-    refetchSchedule();
-    refetchStats();
+    // Ask the backend for a fresh live reading, then refetch the cached
+    // snapshot. If the force-refresh fails we still refetch so the button does
+    // something useful (shows whatever the backend currently has).
+    void api
+      .refresh()
+      .catch(() => undefined)
+      .finally(() => {
+        refetchStatus();
+        refetchSchedule();
+        refetchStats();
+      });
     // Brief spin so the click registers visually even when the new data is
     // identical to what's already on screen.
     setRefreshing(true);
