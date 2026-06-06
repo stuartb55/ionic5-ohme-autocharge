@@ -16,3 +16,12 @@ POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "180"))
 NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")
 NTFY_URL = os.getenv("NTFY_URL", "https://ntfy.sh")
 NTFY_TOKEN = os.getenv("NTFY_TOKEN", "")
+
+# Optional Postgres persistence for charging history (consumed by Grafana). When
+# blank, history persistence is disabled and the app runs entirely in memory as
+# before. Example: postgresql://autocharge:secret@postgres:5432/autocharge
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+
+# How often (seconds) the poll loop refreshes Ohme's daily totals into Postgres.
+# Independent of the dashboard being open. Default 6h.
+DAILY_STATS_INTERVAL = int(os.getenv("DAILY_STATS_INTERVAL", str(6 * 60 * 60)))
