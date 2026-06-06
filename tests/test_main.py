@@ -65,6 +65,45 @@ async def test_notification_includes_charge_schedule_when_slots_available(monkey
     assert "Charge schedule: 01:00-03:30" in msg
 
 
+async def test_records_session_and_schedule_when_db_enabled(monkeypatch):
+    monkeypatch.setattr(config, "CHARGE_TARGET", 80)
+    client = _mock_ohme_client()
+    client.current_vehicle = "IONIQ 5"
+    client.next_slot_start = None
+    client.next_slot_end = None
+
+    with patch("bluelink.get_battery_percentage", return_value=62), \
+         patch("ohme_client.set_target", new=AsyncMock()), \
+         patch("ntfy.send", new=AsyncMock()), \
+         patch("db.is_enabled", return_value=True), \
+         patch("db.record_session", new=AsyncMock(return_value=7)) as mock_session, \
+         patch("db.record_schedule", new=AsyncMock()) as mock_schedule:
+        result = await handle_plugin_event(client)
+
+    assert result is True
+    mock_session.assert_awaited_once_with(
+        vehicle_name="IONIQ 5", soc_percent=62, target_percent=80, topup_percent=18, action="configured"
+    )
+    mock_schedule.assert_awaited_once()
+    assert mock_schedule.call_args.kwargs["session_id"] == 7
+
+
+async def test_records_skipped_session_when_already_at_target(monkeypatch):
+    monkeypatch.setattr(config, "CHARGE_TARGET", 80)
+    client = _mock_ohme_client()
+    client.current_vehicle = "IONIQ 5"
+
+    with patch("bluelink.get_battery_percentage", return_value=90), \
+         patch("db.is_enabled", return_value=True), \
+         patch("db.record_session", new=AsyncMock(return_value=1)) as mock_session:
+        result = await handle_plugin_event(client)
+
+    assert result is True
+    mock_session.assert_awaited_once_with(
+        vehicle_name="IONIQ 5", soc_percent=90, target_percent=80, topup_percent=0, action="skipped_at_target"
+    )
+
+
 async def test_returns_false_when_ohme_fails_and_does_not_notify(monkeypatch):
     monkeypatch.setattr(config, "CHARGE_TARGET", 80)
 

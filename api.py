@@ -20,6 +20,7 @@ import asyncio
 import datetime
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 
@@ -30,6 +31,7 @@ from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
 import config
+import db
 import main
 import ohme_client
 import settings
@@ -153,6 +155,7 @@ async def poll_loop() -> None:
     except Exception:
         logger.warning("Could not determine initial charge state", exc_info=True)
 
+    last_daily_sync = 0.0  # monotonic time of the last daily-stats persist (0 = never)
     try:
         while True:
             try:
@@ -177,6 +180,19 @@ async def poll_loop() -> None:
 
                 async with store.client_lock:
                     store.update(build_snapshot(client, connected=now_connected))
+
+                # Append a telemetry point for Grafana (best-effort, no-op when
+                # persistence is disabled). Outside the lock: it doesn't touch the
+                # Ohme client.
+                await db.record_telemetry(store.status)
+
+                # Refresh Ohme's daily totals into Postgres on a slow cadence so
+                # the history is populated even when nobody opens the dashboard.
+                if db.is_enabled():
+                    now_mono = time.monotonic()
+                    if now_mono - last_daily_sync >= config.DAILY_STATS_INTERVAL:
+                        await _persist_daily_stats(client)
+                        last_daily_sync = now_mono
             except Exception:
                 logger.exception("Error during poll — will retry next interval")
                 store.update(build_snapshot(client, connected=False, error="poll_failed"))
@@ -194,6 +210,8 @@ async def lifespan(app: FastAPI):
     if _quiet_access_filter not in access_logger.filters:
         access_logger.addFilter(_quiet_access_filter)
 
+    await db.init()
+
     task: Optional[asyncio.Task] = None
     if not DISABLE_POLLING:
         task = asyncio.create_task(poll_loop())
@@ -206,6 +224,7 @@ async def lifespan(app: FastAPI):
                 await task
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
+        await db.close()
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -397,10 +416,28 @@ async def get_schedule() -> JSONResponse:
     )
 
 
+async def _persist_daily_stats(client: Any, days: int = 90) -> None:
+    """Fetch Ohme's charge summary and upsert its per-day totals into Postgres.
+
+    Best-effort and only does work when persistence is enabled. Used by the poll
+    loop so Grafana's daily history stays current without the dashboard open.
+    """
+    if not db.is_enabled():
+        return
+    end_ts = int(time.time() * 1000)
+    start_ts = end_ts - days * 24 * 60 * 60 * 1000
+    try:
+        async with store.client_lock:
+            summary = await client.async_get_charge_summary(start_ts=start_ts, end_ts=end_ts)
+    except Exception:
+        logger.warning("Could not fetch charge summary for daily-stats persist", exc_info=True)
+        return
+    parsed = parse_summary({k: v for k, v in summary.items() if k != "granularity"}, days)
+    await db.record_daily_stats(parsed["daily"], parsed["currency"])
+
+
 @app.get("/api/statistics")
 async def get_statistics(days: int = Query(default=7, ge=1, le=90)) -> JSONResponse:
-    import time
-
     client = store.client
     if client is None:
         raise HTTPException(status_code=503, detail="Backend not connected to Ohme yet")
@@ -426,6 +463,8 @@ async def get_statistics(days: int = Query(default=7, ge=1, le=90)) -> JSONRespo
     # async_get_charge_summary returns granularity as an enum; drop it before serialising.
     parsed = parse_summary({k: v for k, v in summary.items() if k != "granularity"}, days)
     _summary_cache.update(key=cache_key, value=parsed, at=now)
+    # Opportunistically persist the day totals we just fetched (no-op when disabled).
+    await db.record_daily_stats(parsed["daily"], parsed["currency"])
     return JSONResponse(parsed)
 
 

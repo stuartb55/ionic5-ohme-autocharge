@@ -14,6 +14,7 @@ import bluelink
 import ohme_client
 import ntfy
 import config
+import db
 import settings
 from state import store
 
@@ -56,6 +57,14 @@ async def handle_plugin_event(client) -> bool:
             soc,
             target,
         )
+        if db.is_enabled():
+            await db.record_session(
+                vehicle_name=client.current_vehicle,
+                soc_percent=soc,
+                target_percent=target,
+                topup_percent=0,
+                action="skipped_at_target",
+            )
         return True
 
     logger.info(
@@ -71,6 +80,20 @@ async def handle_plugin_event(client) -> bool:
         if schedule:
             msg += f". Charge schedule: {schedule}"
         await ntfy.send(msg)
+        if db.is_enabled():
+            session_id = await db.record_session(
+                vehicle_name=client.current_vehicle,
+                soc_percent=soc,
+                target_percent=target,
+                topup_percent=target - soc,
+                action="configured",
+            )
+            await db.record_schedule(
+                session_id=session_id,
+                slots=[s.to_dict() for s in client.slots],
+                next_slot_start=client.next_slot_start,
+                next_slot_end=client.next_slot_end,
+            )
         return True
     except Exception:
         logger.exception("Failed to set Ohme charge target — will retry next poll")
@@ -88,6 +111,8 @@ async def run_loop() -> None:
         logger.info("Ntfy notifications enabled (url=%s, topic=%s)", config.NTFY_URL, config.NTFY_TOPIC)
     else:
         logger.info("Ntfy notifications disabled — set NTFY_TOPIC to enable")
+
+    await db.init()
 
     client = await ohme_client.make_client()
 
@@ -130,17 +155,20 @@ async def run_loop() -> None:
             await asyncio.sleep(config.POLL_INTERVAL)
     finally:
         await client.close()
+        await db.close()
 
 
 async def run_once() -> None:
     """Single execution: fetch SOC and set Ohme target regardless of plug state."""
     logger.info("Running in one-shot mode")
     load_persisted_target()
+    await db.init()
     client = await ohme_client.make_client()
     try:
         await handle_plugin_event(client)
     finally:
         await client.close()
+        await db.close()
 
 
 if __name__ == "__main__":
