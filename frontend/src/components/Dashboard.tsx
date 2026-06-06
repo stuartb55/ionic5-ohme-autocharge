@@ -25,10 +25,12 @@ export function Dashboard() {
   const statsFetcher = useCallback((signal: AbortSignal) => api.getStatistics(days, signal), [days]);
   const stats = usePolling(statsFetcher, STATS_INTERVAL, [days]);
 
-  // Persist a new charge target, then refetch status so the UI reflects it.
+  // refetch() from usePolling is stable, so these are safe to capture.
   const { refetch: refetchStatus } = status;
   const { refetch: refetchSchedule } = schedule;
   const { refetch: refetchStats } = stats;
+
+  // Persist a new charge target, then refetch status so the UI reflects it.
   const handleSetTarget = useCallback(
     async (target: number) => {
       await api.setTarget(target);
@@ -37,14 +39,22 @@ export function Dashboard() {
     [refetchStatus],
   );
 
-  // Manual refresh: refetch every section at once. The button spins until the
-  // next status result lands (cleared by the effect below) or a safety timeout.
+  // Manual refresh: ask the backend to pull a fresh live reading from Ohme,
+  // then refetch every section. Even if the force-refresh fails we still
+  // refetch so the button does something (shows whatever the backend has).
+  // The button spins until the next status result lands (cleared by the effect
+  // below) or a safety timeout.
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
-    refetchStatus();
-    refetchSchedule();
-    refetchStats();
+    void api
+      .refresh()
+      .catch(() => undefined)
+      .finally(() => {
+        refetchStatus();
+        refetchSchedule();
+        refetchStats();
+      });
     window.setTimeout(() => setRefreshing(false), 5_000);
   }, [refetchStatus, refetchSchedule, refetchStats]);
 

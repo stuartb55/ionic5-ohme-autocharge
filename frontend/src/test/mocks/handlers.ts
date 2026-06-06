@@ -14,4 +14,7 @@ export const handlers = [
     const body = (await request.json()) as { targetPercent: number };
     return HttpResponse.json({ targetPercent: body.targetPercent, persisted: true, applied: false });
   }),
+  http.post('*/api/refresh', () =>
+    HttpResponse.json({ ok: true, updatedAt: statusFixture.updatedAt, ready: true }),
+  ),
 ];

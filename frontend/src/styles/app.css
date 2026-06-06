@@ -406,8 +406,68 @@ body {
 }
 .stat-card.highlight .value { color: var(--success); }
 
+/* derived insights row */
+.insights {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+.insight {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.insight-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-subtle);
+}
+.insight-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.insight-sub {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.stats-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.ghost-button {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.ghost-button:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-subtle);
+}
+.ghost-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .barchart svg { width: 100%; height: auto; display: block; }
 .barchart .axis { font-size: 10px; fill: var(--text-subtle); }
+.barchart .avg-line line { stroke: var(--text-subtle); stroke-width: 1; opacity: 0.7; }
+.barchart .avg-label { font-size: 10px; fill: var(--text-muted); font-weight: 600; }
 .chart-toolbar {
   display: inline-flex;
   background: var(--surface-2);
@@ -477,6 +537,7 @@ body {
 /* --- responsive --- */
 @media (max-width: 900px) {
   .stat-cards { grid-template-columns: repeat(2, 1fr); }
+  .insights { grid-template-columns: repeat(3, 1fr); }
 }
 @media (max-width: 720px) {
   .app { padding: var(--space-5) var(--space-4) var(--space-6); }
@@ -484,5 +545,5 @@ body {
   .tiles { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 460px) {
-  .stat-cards, .tiles { grid-template-columns: 1fr 1fr; }
+  .stat-cards, .tiles, .insights { grid-template-columns: 1fr 1fr; }
 }

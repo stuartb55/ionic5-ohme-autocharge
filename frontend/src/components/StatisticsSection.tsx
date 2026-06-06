@@ -1,13 +1,8 @@
 import { useState } from 'react';
 import type { StatisticsResponse } from '../api/types';
-import { formatKwh, formatMoney, formatPricePerKwh } from '../utils/format';
-import { EnergyBarChart, type ChartMetric } from './EnergyBarChart';
-
-const METRIC_OPTIONS: { value: ChartMetric; label: string; heading: string }[] = [
-  { value: 'energyKwh', label: 'Energy', heading: 'Daily energy' },
-  { value: 'savings', label: 'Savings', heading: 'Daily savings' },
-  { value: 'cost', label: 'Cost', heading: 'Daily cost' },
-];
+import { formatDateShort, formatKwh, formatMoney, formatPricePerKwh } from '../utils/format';
+import { deriveInsights, downloadDailyCsv, type ChartMetric } from '../utils/statistics';
+import { EnergyBarChart } from './EnergyBarChart';
 
 interface Props {
   stats: StatisticsResponse;
@@ -16,6 +11,18 @@ interface Props {
 }
 
 const RANGES = [7, 30, 90];
+
+const CHART_METRICS: { key: ChartMetric; label: string }[] = [
+  { key: 'energyKwh', label: 'Energy' },
+  { key: 'savings', label: 'Savings' },
+  { key: 'cost', label: 'Cost' },
+];
+
+const CHART_TITLE: Record<ChartMetric, string> = {
+  energyKwh: 'Daily energy',
+  savings: 'Daily savings',
+  cost: 'Daily cost',
+};
 
 function StatCard({
   label,
@@ -34,10 +41,20 @@ function StatCard({
   );
 }
 
+function Insight({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="insight">
+      <span className="insight-label">{label}</span>
+      <span className="insight-value">{value}</span>
+      {sub && <span className="insight-sub">{sub}</span>}
+    </div>
+  );
+}
+
 export function StatisticsSection({ stats, days, onDaysChange }: Props) {
   const [metric, setMetric] = useState<ChartMetric>('energyKwh');
   const { totals, currency } = stats;
-  const heading = METRIC_OPTIONS.find((o) => o.value === metric)?.heading ?? 'Daily energy';
+  const insights = deriveInsights(stats);
 
   return (
     <section className="card" aria-labelledby="stats-heading">
@@ -46,17 +63,27 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
           <p className="eyebrow">Performance</p>
           <h2 id="stats-heading">Statistics &amp; savings</h2>
         </div>
-        <div className="chart-toolbar" role="group" aria-label="Time range">
-          {RANGES.map((r) => (
-            <button
-              key={r}
-              type="button"
-              aria-pressed={days === r}
-              onClick={() => onDaysChange(r)}
-            >
-              {r}d
-            </button>
-          ))}
+        <div className="stats-actions">
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={() => downloadDailyCsv(stats)}
+            disabled={!stats.daily.length}
+          >
+            Export CSV
+          </button>
+          <div className="chart-toolbar" role="group" aria-label="Time range">
+            {RANGES.map((r) => (
+              <button
+                key={r}
+                type="button"
+                aria-pressed={days === r}
+                onClick={() => onDaysChange(r)}
+              >
+                {r}d
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
@@ -71,17 +98,37 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
         <StatCard label="CO₂ saved vs petrol" value={`${totals.carbonSavedKgVsGasCar} kg`} />
       </div>
 
+      <div className="insights" aria-label="Derived insights">
+        <Insight
+          label="Charging days"
+          value={`${insights.chargingDays}`}
+          sub={`of ${insights.totalDays} days`}
+        />
+        <Insight label="Avg / charging day" value={formatKwh(insights.avgPerChargingDay)} />
+        <Insight
+          label="Best day"
+          value={insights.bestDay ? formatKwh(insights.bestDay.energyKwh) : '—'}
+          sub={insights.bestDay ? formatDateShort(insights.bestDay.date) : undefined}
+        />
+        <Insight
+          label="Est. range added"
+          value={`${Math.round(insights.estimatedMiles)} mi`}
+          sub="@ 3.5 mi/kWh"
+        />
+        <Insight label="Total cost" value={formatMoney(totals.costTotal, currency)} />
+      </div>
+
       <header style={{ marginBottom: 'var(--space-4)' }}>
-        <h2 style={{ fontSize: '0.92rem' }}>{heading}</h2>
+        <h2 style={{ fontSize: '0.92rem' }}>{CHART_TITLE[metric]}</h2>
         <div className="chart-toolbar" role="group" aria-label="Chart metric">
-          {METRIC_OPTIONS.map((opt) => (
+          {CHART_METRICS.map(({ key, label }) => (
             <button
-              key={opt.value}
+              key={key}
               type="button"
-              aria-pressed={metric === opt.value}
-              onClick={() => setMetric(opt.value)}
+              aria-pressed={metric === key}
+              onClick={() => setMetric(key)}
             >
-              {opt.label}
+              {label}
             </button>
           ))}
         </div>

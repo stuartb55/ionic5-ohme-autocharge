@@ -79,21 +79,28 @@ describe('Dashboard integration', () => {
     await waitFor(() => expect(putBody).toEqual({ targetPercent: 85 }));
   });
 
-  it('refetches when the refresh button is clicked', async () => {
-    let statusCalls = 0;
+  it('forces a backend refresh then refetches when the button is clicked', async () => {
+    let statusHits = 0;
+    let refreshHits = 0;
     server.use(
       http.get('*/api/status', () => {
-        statusCalls += 1;
+        statusHits += 1;
         return HttpResponse.json(statusFixture);
+      }),
+      http.post('*/api/refresh', () => {
+        refreshHits += 1;
+        return HttpResponse.json({ ok: true, updatedAt: statusFixture.updatedAt, ready: true });
       }),
     );
 
     render(<Dashboard />);
     await screen.findByText('Hyundai IONIQ 5');
-    const initial = statusCalls;
+    const initialStatusHits = statusHits;
 
     await userEvent.click(screen.getByRole('button', { name: /refresh now/i }));
-    await waitFor(() => expect(statusCalls).toBeGreaterThan(initial));
+
+    await waitFor(() => expect(refreshHits).toBe(1));
+    await waitFor(() => expect(statusHits).toBeGreaterThan(initialStatusHits));
   });
 
   it('switches the daily chart to the Cost metric', async () => {

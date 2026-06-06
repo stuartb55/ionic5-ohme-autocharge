@@ -233,7 +233,7 @@ if CORS_ORIGINS:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=CORS_ORIGINS,
-        allow_methods=["GET", "PUT"],
+        allow_methods=["GET", "POST", "PUT"],
         allow_headers=["*"],
     )
 
@@ -427,3 +427,35 @@ async def get_statistics(days: int = Query(default=7, ge=1, le=90)) -> JSONRespo
     parsed = parse_summary({k: v for k, v in summary.items() if k != "granularity"}, days)
     _summary_cache.update(key=cache_key, value=parsed, at=now)
     return JSONResponse(parsed)
+
+
+@app.post("/api/refresh")
+async def refresh() -> JSONResponse:
+    """Force an immediate live re-read from Ohme and rebuild the cached snapshot.
+
+    The read endpoints (``/api/status``, ``/api/schedule``) serve a snapshot that
+    the background loop only refreshes every ``POLL_INTERVAL`` seconds. This lets
+    the UI pull a fresh reading on demand. It re-queries the charge session under
+    ``client_lock`` (so it never races the poll loop) and invalidates the
+    statistics cache so the next ``/api/statistics`` call also re-fetches.
+
+    Plug-in detection stays the responsibility of the background loop; this only
+    refreshes the displayed snapshot, it does not (re)configure the charge target.
+    """
+    client = store.client
+    if client is None:
+        raise HTTPException(status_code=503, detail="Backend not connected to Ohme yet")
+
+    try:
+        async with store.client_lock:
+            mode = await ohme_client.get_session_mode(client)
+            connected = ohme_client.is_connected(mode)
+            store.update(build_snapshot(client, connected=connected))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Manual refresh failed", exc_info=True)
+        raise HTTPException(status_code=502, detail="Could not refresh from Ohme") from exc
+
+    # Drop the statistics cache so the next request re-fetches from Ohme.
+    _summary_cache.update(key=None, value=None, at=0.0)
+
+    return JSONResponse({"ok": True, "updatedAt": store.status.updated_at, "ready": store.ready})
