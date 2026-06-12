@@ -161,12 +161,16 @@ async def test_unplug_clears_recorded_soc(monkeypatch):
     client = _make_loop_client()
     store.record_soc(62)
 
+    from ohme import ChargerStatus
+
     # Startup + poll 1: connected (plug-in handled); poll 2: unplugged.
-    modes = AsyncMock(side_effect=["SMART_CHARGE", "SMART_CHARGE", "DISCONNECTED"])
+    statuses = AsyncMock(
+        side_effect=[ChargerStatus.CHARGING, ChargerStatus.CHARGING, ChargerStatus.UNPLUGGED]
+    )
     sleeps = AsyncMock(side_effect=[None, asyncio.CancelledError()])
 
     with patch("ohme_client.make_client", new=AsyncMock(return_value=client)), \
-         patch("ohme_client.get_session_mode", new=modes), \
+         patch("ohme_client.get_charger_status", new=statuses), \
          patch("main.handle_plugin_event", new=AsyncMock(return_value=True)), \
          patch("asyncio.sleep", new=sleeps):
         try:
