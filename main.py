@@ -121,8 +121,8 @@ async def run_loop() -> None:
     was_connected = False
     session_handled = False
     try:
-        initial_mode = await ohme_client.get_session_mode(client)
-        was_connected = ohme_client.is_connected(initial_mode)
+        initial_status = await ohme_client.get_charger_status(client)
+        was_connected = ohme_client.is_connected(initial_status)
         if was_connected:
             logger.info("Car already connected on startup — will reconfigure Ohme on next poll")
     except Exception:
@@ -133,8 +133,8 @@ async def run_loop() -> None:
     try:
         while True:
             try:
-                mode = await ohme_client.get_session_mode(client)
-                now_connected = ohme_client.is_connected(mode)
+                status = await ohme_client.get_charger_status(client)
+                now_connected = ohme_client.is_connected(status)
 
                 if now_connected and not was_connected:
                     # Transition: disconnected → connected (car just plugged in)
@@ -144,7 +144,7 @@ async def run_loop() -> None:
                     session_handled = await handle_plugin_event(client)
 
                 if not now_connected and was_connected:
-                    logger.info("Car unplugged (mode=%s). Waiting for next session.", mode)
+                    logger.info("Car unplugged (status=%s). Waiting for next session.", status)
                     session_handled = False
 
                 was_connected = now_connected
