@@ -155,6 +155,25 @@ def test_statistics_parses_summary(client):
     assert body["daily"][0]["savings"] == 3.7  # 370p -> £3.70
 
 
+def test_parse_summary_buckets_days_in_account_timezone():
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    # 23:30 UTC on June 1st is 00:30 BST on June 2nd — Ohme's day bucket belongs
+    # to June 2nd even when the host (CI, container default) runs UTC. Pin the
+    # configured zone so the assertion doesn't depend on the host's TZ env.
+    start = dt.datetime(2025, 6, 1, 23, 30, tzinfo=dt.timezone.utc)
+    summary = {
+        "totalStats": {},
+        "stats": [{"startTime": int(start.timestamp() * 1000), "energyChargedTotalWh": 1000}],
+    }
+
+    with patch.object(api, "_STATS_TZ", ZoneInfo("Europe/London")):
+        parsed = api.parse_summary(summary, 7)
+
+    assert parsed["daily"][0]["date"] == "2025-06-02"
+
+
 def test_statistics_validates_days_range(client):
     store.client = MagicMock()
     assert client.get("/api/statistics?days=0").status_code == 422

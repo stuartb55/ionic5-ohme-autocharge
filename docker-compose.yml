@@ -9,6 +9,9 @@ services:
     # .env to point elsewhere, or leave it blank there to disable persistence.
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://autocharge:autocharge@postgres:5432/autocharge}
+      # Local time for log timestamps and daily-stats date bucketing (the
+      # container would otherwise run UTC, off by an hour during BST).
+      TZ: ${TZ:-Europe/London}
     depends_on:
       postgres:
         condition: service_healthy

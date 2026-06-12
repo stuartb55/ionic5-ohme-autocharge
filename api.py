@@ -23,6 +23,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -262,6 +263,15 @@ if CORS_ORIGINS:
 _summary_cache: dict[str, Any] = {"key": None, "value": None, "at": 0.0}
 
 
+# Ohme's per-day stats buckets start at midnight in the account's home timezone.
+# Convert bucket timestamps in that zone — not the host's — so a bucket starting
+# at 23:00 UTC during BST isn't attributed to the previous calendar date.
+try:
+    _STATS_TZ: Optional[ZoneInfo] = ZoneInfo(config.TIMEZONE)
+except Exception:  # noqa: BLE001 - bad TIMEZONE value; fall back to host-local
+    logger.warning("Unknown TIMEZONE %r — using host-local time for daily stats", config.TIMEZONE)
+    _STATS_TZ = None
+
 # Ohme returns Money amounts in the currency's *minor* unit (pence for GBP), so
 # e.g. a 7.284 p/kWh price comes back as amount "7.284" and a £13.97 cost as
 # "1396.663". Divide by 100 to convert to major units (pounds) here, once, so the
@@ -298,7 +308,11 @@ def parse_summary(summary: dict[str, Any], days: int) -> dict[str, Any]:
         start_ms = stat.get("startTime")
         date = None
         if start_ms:
-            date = datetime.datetime.fromtimestamp(start_ms / 1000).date().isoformat()
+            date = (
+                datetime.datetime.fromtimestamp(start_ms / 1000, tz=_STATS_TZ)
+                .date()
+                .isoformat()
+            )
         daily.append(
             {
                 "date": date,
