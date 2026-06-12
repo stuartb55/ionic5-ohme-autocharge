@@ -33,6 +33,12 @@ export interface StatusResponse {
   };
   updatedAt: string | null;
   ready: boolean;
+  /**
+   * Why the backend's most recent Ohme poll failed (e.g. "poll_failed"), or
+   * null when it succeeded. When set, the rest of the payload is the last
+   * good snapshot rather than a live reading.
+   */
+  lastError: string | null;
 }
 
 export interface TargetUpdateResponse {
