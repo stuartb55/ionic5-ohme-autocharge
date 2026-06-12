@@ -306,6 +306,78 @@ def test_refresh_502_on_upstream_error(client):
     assert client.post("/api/refresh").status_code == 502
 
 
+# --- charge controls -------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "method,path",
+    [("post", "/api/charge/pause"), ("post", "/api/charge/resume")],
+)
+def test_charge_controls_503_when_no_client(client, method, path):
+    assert getattr(client, method)(path).status_code == 503
+
+
+def test_max_charge_503_when_no_client(client):
+    assert client.put("/api/charge/max-charge", json={"enabled": True}).status_code == 503
+
+
+def test_pause_calls_ohme_and_rebuilds_snapshot(client):
+    mock_client = _charging_client()
+    mock_client.async_pause_charge = AsyncMock(return_value=True)
+    mock_client.async_get_charge_session = AsyncMock()
+    store.client = mock_client
+
+    resp = client.post("/api/charge/pause")
+
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    mock_client.async_pause_charge.assert_awaited_once()
+    # Snapshot was re-read so the UI sees the new state immediately.
+    mock_client.async_get_charge_session.assert_awaited()
+    assert store.status.charger_status == "charging"  # from the mock's status
+
+
+def test_resume_calls_ohme(client):
+    mock_client = _charging_client()
+    mock_client.async_resume_charge = AsyncMock(return_value=True)
+    mock_client.async_get_charge_session = AsyncMock()
+    store.client = mock_client
+
+    resp = client.post("/api/charge/resume")
+
+    assert resp.status_code == 200
+    mock_client.async_resume_charge.assert_awaited_once()
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_max_charge_passes_flag_and_reports_state(client, enabled):
+    mock_client = _charging_client()
+    mock_client.max_charge = enabled  # what Ohme reports after the call
+    mock_client.async_max_charge = AsyncMock(return_value=True)
+    mock_client.async_get_charge_session = AsyncMock()
+    store.client = mock_client
+
+    resp = client.put("/api/charge/max-charge", json={"enabled": enabled})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["maxCharge"] is enabled
+    mock_client.async_max_charge.assert_awaited_once_with(enabled)
+
+
+def test_charge_control_502_on_upstream_error(client):
+    mock_client = _charging_client()
+    mock_client.async_pause_charge = AsyncMock(side_effect=RuntimeError("boom"))
+    store.client = mock_client
+    assert client.post("/api/charge/pause").status_code == 502
+
+
+def test_status_reports_max_charge(client):
+    store.update(StatusSnapshot(max_charge=True))
+    body = client.get("/api/status").json()
+    assert body["charger"]["maxCharge"] is True
+
+
 # --- charge target -------------------------------------------------------------
 
 
@@ -408,6 +480,7 @@ def _charging_client():
     client.battery = 33  # Ohme's unreliable internal estimate
     client.status = ChargerStatus.CHARGING
     client.available = True
+    client.max_charge = False
     client.device_info = {"model": "Home Pro"}
     client.power = ChargerPower(watts=7400, amps=32, volts=230)
     client.target_soc = 35  # the top-up amount we sent, NOT the real target

@@ -1,4 +1,5 @@
 import type {
+  ChargeActionResponse,
   ScheduleResponse,
   StatisticsResponse,
   StatusResponse,
@@ -70,4 +71,11 @@ export const api = {
   // Ask the backend to pull a fresh live reading from Ohme, then the caller
   // refetches the read endpoints to display it.
   refresh: (signal?: AbortSignal) => postJson<RefreshResponse>('/api/refresh', signal),
+  // Charge controls — pause/resume the session, or toggle max-charge (boost).
+  pauseCharge: (signal?: AbortSignal) =>
+    postJson<ChargeActionResponse>('/api/charge/pause', signal),
+  resumeCharge: (signal?: AbortSignal) =>
+    postJson<ChargeActionResponse>('/api/charge/resume', signal),
+  setMaxCharge: (enabled: boolean, signal?: AbortSignal) =>
+    putJson<ChargeActionResponse>('/api/charge/max-charge', { enabled }, signal),
 };

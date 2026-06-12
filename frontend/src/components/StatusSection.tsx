@@ -1,6 +1,7 @@
 import type { StatusResponse } from '../api/types';
 import { formatKwh, formatPower } from '../utils/format';
 import { BatteryRing } from './BatteryRing';
+import { ChargeControls } from './ChargeControls';
 import { ConnectionBadge } from './ConnectionBadge';
 import { TargetEditor } from './TargetEditor';
 
@@ -19,9 +20,12 @@ function Tile({ label, value, unit }: { label: string; value: string; unit?: str
 export function StatusSection({
   status,
   onSetTarget,
+  onChargeChanged,
 }: {
   status: StatusResponse;
   onSetTarget?: (target: number) => Promise<void>;
+  /** Refetch status after a charge-control action; controls hidden when omitted. */
+  onChargeChanged?: () => void;
 }) {
   const { vehicle, charger } = status;
   const target = charger.targetPercent ?? status.config.chargeTarget;
@@ -60,6 +64,8 @@ export function StatusSection({
           <Tile label="Charger" value={charger.model ?? '—'} unit={charger.online ? '· online' : '· offline'} />
         </div>
       </div>
+
+      {onChargeChanged && <ChargeControls status={status} onChanged={onChargeChanged} />}
     </section>
   );
 }

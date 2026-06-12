@@ -6,6 +6,7 @@ export const statusFixture: StatusResponse = {
     status: 'charging',
     connected: true,
     online: true,
+    maxCharge: false,
     model: 'Home Pro',
     power: { watts: 7400, amps: 32, volts: 230 },
     targetPercent: 80,

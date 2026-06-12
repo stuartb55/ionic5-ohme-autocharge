@@ -130,6 +130,7 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
         charger_status=status_value,
         connected=connected,
         charger_online=bool(client.available),
+        max_charge=bool(client.max_charge),
         charger_model=(client.device_info or {}).get("model"),
         power_watts=float(power.watts or 0),
         power_amps=float(power.amps or 0),
@@ -492,6 +493,7 @@ async def get_status() -> JSONResponse:
             "status": store.status.charger_status,
             "connected": store.status.connected,
             "online": store.status.charger_online,
+            "maxCharge": store.status.max_charge,
             "model": store.status.charger_model,
             "power": {
                 "watts": store.status.power_watts,
@@ -577,6 +579,68 @@ async def get_statistics(days: int = Query(default=7, ge=1, le=90)) -> JSONRespo
     # Opportunistically persist the day totals we just fetched (no-op when disabled).
     await db.record_daily_stats(parsed["daily"], parsed["currency"])
     return JSONResponse(parsed)
+
+
+# --- charge controls -------------------------------------------------------------
+
+
+class MaxChargeUpdate(BaseModel):
+    """Request body for PUT /api/charge/max-charge."""
+
+    enabled: bool
+
+
+async def _charge_action(name: str, action: Any) -> JSONResponse:
+    """Run an Ohme charge-control call, then refresh the cached snapshot.
+
+    ``action`` is an async callable taking the client. The session re-read after
+    the action means the next GET /api/status reflects the new charger state
+    immediately instead of after the next poll interval.
+    """
+    client = store.client
+    if client is None:
+        raise HTTPException(status_code=503, detail="Backend not connected to Ohme yet")
+    try:
+        async with store.client_lock:
+            await action(client)
+            charger_status = await ohme_client.get_charger_status(client)
+            store.update(
+                build_snapshot(client, connected=ohme_client.is_connected(charger_status))
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Charge control '%s' failed", name, exc_info=True)
+        raise HTTPException(status_code=502, detail=f"Could not {name} via Ohme") from exc
+    logger.info("Charge control '%s' requested from the dashboard", name)
+    return JSONResponse(
+        {
+            "ok": True,
+            "status": store.status.charger_status,
+            "maxCharge": store.status.max_charge,
+        }
+    )
+
+
+@app.post("/api/charge/pause")
+async def pause_charge() -> JSONResponse:
+    """Pause the active charge session."""
+    return await _charge_action("pause charging", lambda c: c.async_pause_charge())
+
+
+@app.post("/api/charge/resume")
+async def resume_charge() -> JSONResponse:
+    """Resume a paused charge session."""
+    return await _charge_action("resume charging", lambda c: c.async_resume_charge())
+
+
+@app.put("/api/charge/max-charge")
+async def set_max_charge(update: MaxChargeUpdate) -> JSONResponse:
+    """Toggle Ohme's max-charge (boost) mode.
+
+    Enabling abandons the smart schedule and charges flat-out at full rate;
+    disabling returns to smart charging.
+    """
+    action = "enable max charge" if update.enabled else "disable max charge"
+    return await _charge_action(action, lambda c: c.async_max_charge(update.enabled))
 
 
 @app.post("/api/refresh")

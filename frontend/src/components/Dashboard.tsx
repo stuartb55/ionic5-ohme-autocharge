@@ -117,7 +117,11 @@ export function Dashboard() {
 
       <div className="sections">
         {status.data ? (
-          <StatusSection status={status.data} onSetTarget={handleSetTarget} />
+          <StatusSection
+            status={status.data}
+            onSetTarget={handleSetTarget}
+            onChargeChanged={refetchStatus}
+          />
         ) : (
           <SectionSkeleton height={260} />
         )}
