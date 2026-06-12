@@ -192,6 +192,9 @@ async def poll_loop() -> None:
                     now_mono = time.monotonic()
                     if now_mono - last_daily_sync >= config.DAILY_STATS_INTERVAL:
                         await _persist_daily_stats(client)
+                        # Same slow cadence: stop the per-poll telemetry table
+                        # from growing without bound.
+                        await db.prune_telemetry(config.TELEMETRY_RETENTION_DAYS)
                         last_daily_sync = now_mono
             except Exception:
                 logger.exception("Error during poll — will retry next interval")

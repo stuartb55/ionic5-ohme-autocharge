@@ -204,6 +204,24 @@ async def record_telemetry(snap: Any) -> None:
         logger.warning("Failed to record telemetry to Postgres", exc_info=True)
 
 
+async def prune_telemetry(retention_days: int) -> None:
+    """Delete telemetry rows older than ``retention_days`` (<= 0 keeps forever).
+
+    Called on the daily-stats cadence so the per-poll table doesn't grow
+    without bound. Best-effort like every other write here.
+    """
+    if _pool is None or retention_days <= 0:
+        return
+    try:
+        async with _pool.connection() as conn:
+            await conn.execute(
+                "DELETE FROM telemetry WHERE recorded_at < now() - %s * interval '1 day'",
+                (retention_days,),
+            )
+    except Exception:
+        logger.warning("Failed to prune old telemetry from Postgres", exc_info=True)
+
+
 async def record_daily_stats(daily: list[dict[str, Any]], currency: Optional[str]) -> None:
     """Upsert Ohme's per-day totals (energy/savings/cost) keyed by date.
 

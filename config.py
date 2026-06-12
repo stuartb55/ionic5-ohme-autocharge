@@ -25,3 +25,8 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 # How often (seconds) the poll loop refreshes Ohme's daily totals into Postgres.
 # Independent of the dashboard being open. Default 6h.
 DAILY_STATS_INTERVAL = int(os.getenv("DAILY_STATS_INTERVAL", str(6 * 60 * 60)))
+
+# How long (days) to keep per-poll telemetry rows in Postgres. One row per poll
+# is ~175k rows/year at the default POLL_INTERVAL, so without pruning the table
+# grows forever. Pruning runs on the daily-stats cadence; 0 keeps rows forever.
+TELEMETRY_RETENTION_DAYS = int(os.getenv("TELEMETRY_RETENTION_DAYS", "365"))
