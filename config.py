@@ -39,6 +39,11 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 # Independent of the dashboard being open. Default 6h.
 DAILY_STATS_INTERVAL = int(os.getenv("DAILY_STATS_INTERVAL", str(6 * 60 * 60)))
 
+# How long (days) to keep per-poll telemetry rows in Postgres. One row per poll
+# is ~175k rows/year at the default POLL_INTERVAL, so without pruning the table
+# grows forever. Pruning runs on the daily-stats cadence; 0 keeps rows forever.
+TELEMETRY_RETENTION_DAYS = int(os.getenv("TELEMETRY_RETENTION_DAYS", "365"))
+
 # Timezone used to bucket Ohme's per-day statistics: Ohme days start at local
 # midnight, so attributing a bucket to a calendar date must use this zone, not
 # the host's (containers default to UTC). Defaults to the UK since this app is
