@@ -156,6 +156,36 @@ async def test_record_telemetry_maps_snapshot_fields(fake_pool):
     )
 
 
+# --- telemetry retention ---------------------------------------------------------
+
+
+async def test_prune_telemetry_deletes_rows_older_than_retention(fake_pool):
+    conn, _ = fake_pool
+    await db.prune_telemetry(365)
+    sql, params = conn.executed[0]
+    assert "DELETE FROM telemetry" in sql
+    assert params == (365,)
+
+
+async def test_prune_telemetry_zero_retention_keeps_everything(fake_pool):
+    conn, _ = fake_pool
+    await db.prune_telemetry(0)
+    assert conn.executed == []
+
+
+async def test_prune_telemetry_noop_when_disabled():
+    db._pool = None
+    await db.prune_telemetry(365)  # must not raise
+
+
+async def test_prune_telemetry_swallows_errors():
+    db._pool = _BoomPool()
+    try:
+        await db.prune_telemetry(365)  # must not raise
+    finally:
+        db._pool = None
+
+
 # --- daily stats ---------------------------------------------------------------
 
 

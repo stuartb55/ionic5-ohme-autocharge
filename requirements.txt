@@ -1,7 +1,11 @@
-hyundai-kia-connect-api>=3.0.0
-ohme>=1.9.1
-python-dotenv>=1.0.0
-fastapi>=0.110.0
-uvicorn[standard]>=0.29.0
-psycopg[binary]>=3.1
-psycopg-pool>=3.2
+# Pinned exactly so image builds are reproducible: the GHCR image is rebuilt on
+# every push to main, and a floating range here would let an upstream release
+# change what ships without any code change. Renovate proposes upgrades as PRs,
+# which run the test suite before automerging.
+hyundai-kia-connect-api==4.14.1
+ohme==1.9.1
+python-dotenv==1.2.2
+fastapi==0.136.3
+uvicorn[standard]==0.48.0
+psycopg[binary]==3.3.4
+psycopg-pool==3.3.1
