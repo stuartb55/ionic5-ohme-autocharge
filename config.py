@@ -38,3 +38,9 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 # How often (seconds) the poll loop refreshes Ohme's daily totals into Postgres.
 # Independent of the dashboard being open. Default 6h.
 DAILY_STATS_INTERVAL = int(os.getenv("DAILY_STATS_INTERVAL", str(6 * 60 * 60)))
+
+# Timezone used to bucket Ohme's per-day statistics: Ohme days start at local
+# midnight, so attributing a bucket to a calendar date must use this zone, not
+# the host's (containers default to UTC). Defaults to the UK since this app is
+# GBP/UK-only. Respects TZ when set so one variable can drive logs and stats.
+TIMEZONE = os.getenv("TIMEZONE") or os.getenv("TZ") or "Europe/London"
