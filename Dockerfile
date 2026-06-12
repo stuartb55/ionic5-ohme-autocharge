@@ -30,4 +30,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 
 # Serve the API; the app also runs the plug-in detection poll loop on startup.
 # (For the headless CLI behaviour use: python main.py  /  python main.py --once)
+#
+# MUST stay a single worker: the app keeps its state in-process (state.store,
+# the poll loop, the Ohme client, the statistics cache). Multiple workers would
+# each run their own poll loop — duplicate Ohme logins, duplicate DB writes,
+# and dashboards reading whichever worker answered. Never add --workers.
 CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
