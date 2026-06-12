@@ -6,7 +6,10 @@ blank and the app runs entirely in memory exactly as before.
 
 The bundled `docker-compose.yml` / `docker-compose.prod.yml` include a
 `postgres:16-alpine` service (database `autocharge`, user `autocharge`) with the
-port published on `5432` so an existing Grafana can query it directly.
+port published on **loopback only** (`127.0.0.1:5432`) so a Grafana running on
+the same host can query it directly without exposing the database to the LAN.
+Set `POSTGRES_PASSWORD` in `.env` to change the password — the backend's
+default `DATABASE_URL` picks it up automatically.
 
 ## Datasource
 
@@ -14,10 +17,10 @@ In Grafana add a **PostgreSQL** datasource:
 
 | Field    | Value                                  |
 | -------- | -------------------------------------- |
-| Host     | `<docker-host>:5432` (or `postgres:5432` if Grafana shares the compose network) |
+| Host     | `127.0.0.1:5432` from the docker host (or `postgres:5432` if Grafana shares the compose network) |
 | Database | `autocharge`                           |
 | User     | `autocharge`                           |
-| Password | `autocharge` (override `POSTGRES_PASSWORD` in prod) |
+| Password | `POSTGRES_PASSWORD` from `.env` (default `autocharge`) |
 | TLS/SSL  | disable for the internal network       |
 
 ## Tables
