@@ -2,7 +2,8 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import config
-from main import handle_plugin_event, run_loop
+from main import handle_plugin_event, run_loop, run_once
+from state import store
 
 
 def _mock_ohme_client(slots=None):
@@ -132,6 +133,7 @@ def _make_loop_client():
     """Return a mock Ohme client for run_loop tests."""
     client = MagicMock()
     client.close = AsyncMock()
+    client.async_update_device_info = AsyncMock()
     return client
 
 
@@ -140,9 +142,10 @@ async def test_reconfigures_on_restart_when_already_connected(monkeypatch):
     monkeypatch.setattr(config, "CHARGE_TARGET", 80)
     client = _make_loop_client()
 
+    from ohme import ChargerStatus
+
     with patch("ohme_client.make_client", new=AsyncMock(return_value=client)), \
-         patch("ohme_client.is_connected", side_effect=lambda m: m != "DISCONNECTED"), \
-         patch("ohme_client.get_session_mode", new=AsyncMock(return_value="SMART_CHARGE")), \
+         patch("ohme_client.get_charger_status", new=AsyncMock(return_value=ChargerStatus.CHARGING)), \
          patch("main.handle_plugin_event", new=AsyncMock(return_value=True)) as mock_handle, \
          patch("asyncio.sleep", side_effect=asyncio.CancelledError()):
         try:
@@ -151,3 +154,46 @@ async def test_reconfigures_on_restart_when_already_connected(monkeypatch):
             pass
 
     mock_handle.assert_called_once()
+    # Vehicle name must be available before the first plug-in event is recorded.
+    client.async_update_device_info.assert_awaited_once()
+
+
+# --- run_once exit code ---
+
+
+@pytest.mark.parametrize("handled,expected_code", [(True, 0), (False, 1)])
+async def test_run_once_exit_code_reflects_outcome(handled, expected_code):
+    """CI/smoke callers rely on the exit code, so a failed one-shot must be non-zero."""
+    client = _make_loop_client()
+
+    with patch("ohme_client.make_client", new=AsyncMock(return_value=client)), \
+         patch("main.handle_plugin_event", new=AsyncMock(return_value=handled)):
+        assert await run_once() == expected_code
+
+    client.close.assert_awaited()
+
+
+async def test_unplug_clears_recorded_soc(monkeypatch):
+    """The plug-in SOC must be forgotten on unplug — it's stale once the car drives away."""
+    monkeypatch.setattr(config, "CHARGE_TARGET", 80)
+    client = _make_loop_client()
+    store.record_soc(62)
+
+    from ohme import ChargerStatus
+
+    # Startup + poll 1: connected (plug-in handled); poll 2: unplugged.
+    statuses = AsyncMock(
+        side_effect=[ChargerStatus.CHARGING, ChargerStatus.CHARGING, ChargerStatus.UNPLUGGED]
+    )
+    sleeps = AsyncMock(side_effect=[None, asyncio.CancelledError()])
+
+    with patch("ohme_client.make_client", new=AsyncMock(return_value=client)), \
+         patch("ohme_client.get_charger_status", new=statuses), \
+         patch("main.handle_plugin_event", new=AsyncMock(return_value=True)), \
+         patch("asyncio.sleep", new=sleeps):
+        try:
+            await run_loop()
+        except asyncio.CancelledError:
+            pass
+
+    assert store.last_soc is None

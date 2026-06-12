@@ -109,6 +109,11 @@ export function Dashboard() {
       {status.data && !status.data.ready && (
         <Banner variant="info">Connecting to Ohme — waiting for the first reading…</Banner>
       )}
+      {status.data?.ready && status.data.lastError && (
+        <Banner variant="error">
+          Can&apos;t reach Ohme — showing the last known data. Retrying automatically…
+        </Banner>
+      )}
 
       <div className="sections">
         {status.data ? (
