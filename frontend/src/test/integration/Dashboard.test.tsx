@@ -118,4 +118,18 @@ describe('Dashboard integration', () => {
     render(<Dashboard />);
     expect(await screen.findByRole('alert')).toHaveTextContent(/can't reach the charging service/i);
   });
+
+  it('flags stale data when the backend cannot reach Ohme', async () => {
+    server.use(
+      http.get('*/api/status', () =>
+        HttpResponse.json({ ...statusFixture, lastError: 'poll_failed' }),
+      ),
+    );
+    render(<Dashboard />);
+
+    // The last good snapshot is still rendered…
+    expect(await screen.findByText('Hyundai IONIQ 5')).toBeInTheDocument();
+    // …with a banner explaining that live updates are failing.
+    expect(screen.getByRole('alert')).toHaveTextContent(/can't reach ohme/i);
+  });
 });

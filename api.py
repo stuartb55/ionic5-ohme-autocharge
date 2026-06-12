@@ -83,6 +83,15 @@ DISABLE_POLLING = os.getenv("AUTOCHARGE_DISABLE_POLLING") == "1"
 # Charge summary is cached this many seconds to avoid repeated upstream calls.
 SUMMARY_CACHE_TTL = 300
 
+# Backoff schedule for the initial Ohme login. Login happens once per process
+# start; failures there (the home server booting before its network is up, an
+# Ohme outage) must never kill the poll loop permanently.
+LOGIN_RETRY_INITIAL = 5.0
+LOGIN_RETRY_MAX = 300.0
+
+# The running poll task, so /api/health can report whether it is still alive.
+_poll_task: Optional[asyncio.Task] = None
+
 
 def _iso(dt: Optional[datetime.datetime]) -> Optional[str]:
     return dt.isoformat() if dt is not None else None
@@ -128,6 +137,37 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
     )
 
 
+async def _make_client_with_retry() -> Any:
+    """Create the Ohme client, retrying forever with exponential backoff."""
+    delay = LOGIN_RETRY_INITIAL
+    while True:
+        try:
+            return await ohme_client.make_client()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            store.record_poll_failure("login_failed")
+            logger.exception("Ohme login failed — retrying in %.0fs", delay)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, LOGIN_RETRY_MAX)
+
+
+def _on_poll_task_done(task: asyncio.Task) -> None:
+    """Log loudly if the poll loop ever exits unexpectedly.
+
+    /api/health reports the task as dead (HTTP 503) so the container
+    HEALTHCHECK fails and Docker restarts the service.
+    """
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.critical(
+            "Poll loop crashed — plug-in detection is down until the container restarts",
+            exc_info=exc,
+        )
+
+
 async def poll_loop() -> None:
     """Background task: detect plug-in events and refresh the status snapshot."""
     main.load_persisted_target()
@@ -136,7 +176,7 @@ async def poll_loop() -> None:
         config.POLL_INTERVAL,
         store.charge_target,
     )
-    client = await ohme_client.make_client()
+    client = await _make_client_with_retry()
     store.client = client
 
     # Populate vehicle name / model / serial once up front.
@@ -194,8 +234,11 @@ async def poll_loop() -> None:
                         await _persist_daily_stats(client)
                         last_daily_sync = now_mono
             except Exception:
+                # Keep the last good snapshot: a transient Ohme hiccup shouldn't
+                # blank the dashboard. The failure is surfaced via lastError and
+                # the snapshot's updatedAt simply stops advancing.
                 logger.exception("Error during poll — will retry next interval")
-                store.update(build_snapshot(client, connected=False, error="poll_failed"))
+                store.record_poll_failure("poll_failed")
 
             await asyncio.sleep(config.POLL_INTERVAL)
     finally:
@@ -212,9 +255,12 @@ async def lifespan(app: FastAPI):
 
     await db.init()
 
+    global _poll_task
     task: Optional[asyncio.Task] = None
     if not DISABLE_POLLING:
         task = asyncio.create_task(poll_loop())
+        task.add_done_callback(_on_poll_task_done)
+        _poll_task = task
     try:
         yield
     finally:
@@ -222,8 +268,11 @@ async def lifespan(app: FastAPI):
             task.cancel()
             try:
                 await task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            except asyncio.CancelledError:
                 pass
+            except Exception:  # noqa: BLE001 - already logged by _on_poll_task_done
+                pass
+            _poll_task = None
         await db.close()
 
 
@@ -353,8 +402,24 @@ async def _reapply_target_if_connected(target: int) -> bool:
 
 
 @app.get("/api/health")
-async def health() -> dict[str, Any]:
-    return {"status": "ok", "ready": store.ready}
+async def health() -> JSONResponse:
+    """Liveness for the container HEALTHCHECK.
+
+    Returns 503 once the poll loop has died, so Docker marks the container
+    unhealthy and restarts it — a dead loop means plug-in detection is down
+    even though the web server itself still responds.
+    """
+    poll_alive = DISABLE_POLLING or (_poll_task is not None and not _poll_task.done())
+    return JSONResponse(
+        {
+            "status": "ok" if poll_alive else "error",
+            "ready": store.ready,
+            "pollAlive": poll_alive,
+            "lastSuccessfulPoll": store.status.updated_at,
+            "lastError": store.last_poll_error,
+        },
+        status_code=200 if poll_alive else 503,
+    )
 
 
 @app.put("/api/settings/target")
@@ -399,6 +464,9 @@ async def get_status() -> JSONResponse:
         },
         "updatedAt": store.status.updated_at,
         "ready": store.ready,
+        # Why the most recent poll failed, or null when it succeeded. The data
+        # above is the last good snapshot, so the UI can flag it as stale.
+        "lastError": store.last_poll_error,
     }
     return JSONResponse(payload)
 
