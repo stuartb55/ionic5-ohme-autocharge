@@ -90,6 +90,10 @@ class AppState:
         """Remember the real vehicle SOC fetched from Bluelink at plug-in."""
         self.last_soc = soc
 
+    def clear_soc(self) -> None:
+        """Forget the plug-in SOC — it is stale the moment the car unplugs."""
+        self.last_soc = None
+
 
 # Module-level singleton imported by api.py and tests.
 store = AppState()

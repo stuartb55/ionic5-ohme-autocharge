@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import config
 from main import handle_plugin_event, run_loop
+from state import store
 
 
 def _mock_ohme_client(slots=None):
@@ -152,3 +153,29 @@ async def test_reconfigures_on_restart_when_already_connected(monkeypatch):
             pass
 
     mock_handle.assert_called_once()
+
+
+async def test_unplug_clears_recorded_soc(monkeypatch):
+    """The plug-in SOC must be forgotten on unplug — it's stale once the car drives away."""
+    monkeypatch.setattr(config, "CHARGE_TARGET", 80)
+    client = _make_loop_client()
+    store.record_soc(62)
+
+    from ohme import ChargerStatus
+
+    # Startup + poll 1: connected (plug-in handled); poll 2: unplugged.
+    statuses = AsyncMock(
+        side_effect=[ChargerStatus.CHARGING, ChargerStatus.CHARGING, ChargerStatus.UNPLUGGED]
+    )
+    sleeps = AsyncMock(side_effect=[None, asyncio.CancelledError()])
+
+    with patch("ohme_client.make_client", new=AsyncMock(return_value=client)), \
+         patch("ohme_client.get_charger_status", new=statuses), \
+         patch("main.handle_plugin_event", new=AsyncMock(return_value=True)), \
+         patch("asyncio.sleep", new=sleeps):
+        try:
+            await run_loop()
+        except asyncio.CancelledError:
+            pass
+
+    assert store.last_soc is None
