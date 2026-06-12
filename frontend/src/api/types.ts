@@ -18,6 +18,8 @@ export interface StatusResponse {
     status: ChargerStatus;
     connected: boolean;
     online: boolean;
+    /** True while Ohme is in max-charge ("boost") mode. */
+    maxCharge: boolean;
     model: string | null;
     power: {
       watts: number;
@@ -39,6 +41,14 @@ export interface StatusResponse {
    * good snapshot rather than a live reading.
    */
   lastError: string | null;
+}
+
+export interface ChargeActionResponse {
+  ok: boolean;
+  /** Charger status after the action. */
+  status: ChargerStatus;
+  /** Whether max-charge mode is active after the action. */
+  maxCharge: boolean;
 }
 
 export interface TargetUpdateResponse {

@@ -273,6 +273,18 @@ body {
   font-size: 0.78rem;
 }
 
+.charge-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+.charge-controls .boost-confirm {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
 .tiles {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

@@ -27,6 +27,8 @@ class StatusSnapshot:
     charger_status: str = "unknown"  # ChargerStatus value, e.g. "charging"
     connected: bool = False
     charger_online: bool = False
+    # True while Ohme is in MAX_CHARGE mode (the dashboard's "boost" toggle).
+    max_charge: bool = False
     charger_model: Optional[str] = None
     power_watts: float = 0.0
     power_amps: float = 0.0
