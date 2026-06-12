@@ -1,26 +1,29 @@
 """Async wrapper around the ohmepy library (PyPI: ohme)."""
 
 import logging
-from ohme import OhmeApiClient
+from ohme import ChargerStatus, OhmeApiClient
 
 import config
 
 logger = logging.getLogger(__name__)
 
-DISCONNECTED_MODE = "DISCONNECTED"
 
-
-async def get_session_mode(client: OhmeApiClient) -> str:
-    """Return the raw Ohme session mode string, e.g. 'DISCONNECTED' or 'SMART_CHARGE'."""
+async def get_charger_status(client: OhmeApiClient) -> ChargerStatus:
+    """Refresh the charge session and return the charger's status."""
     await client.async_get_charge_session()
-    mode = client._charge_session.get("mode", DISCONNECTED_MODE)
-    logger.debug("Ohme session mode: %s", mode)
-    return mode
+    try:
+        status = client.status
+    except KeyError:
+        # Session response without a mode — same graceful default the previous
+        # raw-mode implementation used.
+        status = ChargerStatus.UNPLUGGED
+    logger.debug("Ohme charger status: %s", status)
+    return status
 
 
-def is_connected(mode: str) -> bool:
+def is_connected(status: ChargerStatus) -> bool:
     """True when the car is physically plugged into the Ohme charger."""
-    return mode != DISCONNECTED_MODE
+    return status is not ChargerStatus.UNPLUGGED
 
 
 async def set_target(client: OhmeApiClient, current_soc: int, target_percent: int) -> None:

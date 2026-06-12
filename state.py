@@ -62,6 +62,10 @@ class AppState:
         # Runtime charge-target override set from the dashboard. None means "use
         # the CHARGE_TARGET env default"; see the `charge_target` property.
         self.charge_target_override: Optional[int] = None
+        # Why the most recent poll failed ("poll_failed", "login_failed"), or
+        # None when it succeeded. Failures keep the previous snapshot so the
+        # dashboard shows last-known-good data rather than going blank.
+        self.last_poll_error: Optional[str] = None
 
     @property
     def charge_target(self) -> int:
@@ -76,6 +80,11 @@ class AppState:
         self.status = snapshot
         if snapshot.error is None:
             self.ready = True
+            self.last_poll_error = None
+
+    def record_poll_failure(self, reason: str) -> None:
+        """Note a failed poll without discarding the last good snapshot."""
+        self.last_poll_error = reason
 
     def record_soc(self, soc: int) -> None:
         """Remember the real vehicle SOC fetched from Bluelink at plug-in."""

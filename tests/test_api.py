@@ -30,6 +30,7 @@ def reset_state():
     store.ready = False
     store.last_soc = None
     store.charge_target_override = None
+    store.last_poll_error = None
     api._summary_cache.update(key=None, value=None, at=0.0)
     if os.path.exists(settings.SETTINGS_PATH):
         os.remove(settings.SETTINGS_PATH)
@@ -67,6 +68,34 @@ def test_health_ok(client):
     assert resp.json()["status"] == "ok"
 
 
+def test_health_503_when_poll_task_dead(client):
+    dead = MagicMock()
+    dead.done.return_value = True
+    with patch.object(api, "DISABLE_POLLING", False), patch.object(api, "_poll_task", dead):
+        resp = client.get("/api/health")
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["status"] == "error"
+    assert body["pollAlive"] is False
+
+
+def test_health_ok_while_poll_task_running(client):
+    alive = MagicMock()
+    alive.done.return_value = False
+    with patch.object(api, "DISABLE_POLLING", False), patch.object(api, "_poll_task", alive):
+        resp = client.get("/api/health")
+    assert resp.status_code == 200
+    assert resp.json()["pollAlive"] is True
+
+
+def test_health_reports_last_error(client):
+    _populate_snapshot()
+    store.record_poll_failure("poll_failed")
+    body = client.get("/api/health").json()
+    assert body["lastError"] == "poll_failed"
+    assert body["lastSuccessfulPoll"] == "2026-06-02T00:00:00+01:00"
+
+
 def test_status_reflects_snapshot(client):
     _populate_snapshot()
     body = client.get("/api/status").json()
@@ -87,6 +116,44 @@ def test_status_before_first_poll_is_empty_but_ok(client):
     assert body["ready"] is False
     assert body["vehicle"]["batteryPercent"] is None
     assert body["charger"]["connected"] is False
+
+
+def test_poll_failure_preserves_snapshot_and_reports_error(client):
+    _populate_snapshot()
+    store.record_poll_failure("poll_failed")
+
+    body = client.get("/api/status").json()
+
+    # Last good data is still served…
+    assert body["vehicle"]["batteryPercent"] == 62
+    assert body["charger"]["status"] == "charging"
+    # …and the failure is reported alongside it.
+    assert body["lastError"] == "poll_failed"
+
+
+def test_successful_poll_clears_last_error(client):
+    store.record_poll_failure("poll_failed")
+    _populate_snapshot()
+    body = client.get("/api/status").json()
+    assert body["lastError"] is None
+
+
+async def test_make_client_with_retry_eventually_succeeds():
+    ohme = MagicMock()
+    with (
+        patch(
+            "ohme_client.make_client",
+            new=AsyncMock(side_effect=[RuntimeError("boom"), RuntimeError("boom"), ohme]),
+        ),
+        patch("asyncio.sleep", new=AsyncMock()) as mock_sleep,
+    ):
+        result = await api._make_client_with_retry()
+
+    assert result is ohme
+    # Two failures -> two backoff sleeps (5s then 10s), then success.
+    assert [c.args[0] for c in mock_sleep.await_args_list] == [5.0, 10.0]
+    # The failures were recorded so /api/health can report them while retrying.
+    assert store.last_poll_error == "login_failed"
 
 
 def test_schedule_returns_slots(client):
@@ -179,7 +246,6 @@ def test_refresh_503_when_no_client(client):
 def test_refresh_rebuilds_snapshot_and_clears_stats_cache(client):
     mock_client = _charging_client()
     mock_client.async_get_charge_session = AsyncMock()
-    mock_client._charge_session = {"mode": "SMART_CHARGE"}
     store.client = mock_client
     # Seed a stale stats cache to prove refresh invalidates it.
     api._summary_cache.update(key="days=7", value={"stale": True}, at=9e9)
@@ -191,7 +257,7 @@ def test_refresh_rebuilds_snapshot_and_clears_stats_cache(client):
     assert body["ok"] is True
     assert body["ready"] is True
     mock_client.async_get_charge_session.assert_awaited()
-    # Snapshot was rebuilt from the live client (connected via SMART_CHARGE mode).
+    # Snapshot was rebuilt from the live client (CHARGING status => connected).
     assert store.status.connected is True
     assert store.status.charger_status == "charging"
     # Stats cache was dropped.
