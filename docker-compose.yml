@@ -11,6 +11,9 @@ services:
     # uses, so the two can never drift apart.
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://autocharge:${POSTGRES_PASSWORD:-autocharge}@postgres:5432/autocharge}
+      # Local time for log timestamps and daily-stats date bucketing (the
+      # container would otherwise run UTC, off by an hour during BST).
+      TZ: ${TZ:-Europe/London}
     depends_on:
       postgres:
         condition: service_healthy
