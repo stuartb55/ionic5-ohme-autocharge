@@ -116,6 +116,14 @@ async def run_loop() -> None:
 
     client = await ohme_client.make_client()
 
+    # Populate the vehicle name once up front (api.poll_loop does the same).
+    # Without it, current_vehicle is None until the first set_target call, so
+    # the skipped-at-target session record would have no vehicle name.
+    try:
+        await client.async_update_device_info()
+    except Exception:
+        logger.warning("Could not fetch device info on startup", exc_info=True)
+
     # Snapshot real initial state so a container restart mid-charge doesn't
     # reconfigure Ohme and interrupt an active session.
     was_connected = False
@@ -165,6 +173,10 @@ async def run_once() -> None:
     await db.init()
     client = await ohme_client.make_client()
     try:
+        try:
+            await client.async_update_device_info()
+        except Exception:
+            logger.warning("Could not fetch device info", exc_info=True)
         await handle_plugin_event(client)
     finally:
         await client.close()

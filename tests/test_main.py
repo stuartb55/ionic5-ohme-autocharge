@@ -132,6 +132,7 @@ def _make_loop_client():
     """Return a mock Ohme client for run_loop tests."""
     client = MagicMock()
     client.close = AsyncMock()
+    client.async_update_device_info = AsyncMock()
     return client
 
 
@@ -151,3 +152,5 @@ async def test_reconfigures_on_restart_when_already_connected(monkeypatch):
             pass
 
     mock_handle.assert_called_once()
+    # Vehicle name must be available before the first plug-in event is recorded.
+    client.async_update_device_info.assert_awaited_once()
