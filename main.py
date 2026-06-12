@@ -9,6 +9,7 @@ Run once (CI/test): python main.py --once
 import argparse
 import asyncio
 import logging
+import sys
 
 import bluelink
 import ohme_client
@@ -158,14 +159,19 @@ async def run_loop() -> None:
         await db.close()
 
 
-async def run_once() -> None:
-    """Single execution: fetch SOC and set Ohme target regardless of plug state."""
+async def run_once() -> int:
+    """Single execution: fetch SOC and set Ohme target regardless of plug state.
+
+    Returns the process exit code — non-zero when the SOC fetch or the Ohme
+    configuration failed, so CI/smoke callers actually see the failure.
+    """
     logger.info("Running in one-shot mode")
     load_persisted_target()
     await db.init()
     client = await ohme_client.make_client()
     try:
-        await handle_plugin_event(client)
+        ok = await handle_plugin_event(client)
+        return 0 if ok else 1
     finally:
         await client.close()
         await db.close()
@@ -181,6 +187,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.once:
-        asyncio.run(run_once())
+        sys.exit(asyncio.run(run_once()))
     else:
         asyncio.run(run_loop())

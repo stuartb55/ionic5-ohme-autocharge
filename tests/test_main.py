@@ -2,7 +2,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import config
-from main import handle_plugin_event, run_loop
+from main import handle_plugin_event, run_loop, run_once
 
 
 def _mock_ohme_client(slots=None):
@@ -151,3 +151,18 @@ async def test_reconfigures_on_restart_when_already_connected(monkeypatch):
             pass
 
     mock_handle.assert_called_once()
+
+
+# --- run_once exit code ---
+
+
+@pytest.mark.parametrize("handled,expected_code", [(True, 0), (False, 1)])
+async def test_run_once_exit_code_reflects_outcome(handled, expected_code):
+    """CI/smoke callers rely on the exit code, so a failed one-shot must be non-zero."""
+    client = _make_loop_client()
+
+    with patch("ohme_client.make_client", new=AsyncMock(return_value=client)), \
+         patch("main.handle_plugin_event", new=AsyncMock(return_value=handled)):
+        assert await run_once() == expected_code
+
+    client.close.assert_awaited()
