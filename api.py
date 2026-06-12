@@ -30,6 +30,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
+import bluelink
 import config
 import db
 import main
@@ -107,7 +108,8 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
     return StatusSnapshot(
         vehicle_name=client.current_vehicle,
         # Prefer the real Bluelink SOC captured at plug-in; Ohme's own `battery`
-        # estimate is unreliable. Fall back to it only until the first plug-in.
+        # estimate is unreliable. Fall back to it while no plug-in SOC is held
+        # (before the first plug-in, and after unplug clears it).
         battery_percent=(store.last_soc if store.last_soc is not None else (client.battery or None)),
         charger_status=status_value,
         connected=connected,
@@ -176,6 +178,10 @@ async def poll_loop() -> None:
                 if not now_connected and was_connected:
                     logger.info("Car unplugged (mode=%s)", mode)
                     session_handled = False
+                    # The plug-in SOC is meaningless once the car drives away;
+                    # the snapshot falls back to Ohme's estimate until the next
+                    # plug-in records a fresh Bluelink reading.
+                    store.clear_soc()
                 was_connected = now_connected
 
                 async with store.client_lock:
@@ -340,8 +346,22 @@ async def _reapply_target_if_connected(target: int) -> bool:
     fail the request — the target still takes effect on the next plug-in/poll.
     """
     client = store.client
-    soc = store.last_soc
-    if client is None or not store.status.connected or soc is None or soc >= target:
+    if client is None or not store.status.connected:
+        return False
+    # The SOC recorded at plug-in goes stale as the session charges, and the
+    # top-up sent to Ohme is computed from it — so re-read the real SOC first.
+    # Target changes are rare (someone clicking save), so the extra Bluelink
+    # round-trip is fine; fall back to the plug-in reading if it fails.
+    try:
+        soc = await asyncio.to_thread(bluelink.get_battery_percentage)
+        store.record_soc(soc)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Could not refresh SOC from Bluelink — using the plug-in reading",
+            exc_info=True,
+        )
+        soc = store.last_soc
+    if soc is None or soc >= target:
         return False
     try:
         async with store.client_lock:

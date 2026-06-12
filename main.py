@@ -146,6 +146,8 @@ async def run_loop() -> None:
                 if not now_connected and was_connected:
                     logger.info("Car unplugged (mode=%s). Waiting for next session.", mode)
                     session_handled = False
+                    # The plug-in SOC is meaningless once the car drives away.
+                    store.clear_soc()
 
                 was_connected = now_connected
 

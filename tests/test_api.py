@@ -235,18 +235,50 @@ def test_set_target_rejects_out_of_range(client, bad):
     assert store.charge_target_override is None
 
 
-def test_set_target_reapplies_to_ohme_when_plugged_in(client):
+def test_set_target_reapplies_to_ohme_with_fresh_soc(client):
+    mock_client = MagicMock()
+    store.client = mock_client
+    store.last_soc = 50  # SOC recorded at plug-in — stale, the car has charged since
+    store.status = StatusSnapshot(connected=True)
+    store.ready = True
+
+    with patch("bluelink.get_battery_percentage", return_value=68), \
+         patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
+        body = client.put("/api/settings/target", json={"targetPercent": 90}).json()
+
+    assert body["applied"] is True
+    # The top-up must be computed from the fresh reading, not the plug-in one.
+    mock_set_target.assert_awaited_once_with(mock_client, current_soc=68, target_percent=90)
+    assert store.last_soc == 68  # the dashboard now shows the fresh SOC too
+
+
+def test_set_target_falls_back_to_plugin_soc_when_bluelink_fails(client):
     mock_client = MagicMock()
     store.client = mock_client
     store.last_soc = 50
     store.status = StatusSnapshot(connected=True)
     store.ready = True
 
-    with patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
+    with patch("bluelink.get_battery_percentage", side_effect=RuntimeError("Bluelink down")), \
+         patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
         body = client.put("/api/settings/target", json={"targetPercent": 90}).json()
 
     assert body["applied"] is True
     mock_set_target.assert_awaited_once_with(mock_client, current_soc=50, target_percent=90)
+
+
+def test_set_target_does_not_reapply_when_fresh_soc_at_target(client):
+    store.client = MagicMock()
+    store.last_soc = 50
+    store.status = StatusSnapshot(connected=True)
+    store.ready = True
+
+    with patch("bluelink.get_battery_percentage", return_value=85), \
+         patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
+        body = client.put("/api/settings/target", json={"targetPercent": 85}).json()
+
+    assert body["applied"] is False
+    mock_set_target.assert_not_called()
 
 
 def test_set_target_does_not_reapply_when_disconnected(client):
@@ -254,11 +286,14 @@ def test_set_target_does_not_reapply_when_disconnected(client):
     store.last_soc = 50
     store.status = StatusSnapshot(connected=False)
 
-    with patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
+    with patch("bluelink.get_battery_percentage") as mock_soc, \
+         patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
         body = client.put("/api/settings/target", json={"targetPercent": 90}).json()
 
     assert body["applied"] is False
     mock_set_target.assert_not_called()
+    # No point waking Bluelink when the car isn't even plugged in.
+    mock_soc.assert_not_called()
 
 
 # --- snapshot builder ----------------------------------------------------------
