@@ -23,6 +23,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,6 +31,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
+import bluelink
 import config
 import db
 import main
@@ -83,6 +85,21 @@ DISABLE_POLLING = os.getenv("AUTOCHARGE_DISABLE_POLLING") == "1"
 # Charge summary is cached this many seconds to avoid repeated upstream calls.
 SUMMARY_CACHE_TTL = 300
 
+# Minimum seconds between manual /api/refresh calls. Each one triggers a live
+# Ohme request, and the endpoint is unauthenticated on the LAN, so a stuck
+# client (or an eager finger) must not be able to hammer the upstream API.
+REFRESH_MIN_INTERVAL = 10.0
+_last_refresh_at: Optional[float] = None  # monotonic time of the last attempt
+
+# Backoff schedule for the initial Ohme login. Login happens once per process
+# start; failures there (the home server booting before its network is up, an
+# Ohme outage) must never kill the poll loop permanently.
+LOGIN_RETRY_INITIAL = 5.0
+LOGIN_RETRY_MAX = 300.0
+
+# The running poll task, so /api/health can report whether it is still alive.
+_poll_task: Optional[asyncio.Task] = None
+
 
 def _iso(dt: Optional[datetime.datetime]) -> Optional[str]:
     return dt.isoformat() if dt is not None else None
@@ -107,7 +124,8 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
     return StatusSnapshot(
         vehicle_name=client.current_vehicle,
         # Prefer the real Bluelink SOC captured at plug-in; Ohme's own `battery`
-        # estimate is unreliable. Fall back to it only until the first plug-in.
+        # estimate is unreliable. Fall back to it while no plug-in SOC is held
+        # (before the first plug-in, and after unplug clears it).
         battery_percent=(store.last_soc if store.last_soc is not None else (client.battery or None)),
         charger_status=status_value,
         connected=connected,
@@ -128,6 +146,37 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
     )
 
 
+async def _make_client_with_retry() -> Any:
+    """Create the Ohme client, retrying forever with exponential backoff."""
+    delay = LOGIN_RETRY_INITIAL
+    while True:
+        try:
+            return await ohme_client.make_client()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            store.record_poll_failure("login_failed")
+            logger.exception("Ohme login failed — retrying in %.0fs", delay)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, LOGIN_RETRY_MAX)
+
+
+def _on_poll_task_done(task: asyncio.Task) -> None:
+    """Log loudly if the poll loop ever exits unexpectedly.
+
+    /api/health reports the task as dead (HTTP 503) so the container
+    HEALTHCHECK fails and Docker restarts the service.
+    """
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.critical(
+            "Poll loop crashed — plug-in detection is down until the container restarts",
+            exc_info=exc,
+        )
+
+
 async def poll_loop() -> None:
     """Background task: detect plug-in events and refresh the status snapshot."""
     main.load_persisted_target()
@@ -136,7 +185,7 @@ async def poll_loop() -> None:
         config.POLL_INTERVAL,
         store.charge_target,
     )
-    client = await ohme_client.make_client()
+    client = await _make_client_with_retry()
     store.client = client
 
     # Populate vehicle name / model / serial once up front.
@@ -148,8 +197,8 @@ async def poll_loop() -> None:
     was_connected = False
     session_handled = False
     try:
-        initial_mode = await ohme_client.get_session_mode(client)
-        was_connected = ohme_client.is_connected(initial_mode)
+        initial_status = await ohme_client.get_charger_status(client)
+        was_connected = ohme_client.is_connected(initial_status)
         if was_connected:
             logger.info("Car already connected on startup — will reconfigure on next poll")
     except Exception:
@@ -160,8 +209,8 @@ async def poll_loop() -> None:
         while True:
             try:
                 async with store.client_lock:
-                    mode = await ohme_client.get_session_mode(client)
-                now_connected = ohme_client.is_connected(mode)
+                    status = await ohme_client.get_charger_status(client)
+                now_connected = ohme_client.is_connected(status)
 
                 if now_connected and not was_connected:
                     session_handled = False
@@ -174,8 +223,12 @@ async def poll_loop() -> None:
                     # unlocked, and the loop awaits it before the next snapshot build.
                     session_handled = await main.handle_plugin_event(client)
                 if not now_connected and was_connected:
-                    logger.info("Car unplugged (mode=%s)", mode)
+                    logger.info("Car unplugged (status=%s)", status)
                     session_handled = False
+                    # The plug-in SOC is meaningless once the car drives away;
+                    # the snapshot falls back to Ohme's estimate until the next
+                    # plug-in records a fresh Bluelink reading.
+                    store.clear_soc()
                 was_connected = now_connected
 
                 async with store.client_lock:
@@ -197,8 +250,11 @@ async def poll_loop() -> None:
                         await db.prune_telemetry(config.TELEMETRY_RETENTION_DAYS)
                         last_daily_sync = now_mono
             except Exception:
+                # Keep the last good snapshot: a transient Ohme hiccup shouldn't
+                # blank the dashboard. The failure is surfaced via lastError and
+                # the snapshot's updatedAt simply stops advancing.
                 logger.exception("Error during poll — will retry next interval")
-                store.update(build_snapshot(client, connected=False, error="poll_failed"))
+                store.record_poll_failure("poll_failed")
 
             await asyncio.sleep(config.POLL_INTERVAL)
     finally:
@@ -215,9 +271,12 @@ async def lifespan(app: FastAPI):
 
     await db.init()
 
+    global _poll_task
     task: Optional[asyncio.Task] = None
     if not DISABLE_POLLING:
         task = asyncio.create_task(poll_loop())
+        task.add_done_callback(_on_poll_task_done)
+        _poll_task = task
     try:
         yield
     finally:
@@ -225,8 +284,11 @@ async def lifespan(app: FastAPI):
             task.cancel()
             try:
                 await task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            except asyncio.CancelledError:
                 pass
+            except Exception:  # noqa: BLE001 - already logged by _on_poll_task_done
+                pass
+            _poll_task = None
         await db.close()
 
 
@@ -265,6 +327,15 @@ if CORS_ORIGINS:
 _summary_cache: dict[str, Any] = {"key": None, "value": None, "at": 0.0}
 
 
+# Ohme's per-day stats buckets start at midnight in the account's home timezone.
+# Convert bucket timestamps in that zone — not the host's — so a bucket starting
+# at 23:00 UTC during BST isn't attributed to the previous calendar date.
+try:
+    _STATS_TZ: Optional[ZoneInfo] = ZoneInfo(config.TIMEZONE)
+except Exception:  # noqa: BLE001 - bad TIMEZONE value; fall back to host-local
+    logger.warning("Unknown TIMEZONE %r — using host-local time for daily stats", config.TIMEZONE)
+    _STATS_TZ = None
+
 # Ohme returns Money amounts in the currency's *minor* unit (pence for GBP), so
 # e.g. a 7.284 p/kWh price comes back as amount "7.284" and a £13.97 cost as
 # "1396.663". Divide by 100 to convert to major units (pounds) here, once, so the
@@ -301,7 +372,11 @@ def parse_summary(summary: dict[str, Any], days: int) -> dict[str, Any]:
         start_ms = stat.get("startTime")
         date = None
         if start_ms:
-            date = datetime.datetime.fromtimestamp(start_ms / 1000).date().isoformat()
+            date = (
+                datetime.datetime.fromtimestamp(start_ms / 1000, tz=_STATS_TZ)
+                .date()
+                .isoformat()
+            )
         daily.append(
             {
                 "date": date,
@@ -343,8 +418,22 @@ async def _reapply_target_if_connected(target: int) -> bool:
     fail the request — the target still takes effect on the next plug-in/poll.
     """
     client = store.client
-    soc = store.last_soc
-    if client is None or not store.status.connected or soc is None or soc >= target:
+    if client is None or not store.status.connected:
+        return False
+    # The SOC recorded at plug-in goes stale as the session charges, and the
+    # top-up sent to Ohme is computed from it — so re-read the real SOC first.
+    # Target changes are rare (someone clicking save), so the extra Bluelink
+    # round-trip is fine; fall back to the plug-in reading if it fails.
+    try:
+        soc = await asyncio.to_thread(bluelink.get_battery_percentage)
+        store.record_soc(soc)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Could not refresh SOC from Bluelink — using the plug-in reading",
+            exc_info=True,
+        )
+        soc = store.last_soc
+    if soc is None or soc >= target:
         return False
     try:
         async with store.client_lock:
@@ -356,8 +445,24 @@ async def _reapply_target_if_connected(target: int) -> bool:
 
 
 @app.get("/api/health")
-async def health() -> dict[str, Any]:
-    return {"status": "ok", "ready": store.ready}
+async def health() -> JSONResponse:
+    """Liveness for the container HEALTHCHECK.
+
+    Returns 503 once the poll loop has died, so Docker marks the container
+    unhealthy and restarts it — a dead loop means plug-in detection is down
+    even though the web server itself still responds.
+    """
+    poll_alive = DISABLE_POLLING or (_poll_task is not None and not _poll_task.done())
+    return JSONResponse(
+        {
+            "status": "ok" if poll_alive else "error",
+            "ready": store.ready,
+            "pollAlive": poll_alive,
+            "lastSuccessfulPoll": store.status.updated_at,
+            "lastError": store.last_poll_error,
+        },
+        status_code=200 if poll_alive else 503,
+    )
 
 
 @app.put("/api/settings/target")
@@ -402,6 +507,9 @@ async def get_status() -> JSONResponse:
         },
         "updatedAt": store.status.updated_at,
         "ready": store.ready,
+        # Why the most recent poll failed, or null when it succeeded. The data
+        # above is the last good snapshot, so the UI can flag it as stale.
+        "lastError": store.last_poll_error,
     }
     return JSONResponse(payload)
 
@@ -488,10 +596,21 @@ async def refresh() -> JSONResponse:
     if client is None:
         raise HTTPException(status_code=503, detail="Backend not connected to Ohme yet")
 
+    global _last_refresh_at
+    now = time.monotonic()
+    if _last_refresh_at is not None and now - _last_refresh_at < REFRESH_MIN_INTERVAL:
+        retry_after = int(REFRESH_MIN_INTERVAL - (now - _last_refresh_at)) + 1
+        raise HTTPException(
+            status_code=429,
+            detail="Refreshed too recently — try again shortly",
+            headers={"Retry-After": str(retry_after)},
+        )
+    _last_refresh_at = now
+
     try:
         async with store.client_lock:
-            mode = await ohme_client.get_session_mode(client)
-            connected = ohme_client.is_connected(mode)
+            charger_status = await ohme_client.get_charger_status(client)
+            connected = ohme_client.is_connected(charger_status)
             store.update(build_snapshot(client, connected=connected))
     except Exception as exc:  # noqa: BLE001
         logger.warning("Manual refresh failed", exc_info=True)
