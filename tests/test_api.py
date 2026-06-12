@@ -32,6 +32,7 @@ def reset_state():
     store.charge_target_override = None
     store.last_poll_error = None
     api._summary_cache.update(key=None, value=None, at=0.0)
+    api._last_refresh_at = None
     if os.path.exists(settings.SETTINGS_PATH):
         os.remove(settings.SETTINGS_PATH)
     yield
@@ -281,6 +282,21 @@ def test_refresh_rebuilds_snapshot_and_clears_stats_cache(client):
     assert store.status.charger_status == "charging"
     # Stats cache was dropped.
     assert api._summary_cache["value"] is None
+
+
+def test_refresh_rate_limited_within_min_interval(client):
+    mock_client = _charging_client()
+    mock_client.async_get_charge_session = AsyncMock()
+    mock_client._charge_session = {"mode": "SMART_CHARGE"}
+    store.client = mock_client
+
+    assert client.post("/api/refresh").status_code == 200
+    resp = client.post("/api/refresh")
+
+    assert resp.status_code == 429
+    assert int(resp.headers["Retry-After"]) >= 1
+    # Only the first call reached Ohme.
+    assert mock_client.async_get_charge_session.await_count == 1
 
 
 def test_refresh_502_on_upstream_error(client):

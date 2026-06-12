@@ -85,6 +85,12 @@ DISABLE_POLLING = os.getenv("AUTOCHARGE_DISABLE_POLLING") == "1"
 # Charge summary is cached this many seconds to avoid repeated upstream calls.
 SUMMARY_CACHE_TTL = 300
 
+# Minimum seconds between manual /api/refresh calls. Each one triggers a live
+# Ohme request, and the endpoint is unauthenticated on the LAN, so a stuck
+# client (or an eager finger) must not be able to hammer the upstream API.
+REFRESH_MIN_INTERVAL = 10.0
+_last_refresh_at: Optional[float] = None  # monotonic time of the last attempt
+
 # Backoff schedule for the initial Ohme login. Login happens once per process
 # start; failures there (the home server booting before its network is up, an
 # Ohme outage) must never kill the poll loop permanently.
@@ -586,6 +592,17 @@ async def refresh() -> JSONResponse:
     client = store.client
     if client is None:
         raise HTTPException(status_code=503, detail="Backend not connected to Ohme yet")
+
+    global _last_refresh_at
+    now = time.monotonic()
+    if _last_refresh_at is not None and now - _last_refresh_at < REFRESH_MIN_INTERVAL:
+        retry_after = int(REFRESH_MIN_INTERVAL - (now - _last_refresh_at)) + 1
+        raise HTTPException(
+            status_code=429,
+            detail="Refreshed too recently — try again shortly",
+            headers={"Retry-After": str(retry_after)},
+        )
+    _last_refresh_at = now
 
     try:
         async with store.client_lock:
