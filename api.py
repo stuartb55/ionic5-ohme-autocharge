@@ -148,8 +148,8 @@ async def poll_loop() -> None:
     was_connected = False
     session_handled = False
     try:
-        initial_mode = await ohme_client.get_session_mode(client)
-        was_connected = ohme_client.is_connected(initial_mode)
+        initial_status = await ohme_client.get_charger_status(client)
+        was_connected = ohme_client.is_connected(initial_status)
         if was_connected:
             logger.info("Car already connected on startup — will reconfigure on next poll")
     except Exception:
@@ -160,8 +160,8 @@ async def poll_loop() -> None:
         while True:
             try:
                 async with store.client_lock:
-                    mode = await ohme_client.get_session_mode(client)
-                now_connected = ohme_client.is_connected(mode)
+                    status = await ohme_client.get_charger_status(client)
+                now_connected = ohme_client.is_connected(status)
 
                 if now_connected and not was_connected:
                     session_handled = False
@@ -174,7 +174,7 @@ async def poll_loop() -> None:
                     # unlocked, and the loop awaits it before the next snapshot build.
                     session_handled = await main.handle_plugin_event(client)
                 if not now_connected and was_connected:
-                    logger.info("Car unplugged (mode=%s)", mode)
+                    logger.info("Car unplugged (status=%s)", status)
                     session_handled = False
                 was_connected = now_connected
 
@@ -487,8 +487,8 @@ async def refresh() -> JSONResponse:
 
     try:
         async with store.client_lock:
-            mode = await ohme_client.get_session_mode(client)
-            connected = ohme_client.is_connected(mode)
+            charger_status = await ohme_client.get_charger_status(client)
+            connected = ohme_client.is_connected(charger_status)
             store.update(build_snapshot(client, connected=connected))
     except Exception as exc:  # noqa: BLE001
         logger.warning("Manual refresh failed", exc_info=True)

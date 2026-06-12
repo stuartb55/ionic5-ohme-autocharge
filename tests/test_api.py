@@ -179,7 +179,6 @@ def test_refresh_503_when_no_client(client):
 def test_refresh_rebuilds_snapshot_and_clears_stats_cache(client):
     mock_client = _charging_client()
     mock_client.async_get_charge_session = AsyncMock()
-    mock_client._charge_session = {"mode": "SMART_CHARGE"}
     store.client = mock_client
     # Seed a stale stats cache to prove refresh invalidates it.
     api._summary_cache.update(key="days=7", value={"stale": True}, at=9e9)
@@ -191,7 +190,7 @@ def test_refresh_rebuilds_snapshot_and_clears_stats_cache(client):
     assert body["ok"] is True
     assert body["ready"] is True
     mock_client.async_get_charge_session.assert_awaited()
-    # Snapshot was rebuilt from the live client (connected via SMART_CHARGE mode).
+    # Snapshot was rebuilt from the live client (CHARGING status => connected).
     assert store.status.connected is True
     assert store.status.charger_status == "charging"
     # Stats cache was dropped.

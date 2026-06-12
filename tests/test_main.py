@@ -140,9 +140,10 @@ async def test_reconfigures_on_restart_when_already_connected(monkeypatch):
     monkeypatch.setattr(config, "CHARGE_TARGET", 80)
     client = _make_loop_client()
 
+    from ohme import ChargerStatus
+
     with patch("ohme_client.make_client", new=AsyncMock(return_value=client)), \
-         patch("ohme_client.is_connected", side_effect=lambda m: m != "DISCONNECTED"), \
-         patch("ohme_client.get_session_mode", new=AsyncMock(return_value="SMART_CHARGE")), \
+         patch("ohme_client.get_charger_status", new=AsyncMock(return_value=ChargerStatus.CHARGING)), \
          patch("main.handle_plugin_event", new=AsyncMock(return_value=True)) as mock_handle, \
          patch("asyncio.sleep", side_effect=asyncio.CancelledError()):
         try:
