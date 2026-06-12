@@ -14,8 +14,13 @@ services:
     env_file: .env
     # Persist charging history to the bundled Postgres. Override DATABASE_URL in
     # .env to point elsewhere, or leave it blank there to disable persistence.
+    # The password comes from the same POSTGRES_PASSWORD the postgres service
+    # uses, so setting it in .env can't silently break the backend's connection.
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://autocharge:autocharge@postgres:5432/autocharge}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://autocharge:${POSTGRES_PASSWORD:-autocharge}@postgres:5432/autocharge}
+      # Local time for log timestamps and daily-stats date bucketing (the
+      # container would otherwise run UTC, off by an hour during BST).
+      TZ: ${TZ:-Europe/London}
     depends_on:
       postgres:
         condition: service_healthy
@@ -36,9 +41,10 @@ services:
       POSTGRES_USER: autocharge
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-autocharge}
       POSTGRES_DB: autocharge
-    # Published so the Mac Mini's Grafana can query the history directly.
+    # Published on loopback only: the Mac Mini's Grafana runs on the same host,
+    # and a default-credentialed Postgres must not be reachable from the LAN.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - autocharge-pgdata:/var/lib/postgresql/data
     healthcheck:

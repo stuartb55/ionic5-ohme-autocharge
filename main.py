@@ -9,6 +9,7 @@ Run once (CI/test): python main.py --once
 import argparse
 import asyncio
 import logging
+import sys
 
 import bluelink
 import ohme_client
@@ -129,8 +130,8 @@ async def run_loop() -> None:
     was_connected = False
     session_handled = False
     try:
-        initial_mode = await ohme_client.get_session_mode(client)
-        was_connected = ohme_client.is_connected(initial_mode)
+        initial_status = await ohme_client.get_charger_status(client)
+        was_connected = ohme_client.is_connected(initial_status)
         if was_connected:
             logger.info("Car already connected on startup — will reconfigure Ohme on next poll")
     except Exception:
@@ -141,8 +142,8 @@ async def run_loop() -> None:
     try:
         while True:
             try:
-                mode = await ohme_client.get_session_mode(client)
-                now_connected = ohme_client.is_connected(mode)
+                status = await ohme_client.get_charger_status(client)
+                now_connected = ohme_client.is_connected(status)
 
                 if now_connected and not was_connected:
                     # Transition: disconnected → connected (car just plugged in)
@@ -152,8 +153,10 @@ async def run_loop() -> None:
                     session_handled = await handle_plugin_event(client)
 
                 if not now_connected and was_connected:
-                    logger.info("Car unplugged (mode=%s). Waiting for next session.", mode)
+                    logger.info("Car unplugged (status=%s). Waiting for next session.", status)
                     session_handled = False
+                    # The plug-in SOC is meaningless once the car drives away.
+                    store.clear_soc()
 
                 was_connected = now_connected
 
@@ -166,8 +169,12 @@ async def run_loop() -> None:
         await db.close()
 
 
-async def run_once() -> None:
-    """Single execution: fetch SOC and set Ohme target regardless of plug state."""
+async def run_once() -> int:
+    """Single execution: fetch SOC and set Ohme target regardless of plug state.
+
+    Returns the process exit code — non-zero when the SOC fetch or the Ohme
+    configuration failed, so CI/smoke callers actually see the failure.
+    """
     logger.info("Running in one-shot mode")
     load_persisted_target()
     await db.init()
@@ -177,7 +184,8 @@ async def run_once() -> None:
             await client.async_update_device_info()
         except Exception:
             logger.warning("Could not fetch device info", exc_info=True)
-        await handle_plugin_event(client)
+        ok = await handle_plugin_event(client)
+        return 0 if ok else 1
     finally:
         await client.close()
         await db.close()
@@ -193,6 +201,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.once:
-        asyncio.run(run_once())
+        sys.exit(asyncio.run(run_once()))
     else:
         asyncio.run(run_loop())
