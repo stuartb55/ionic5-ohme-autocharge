@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 # events we actually care about, so we drop those access-log lines. Anything that
 # errors (status >= 400) is still logged.
 _QUIET_ACCESS_PATHS = frozenset(
-    {"/api/health", "/api/status", "/api/schedule", "/api/statistics"}
+    {"/api/health", "/api/status", "/api/schedule", "/api/statistics", "/api/sessions"}
 )
 
 
@@ -569,6 +569,19 @@ async def get_schedule() -> JSONResponse:
             "updatedAt": store.status.updated_at,
         }
     )
+
+
+@app.get("/api/sessions")
+async def get_sessions(limit: int = Query(default=10, ge=1, le=50)) -> JSONResponse:
+    """Recent plug-in sessions from the Postgres history.
+
+    ``enabled`` is false when persistence is off (or unreadable) — the
+    dashboard hides the history card entirely rather than showing an empty one.
+    """
+    sessions = await db.get_recent_sessions(limit)
+    if sessions is None:
+        return JSONResponse({"enabled": False, "sessions": []})
+    return JSONResponse({"enabled": True, "sessions": sessions})
 
 
 async def _persist_daily_stats(client: Any, days: int = 90) -> None:

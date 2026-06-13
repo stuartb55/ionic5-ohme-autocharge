@@ -310,6 +310,30 @@ def test_refresh_502_on_upstream_error(client):
     assert client.post("/api/refresh").status_code == 502
 
 
+# --- session history --------------------------------------------------------------
+
+
+def test_sessions_disabled_when_persistence_off(client):
+    with patch("db.get_recent_sessions", new=AsyncMock(return_value=None)):
+        body = client.get("/api/sessions").json()
+    assert body == {"enabled": False, "sessions": []}
+
+
+def test_sessions_returns_rows_and_passes_limit(client):
+    rows = [{"id": 1, "pluggedInAt": "2026-06-01T21:42:00+00:00", "action": "configured"}]
+    with patch("db.get_recent_sessions", new=AsyncMock(return_value=rows)) as mock_get:
+        body = client.get("/api/sessions?limit=5").json()
+
+    assert body["enabled"] is True
+    assert body["sessions"] == rows
+    mock_get.assert_awaited_once_with(5)
+
+
+def test_sessions_validates_limit(client):
+    assert client.get("/api/sessions?limit=0").status_code == 422
+    assert client.get("/api/sessions?limit=100").status_code == 422
+
+
 # --- notifications ---------------------------------------------------------------
 
 
