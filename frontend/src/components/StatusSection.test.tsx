@@ -10,7 +10,11 @@ function withCharger(overrides: Partial<StatusResponse['charger']>): StatusRespo
 
 describe('StatusSection projected finish', () => {
   beforeEach(() => {
-    // The fixture's projectedFinish is 05:00 on 2026-06-02; pin "now" before it.
+    // The fixture's projectedFinish is 2026-06-02T05:00+01:00; pin "now" before
+    // it. Both are absolute instants, so the show/hide logic is timezone-
+    // independent — but the rendered clock string is not, so assertions below
+    // match a time pattern rather than a fixed value (exact formatting is
+    // covered by format.test.ts).
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date('2026-06-02T00:08:00+01:00'));
   });
@@ -21,7 +25,9 @@ describe('StatusSection projected finish', () => {
 
   it('shows when the charge is projected to finish', () => {
     render(<StatusSection status={statusFixture} />);
-    expect(screen.getByText(/ready by ~/i)).toHaveTextContent('05:00');
+    // A time is rendered after "Ready by ~"; the exact value depends on the
+    // viewer's timezone, so don't pin it.
+    expect(screen.getByText(/ready by ~/i)).toHaveTextContent(/\d{1,2}:\d{2}/);
   });
 
   it('hides the projection once the finish time has passed', () => {
