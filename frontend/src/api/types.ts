@@ -28,6 +28,8 @@ export interface StatusResponse {
     };
     targetPercent: number | null;
     sessionEnergyKwh: number;
+    /** ISO time the charge is projected to finish (end of the last slot), or null. */
+    projectedFinish: string | null;
   };
   config: {
     chargeTarget: number;

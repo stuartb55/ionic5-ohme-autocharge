@@ -60,6 +60,7 @@ def _populate_snapshot():
             ],
             next_slot_start="2026-06-02T01:00:00+01:00",
             next_slot_end="2026-06-02T03:30:00+01:00",
+            projected_finish="2026-06-02T03:30:00+01:00",
             updated_at="2026-06-02T00:00:00+01:00",
         )
     )
@@ -110,6 +111,7 @@ def test_status_reflects_snapshot(client):
     assert body["charger"]["power"]["watts"] == 7400.0
     assert body["charger"]["targetPercent"] == 80
     assert body["charger"]["sessionEnergyKwh"] == 4.5  # 4500 Wh -> kWh
+    assert body["charger"]["projectedFinish"] == "2026-06-02T03:30:00+01:00"
     assert body["config"]["chargeTarget"] == 80
     assert body["ready"] is True
 
@@ -554,6 +556,32 @@ def test_build_snapshot_falls_back_to_client_battery_before_first_plugin():
     store.last_soc = None
     snap = api.build_snapshot(_charging_client(), connected=True)
     assert snap.battery_percent == 33
+
+
+def test_build_snapshot_projects_finish_from_last_slot_end():
+    import datetime as dt
+
+    client = _charging_client()
+    early, late = MagicMock(), MagicMock()
+    early.end = dt.datetime(2026, 6, 13, 4, 30, tzinfo=dt.timezone.utc)
+    late.end = dt.datetime(2026, 6, 13, 6, 30, tzinfo=dt.timezone.utc)
+    early.to_dict.return_value = {}
+    late.to_dict.return_value = {}
+    # Deliberately out of order: the finish is the latest end, not the last entry.
+    client.slots = [late, early]
+
+    snap = api.build_snapshot(client, connected=True)
+
+    assert snap.projected_finish == "2026-06-13T06:30:00+00:00"
+
+
+def test_build_snapshot_no_projected_finish_without_slots_or_when_disconnected():
+    assert api.build_snapshot(_charging_client(), connected=True).projected_finish is None
+    client = _charging_client()
+    slot = MagicMock()
+    slot.to_dict.return_value = {}
+    client.slots = [slot]
+    assert api.build_snapshot(client, connected=False).projected_finish is None
 
 
 def test_build_snapshot_with_error():

@@ -1,5 +1,29 @@
 import { describe, expect, it } from 'vitest';
-import { formatKwh, formatMoney, formatPower, formatPricePerKwh, relativeTime, statusLabel } from './format';
+import {
+  formatFinishTime,
+  formatKwh,
+  formatMoney,
+  formatPower,
+  formatPricePerKwh,
+  relativeTime,
+  statusLabel,
+} from './format';
+
+describe('formatFinishTime', () => {
+  // Exact output is locale-dependent (12h vs 24h clock), so match loosely.
+  it('shows just the time when the finish is today', () => {
+    const now = new Date('2026-06-02T00:08:00');
+    const out = formatFinishTime('2026-06-02T05:00:00', now);
+    expect(out).toContain('05:00');
+    expect(out).not.toMatch(/^Tue/);
+  });
+
+  it('prefixes the weekday when the finish is another day', () => {
+    const now = new Date('2026-06-02T23:30:00');
+    // 2026-06-03 is a Wednesday.
+    expect(formatFinishTime('2026-06-03T06:30:00', now)).toMatch(/^Wed.*06:30/);
+  });
+});
 
 describe('formatPower', () => {
   it('converts watts to kW', () => {

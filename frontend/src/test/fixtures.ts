@@ -11,6 +11,7 @@ export const statusFixture: StatusResponse = {
     power: { watts: 7400, amps: 32, volts: 230 },
     targetPercent: 80,
     sessionEnergyKwh: 4.5,
+    projectedFinish: '2026-06-02T05:00:00+01:00',
   },
   config: { chargeTarget: 80, pollIntervalSeconds: 180 },
   updatedAt: '2026-06-02T00:05:00+01:00',
