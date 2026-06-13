@@ -44,6 +44,10 @@ async def handle_plugin_event(client) -> bool:
         soc = await asyncio.to_thread(bluelink.get_battery_percentage)
     except Exception:
         logger.exception("Failed to fetch SOC from Hyundai Bluelink — will retry next poll")
+        await _notify_plugin_failure(
+            "Couldn't read the battery SOC from Bluelink — this charge may not be "
+            "configured yet. Retrying automatically."
+        )
         return False
 
     # Remember the real SOC so the dashboard shows it instead of Ohme's
@@ -66,6 +70,7 @@ async def handle_plugin_event(client) -> bool:
                 topup_percent=0,
                 action="skipped_at_target",
             )
+        store.plugin_failure_notified = False
         return True
 
     logger.info(
@@ -95,10 +100,27 @@ async def handle_plugin_event(client) -> bool:
                 next_slot_start=client.next_slot_start,
                 next_slot_end=client.next_slot_end,
             )
+        store.plugin_failure_notified = False
         return True
     except Exception:
         logger.exception("Failed to set Ohme charge target — will retry next poll")
+        await _notify_plugin_failure(
+            "Couldn't set the Ohme charge target — this charge may not be "
+            "configured yet. Retrying automatically."
+        )
         return False
+
+
+async def _notify_plugin_failure(message: str) -> None:
+    """Alert once per plug-in session that handling it is failing.
+
+    The poll loop retries every interval, so without the once-per-session
+    guard a persistent failure would notify every few minutes.
+    """
+    if store.plugin_failure_notified:
+        return
+    store.plugin_failure_notified = True
+    await ntfy.send(message, title="Autocharge problem", priority="high")
 
 
 async def run_loop() -> None:

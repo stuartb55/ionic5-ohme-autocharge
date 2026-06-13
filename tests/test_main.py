@@ -12,6 +12,16 @@ def _mock_ohme_client(slots=None):
     return client
 
 
+@pytest.fixture(autouse=True)
+def _reset_session_state():
+    """Plug-in handling mutates the shared store; keep tests independent."""
+    store.last_soc = None
+    store.plugin_failure_notified = False
+    yield
+    store.last_soc = None
+    store.plugin_failure_notified = False
+
+
 async def test_returns_false_when_bluelink_fails():
     with patch("bluelink.get_battery_percentage", side_effect=RuntimeError("No vehicles found")):
         result = await handle_plugin_event(_mock_ohme_client())
@@ -105,7 +115,7 @@ async def test_records_skipped_session_when_already_at_target(monkeypatch):
     )
 
 
-async def test_returns_false_when_ohme_fails_and_does_not_notify(monkeypatch):
+async def test_returns_false_when_ohme_fails_and_sends_only_failure_alert(monkeypatch):
     monkeypatch.setattr(config, "CHARGE_TARGET", 80)
 
     with patch("bluelink.get_battery_percentage", return_value=62), \
@@ -114,7 +124,11 @@ async def test_returns_false_when_ohme_fails_and_does_not_notify(monkeypatch):
         result = await handle_plugin_event(_mock_ohme_client())
 
     assert result is False
-    mock_notify.assert_not_called()
+    # The "plugged in → target set" success message must NOT be sent; the only
+    # notification is the high-priority failure alert.
+    mock_notify.assert_awaited_once()
+    assert "plugged in" not in mock_notify.call_args[0][0]
+    assert mock_notify.call_args.kwargs["priority"] == "high"
 
 
 async def test_no_ohme_call_when_soc_at_or_above_target(monkeypatch):
@@ -125,6 +139,44 @@ async def test_no_ohme_call_when_soc_at_or_above_target(monkeypatch):
         await handle_plugin_event(_mock_ohme_client())
 
     mock_set_target.assert_not_called()
+
+
+# --- plug-in failure notifications ---
+
+
+async def test_bluelink_failure_notifies_once_per_session():
+    with patch("bluelink.get_battery_percentage", side_effect=RuntimeError("down")), \
+         patch("ntfy.send", new=AsyncMock()) as mock_notify:
+        # The poll loop retries every interval; only the first failure alerts.
+        await handle_plugin_event(_mock_ohme_client())
+        await handle_plugin_event(_mock_ohme_client())
+
+    mock_notify.assert_awaited_once()
+    assert mock_notify.call_args.kwargs["priority"] == "high"
+
+
+async def test_ohme_failure_notifies_once_per_session(monkeypatch):
+    monkeypatch.setattr(config, "CHARGE_TARGET", 80)
+    with patch("bluelink.get_battery_percentage", return_value=62), \
+         patch("ohme_client.set_target", new=AsyncMock(side_effect=Exception("boom"))), \
+         patch("ntfy.send", new=AsyncMock()) as mock_notify:
+        await handle_plugin_event(_mock_ohme_client())
+        await handle_plugin_event(_mock_ohme_client())
+
+    mock_notify.assert_awaited_once()
+
+
+async def test_successful_handling_resets_failure_notice(monkeypatch):
+    monkeypatch.setattr(config, "CHARGE_TARGET", 80)
+    store.plugin_failure_notified = True  # a previous attempt alerted
+
+    with patch("bluelink.get_battery_percentage", return_value=62), \
+         patch("ohme_client.set_target", new=AsyncMock()), \
+         patch("ntfy.send", new=AsyncMock()):
+        result = await handle_plugin_event(_mock_ohme_client())
+
+    assert result is True
+    assert store.plugin_failure_notified is False
 
 
 # --- run_loop startup behaviour ---
