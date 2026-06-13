@@ -55,6 +55,8 @@ Copy `.env.example` to `.env`. Required vars: `HYUNDAI_USERNAME`, `HYUNDAI_PASSW
 
 Tests live in `tests/`. `conftest.py` sets stub env vars before `config.py` is imported — any new required env var must be added there too. All tests mock at the module boundary (patch `bluelink._get_manager`, mock `OhmeApiClient`, etc.) rather than hitting real APIs. `pytest.ini` sets `asyncio_mode = auto` so async tests work without decorators.
 
+**Timezone in tests:** CI and the containers run in **UTC**, but local dev machines are often on UK time (BST/GMT). Never assert on a rendered/formatted date or time with a hard-coded clock string (e.g. expecting `"05:00"`) — it will pass locally and fail in CI when the value renders in a different zone (and may even roll to a different calendar day, adding/removing a weekday prefix). Instead match a pattern (`/\d{1,2}:\d{2}/`), compute the expected value through the same formatter, or use offset-free timestamps. The day-bucketing logic itself has the matching production concern — see `config.TIMEZONE` and `api._STATS_TZ`.
+
 ## Single-worker constraint
 
 The backend must run as exactly **one uvicorn worker** (the Dockerfile CMD does this). All state is in-process: the `state.store` singleton, the background poll loop, the single authenticated Ohme client and the statistics cache. Running multiple workers would start one poll loop per worker (duplicate Ohme logins, duplicate DB writes) and serve inconsistent snapshots. Never add `--workers` or front it with a multi-worker process manager.
