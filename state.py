@@ -40,6 +40,9 @@ class StatusSnapshot:
     slots: list[dict[str, Any]] = field(default_factory=list)
     next_slot_start: Optional[str] = None
     next_slot_end: Optional[str] = None
+    # End of the last scheduled slot — when the charge is projected to finish.
+    # None when disconnected or no schedule is allocated yet.
+    projected_finish: Optional[str] = None
 
     # Meta
     updated_at: Optional[str] = None

@@ -56,6 +56,17 @@ export function formatTime(iso: string): string {
   return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 }
 
+/**
+ * Projected charge finish: "06:30" when it's today, otherwise "Sat 06:30" —
+ * overnight charges routinely finish on the next calendar day.
+ */
+export function formatFinishTime(iso: string, now: Date = new Date()): string {
+  const d = new Date(iso);
+  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  if (d.toDateString() === now.toDateString()) return time;
+  return `${d.toLocaleDateString(undefined, { weekday: 'short' })} ${time}`;
+}
+
 export function formatDateShort(iso: string | null): string {
   if (!iso) return '';
   return new Date(iso).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });

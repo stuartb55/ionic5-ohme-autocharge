@@ -150,6 +150,11 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
         slots=[s.to_dict() for s in client.slots],
         next_slot_start=_iso(client.next_slot_start),
         next_slot_end=_iso(client.next_slot_end),
+        # The charge is done when the last allocated slot ends. Slots may be
+        # out of order, so take the max rather than the final list entry.
+        projected_finish=(
+            _iso(max((s.end for s in client.slots), default=None)) if connected else None
+        ),
         updated_at=now,
     )
 
@@ -537,6 +542,8 @@ async def get_status() -> JSONResponse:
             },
             "targetPercent": store.status.target_percent,
             "sessionEnergyKwh": round(store.status.session_energy_wh / 1000, 2),
+            # When the charge is projected to finish (end of the last slot).
+            "projectedFinish": store.status.projected_finish,
         },
         "config": {
             "chargeTarget": store.charge_target,

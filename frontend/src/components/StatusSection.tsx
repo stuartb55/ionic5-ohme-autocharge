@@ -1,5 +1,5 @@
 import type { StatusResponse } from '../api/types';
-import { formatKwh, formatPower } from '../utils/format';
+import { formatFinishTime, formatKwh, formatPower } from '../utils/format';
 import { BatteryRing } from './BatteryRing';
 import { ChargeControls } from './ChargeControls';
 import { ConnectionBadge } from './ConnectionBadge';
@@ -29,6 +29,13 @@ export function StatusSection({
 }) {
   const { vehicle, charger } = status;
   const target = charger.targetPercent ?? status.config.chargeTarget;
+  // Show the projected finish only while it's still ahead of us and the
+  // session hasn't already completed.
+  const showFinish =
+    charger.connected &&
+    charger.status !== 'finished' &&
+    charger.projectedFinish != null &&
+    new Date(charger.projectedFinish).getTime() > Date.now();
 
   return (
     <section className="card" aria-labelledby="status-heading">
@@ -45,6 +52,11 @@ export function StatusSection({
           <BatteryRing percent={vehicle.batteryPercent} target={target} />
           <div className="battery-caption">
             <div className="vehicle">{vehicle.name ?? 'Vehicle'}</div>
+            {showFinish && (
+              <div className="finish-eta">
+                Ready by ~{formatFinishTime(charger.projectedFinish as string)}
+              </div>
+            )}
             {onSetTarget ? (
               <TargetEditor value={target} onSave={onSetTarget} />
             ) : (
