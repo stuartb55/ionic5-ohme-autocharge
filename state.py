@@ -68,6 +68,13 @@ class AppState:
         # None when it succeeded. Failures keep the previous snapshot so the
         # dashboard shows last-known-good data rather than going blank.
         self.last_poll_error: Optional[str] = None
+        # How many polls in a row have failed. Drives the "can't reach Ohme"
+        # alert (sent once when a threshold is crossed) and its recovery notice.
+        self.consecutive_poll_failures: int = 0
+        # True once the user has been alerted that handling the current plug-in
+        # is failing, so the per-poll retries don't re-notify. Cleared when a
+        # plug-in is handled successfully and when the car unplugs.
+        self.plugin_failure_notified: bool = False
 
     @property
     def charge_target(self) -> int:
@@ -83,10 +90,12 @@ class AppState:
         if snapshot.error is None:
             self.ready = True
             self.last_poll_error = None
+            self.consecutive_poll_failures = 0
 
     def record_poll_failure(self, reason: str) -> None:
         """Note a failed poll without discarding the last good snapshot."""
         self.last_poll_error = reason
+        self.consecutive_poll_failures += 1
 
     def record_soc(self, soc: int) -> None:
         """Remember the real vehicle SOC fetched from Bluelink at plug-in."""
@@ -95,6 +104,8 @@ class AppState:
     def clear_soc(self) -> None:
         """Forget the plug-in SOC — it is stale the moment the car unplugs."""
         self.last_soc = None
+        # New session, clean slate for the plug-in failure alert.
+        self.plugin_failure_notified = False
 
 
 # Module-level singleton imported by api.py and tests.

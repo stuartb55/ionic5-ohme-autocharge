@@ -35,6 +35,7 @@ import bluelink
 import config
 import db
 import main
+import ntfy
 import ohme_client
 import settings
 from state import StatusSnapshot, store
@@ -96,6 +97,12 @@ _last_refresh_at: Optional[float] = None  # monotonic time of the last attempt
 # Ohme outage) must never kill the poll loop permanently.
 LOGIN_RETRY_INITIAL = 5.0
 LOGIN_RETRY_MAX = 300.0
+
+# Alert via ntfy once this many polls in a row have failed (~15 minutes at the
+# default POLL_INTERVAL) — long enough to skip transient blips, short enough to
+# hear about a real outage while it still matters. A recovery notice follows
+# when polling succeeds again.
+POLL_FAILURE_ALERT_AFTER = 5
 
 # The running poll task, so /api/health can report whether it is still alive.
 _poll_task: Optional[asyncio.Task] = None
@@ -160,6 +167,19 @@ async def _make_client_with_retry() -> Any:
             logger.exception("Ohme login failed — retrying in %.0fs", delay)
             await asyncio.sleep(delay)
             delay = min(delay * 2, LOGIN_RETRY_MAX)
+
+
+async def _maybe_notify_finished(prev_status: str, snap: StatusSnapshot) -> None:
+    """Send a session summary when an active charge transitions to finished.
+
+    Triggered only on a charging→finished transition, so a restart while the
+    car sits finished overnight (unknown→finished) doesn't re-notify.
+    """
+    if prev_status != "charging" or snap.charger_status != "finished":
+        return
+    name = snap.vehicle_name or "EV"
+    kwh = snap.session_energy_wh / 1000
+    await ntfy.send(f"{name} charging finished — {kwh:.1f} kWh added this session")
 
 
 def _on_poll_task_done(task: asyncio.Task) -> None:
@@ -232,8 +252,13 @@ async def poll_loop() -> None:
                     store.clear_soc()
                 was_connected = now_connected
 
+                prev_status = store.status.charger_status
+                recovered = store.consecutive_poll_failures >= POLL_FAILURE_ALERT_AFTER
                 async with store.client_lock:
                     store.update(build_snapshot(client, connected=now_connected))
+                if recovered:
+                    await ntfy.send("Autocharge reconnected to Ohme — live data restored")
+                await _maybe_notify_finished(prev_status, store.status)
 
                 # Append a telemetry point for Grafana (best-effort, no-op when
                 # persistence is disabled). Outside the lock: it doesn't touch the
@@ -256,6 +281,16 @@ async def poll_loop() -> None:
                 # the snapshot's updatedAt simply stops advancing.
                 logger.exception("Error during poll — will retry next interval")
                 store.record_poll_failure("poll_failed")
+                # Alert exactly once when the failure streak crosses the
+                # threshold; ntfy.send swallows its own errors, so this can
+                # never make the poll failure worse.
+                if store.consecutive_poll_failures == POLL_FAILURE_ALERT_AFTER:
+                    await ntfy.send(
+                        f"Autocharge can't reach Ohme — {POLL_FAILURE_ALERT_AFTER} polls "
+                        "have failed; plug-in detection and dashboard data are stale.",
+                        title="Autocharge problem",
+                        priority="high",
+                    )
 
             await asyncio.sleep(config.POLL_INTERVAL)
     finally:

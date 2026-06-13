@@ -65,6 +65,33 @@ async def test_no_auth_header_when_token_not_set(monkeypatch):
     assert "Authorization" not in headers
 
 
+async def test_title_and_priority_sent_as_headers(monkeypatch):
+    monkeypatch.setattr(config, "NTFY_TOPIC", "my-topic")
+    monkeypatch.setattr(config, "NTFY_URL", "https://ntfy.example.com")
+    monkeypatch.setattr(config, "NTFY_TOKEN", "")
+
+    session = _make_mock_session()
+    with patch("aiohttp.ClientSession", return_value=session):
+        await ntfy.send("alert", title="Autocharge problem", priority="high")
+
+    headers = session.post.call_args[1]["headers"]
+    assert headers["X-Title"] == "Autocharge problem"
+    assert headers["X-Priority"] == "high"
+
+
+async def test_no_extra_headers_by_default(monkeypatch):
+    monkeypatch.setattr(config, "NTFY_TOPIC", "my-topic")
+    monkeypatch.setattr(config, "NTFY_TOKEN", "")
+
+    session = _make_mock_session()
+    with patch("aiohttp.ClientSession", return_value=session):
+        await ntfy.send("plain")
+
+    headers = session.post.call_args[1]["headers"]
+    assert "X-Title" not in headers
+    assert "X-Priority" not in headers
+
+
 async def test_logs_warning_on_non_200_but_does_not_raise(monkeypatch):
     monkeypatch.setattr(config, "NTFY_TOPIC", "my-topic")
     monkeypatch.setattr(config, "NTFY_URL", "https://ntfy.example.com")

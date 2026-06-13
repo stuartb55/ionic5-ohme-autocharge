@@ -31,6 +31,8 @@ def reset_state():
     store.last_soc = None
     store.charge_target_override = None
     store.last_poll_error = None
+    store.consecutive_poll_failures = 0
+    store.plugin_failure_notified = False
     api._summary_cache.update(key=None, value=None, at=0.0)
     api._last_refresh_at = None
     if os.path.exists(settings.SETTINGS_PATH):
@@ -304,6 +306,47 @@ def test_refresh_502_on_upstream_error(client):
     mock_client.async_get_charge_session = AsyncMock(side_effect=RuntimeError("boom"))
     store.client = mock_client
     assert client.post("/api/refresh").status_code == 502
+
+
+# --- notifications ---------------------------------------------------------------
+
+
+async def test_notifies_when_charging_finishes():
+    snap = StatusSnapshot(
+        vehicle_name="IONIQ 5", charger_status="finished", connected=True,
+        session_energy_wh=18500.0,
+    )
+    with patch("ntfy.send", new=AsyncMock()) as mock_notify:
+        await api._maybe_notify_finished("charging", snap)
+
+    mock_notify.assert_awaited_once()
+    msg = mock_notify.call_args[0][0]
+    assert "IONIQ 5" in msg
+    assert "18.5 kWh" in msg
+
+
+@pytest.mark.parametrize(
+    "prev,new",
+    [
+        ("finished", "finished"),  # no transition
+        ("unknown", "finished"),   # restart while already finished
+        ("charging", "charging"),  # still charging
+        ("plugged_in", "finished"),  # never actually charged
+    ],
+)
+async def test_no_finish_notification_without_charging_transition(prev, new):
+    snap = StatusSnapshot(charger_status=new, connected=True)
+    with patch("ntfy.send", new=AsyncMock()) as mock_notify:
+        await api._maybe_notify_finished(prev, snap)
+    mock_notify.assert_not_called()
+
+
+def test_consecutive_failures_count_and_reset():
+    store.record_poll_failure("poll_failed")
+    store.record_poll_failure("poll_failed")
+    assert store.consecutive_poll_failures == 2
+    _populate_snapshot()  # a successful poll
+    assert store.consecutive_poll_failures == 0
 
 
 # --- charge controls -------------------------------------------------------------
