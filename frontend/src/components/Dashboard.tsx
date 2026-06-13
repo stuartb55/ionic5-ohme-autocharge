@@ -4,6 +4,7 @@ import { usePolling } from '../api/usePolling';
 import { relativeTime } from '../utils/format';
 import { Banner } from './Banner';
 import { ScheduleSection } from './ScheduleSection';
+import { SessionsSection } from './SessionsSection';
 import { StatisticsSection } from './StatisticsSection';
 import { StatusSection } from './StatusSection';
 import { ThemeToggle } from './ThemeToggle';
@@ -11,6 +12,8 @@ import { ThemeToggle } from './ThemeToggle';
 const STATUS_INTERVAL = 15_000;
 const SCHEDULE_INTERVAL = 30_000;
 const STATS_INTERVAL = 300_000;
+// Sessions only change on plug-in events, so a slow poll is plenty.
+const SESSIONS_INTERVAL = 300_000;
 
 function SectionSkeleton({ height }: { height: number }) {
   return <div className="card"><div className="skeleton" style={{ height }} /></div>;
@@ -24,11 +27,14 @@ export function Dashboard() {
   const schedule = usePolling(api.getSchedule, SCHEDULE_INTERVAL);
   const statsFetcher = useCallback((signal: AbortSignal) => api.getStatistics(days, signal), [days]);
   const stats = usePolling(statsFetcher, STATS_INTERVAL, [days]);
+  const sessionsFetcher = useCallback((signal: AbortSignal) => api.getSessions(8, signal), []);
+  const sessions = usePolling(sessionsFetcher, SESSIONS_INTERVAL);
 
   // refetch() from usePolling is stable, so these are safe to capture.
   const { refetch: refetchStatus } = status;
   const { refetch: refetchSchedule } = schedule;
   const { refetch: refetchStats } = stats;
+  const { refetch: refetchSessions } = sessions;
 
   // Persist a new charge target, then refetch status so the UI reflects it.
   const handleSetTarget = useCallback(
@@ -54,9 +60,10 @@ export function Dashboard() {
         refetchStatus();
         refetchSchedule();
         refetchStats();
+        refetchSessions();
       });
     window.setTimeout(() => setRefreshing(false), 5_000);
-  }, [refetchStatus, refetchSchedule, refetchStats]);
+  }, [refetchStatus, refetchSchedule, refetchStats, refetchSessions]);
 
   const lastFetchedMs = status.lastUpdated?.getTime();
   useEffect(() => {
@@ -131,6 +138,8 @@ export function Dashboard() {
         ) : (
           <SectionSkeleton height={320} />
         )}
+        {/* No skeleton: the card may legitimately never appear (history disabled). */}
+        {sessions.data && <SessionsSection data={sessions.data} />}
       </div>
 
       <footer className="app-footer">

@@ -76,6 +76,23 @@ export interface ScheduleResponse {
   updatedAt: string | null;
 }
 
+export interface ChargeSessionEntry {
+  id: number;
+  pluggedInAt: string | null;
+  vehicleName: string | null;
+  socPercent: number | null;
+  targetPercent: number | null;
+  topupPercent: number | null;
+  /** "configured" or "skipped_at_target". */
+  action: string | null;
+}
+
+export interface SessionsResponse {
+  /** False when Postgres history persistence is disabled — hide the card. */
+  enabled: boolean;
+  sessions: ChargeSessionEntry[];
+}
+
 export interface DailyStat {
   date: string | null;
   energyKwh: number;

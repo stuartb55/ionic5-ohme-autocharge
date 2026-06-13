@@ -1,6 +1,7 @@
 import type {
   ChargeActionResponse,
   ScheduleResponse,
+  SessionsResponse,
   StatisticsResponse,
   StatusResponse,
   TargetUpdateResponse,
@@ -66,6 +67,8 @@ export const api = {
   getSchedule: (signal?: AbortSignal) => getJson<ScheduleResponse>('/api/schedule', signal),
   getStatistics: (days = 7, signal?: AbortSignal) =>
     getJson<StatisticsResponse>(`/api/statistics?days=${days}`, signal),
+  getSessions: (limit = 8, signal?: AbortSignal) =>
+    getJson<SessionsResponse>(`/api/sessions?limit=${limit}`, signal),
   setTarget: (targetPercent: number, signal?: AbortSignal) =>
     putJson<TargetUpdateResponse>('/api/settings/target', { targetPercent }, signal),
   // Ask the backend to pull a fresh live reading from Ohme, then the caller

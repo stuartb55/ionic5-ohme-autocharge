@@ -1,4 +1,9 @@
-import type { ScheduleResponse, StatisticsResponse, StatusResponse } from '../api/types';
+import type {
+  ScheduleResponse,
+  SessionsResponse,
+  StatisticsResponse,
+  StatusResponse,
+} from '../api/types';
 
 export const statusFixture: StatusResponse = {
   vehicle: { name: 'Hyundai IONIQ 5', batteryPercent: 62 },
@@ -28,6 +33,30 @@ export const scheduleFixture: ScheduleResponse = {
   nextSlotEnd: '2026-06-02T03:30:00+01:00',
   connected: true,
   updatedAt: '2026-06-02T00:05:00+01:00',
+};
+
+export const sessionsFixture: SessionsResponse = {
+  enabled: true,
+  sessions: [
+    {
+      id: 3,
+      pluggedInAt: '2026-06-01T21:42:00+01:00',
+      vehicleName: 'Hyundai IONIQ 5',
+      socPercent: 54,
+      targetPercent: 80,
+      topupPercent: 26,
+      action: 'configured',
+    },
+    {
+      id: 2,
+      pluggedInAt: '2026-05-31T19:05:00+01:00',
+      vehicleName: 'Hyundai IONIQ 5',
+      socPercent: 85,
+      targetPercent: 80,
+      topupPercent: 0,
+      action: 'skipped_at_target',
+    },
+  ],
 };
 
 export const statisticsFixture: StatisticsResponse = {

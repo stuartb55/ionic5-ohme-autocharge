@@ -150,6 +150,11 @@ npm run build    # type-check + production build to dist/
 | `GET /api/status` | Vehicle SOC, connection state, charge rate, target, session energy |
 | `GET /api/schedule` | Allocated charge slots + next slot times |
 | `GET /api/statistics?days=N` | Energy, savings, cost, CO₂ and a daily series (N = 1–90) |
+| `GET /api/sessions?limit=N` | Recent plug-in sessions from Postgres history (N = 1–50; `enabled: false` when persistence is off) |
+| `POST /api/refresh` | Force a live re-read from Ohme (rate-limited) |
+| `POST /api/charge/pause` / `POST /api/charge/resume` | Pause / resume the active charge session |
+| `PUT /api/charge/max-charge` | Toggle max-charge ("boost") mode — `{"enabled": true|false}` |
+| `PUT /api/settings/target` | Set the charge target — `{"targetPercent": N}` |
 
 ## Ntfy notifications
 

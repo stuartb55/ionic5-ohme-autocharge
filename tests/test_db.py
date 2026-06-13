@@ -12,8 +12,9 @@ from state import StatusSnapshot
 
 
 class _FakeCursor:
-    def __init__(self, row=None):
+    def __init__(self, row=None, rows=None):
         self._row = row
+        self.rows = rows or []
         self.executed: list[tuple] = []
 
     async def execute(self, sql, params=None):
@@ -22,6 +23,9 @@ class _FakeCursor:
 
     async def fetchone(self):
         return self._row
+
+    async def fetchall(self):
+        return self.rows
 
     async def __aenter__(self):
         return self
@@ -115,6 +119,58 @@ async def test_record_session_swallows_errors():
     finally:
         db._pool = None
     assert result is None  # error swallowed, no exception
+
+
+# --- session history -------------------------------------------------------------
+
+
+async def test_get_recent_sessions_maps_rows(fake_pool):
+    import datetime as dt
+
+    conn, cursor = fake_pool
+    cursor.rows = [
+        (3, dt.datetime(2026, 6, 1, 21, 42, tzinfo=dt.timezone.utc), "IONIQ 5", 54, 80, 26, "configured"),
+        (2, None, "IONIQ 5", 85, 80, 0, "skipped_at_target"),
+    ]
+
+    sessions = await db.get_recent_sessions(10)
+
+    sql, params = conn.executed[0]
+    assert "ORDER BY plugged_in_at DESC" in sql
+    assert params == (10,)
+    assert sessions == [
+        {
+            "id": 3,
+            "pluggedInAt": "2026-06-01T21:42:00+00:00",
+            "vehicleName": "IONIQ 5",
+            "socPercent": 54,
+            "targetPercent": 80,
+            "topupPercent": 26,
+            "action": "configured",
+        },
+        {
+            "id": 2,
+            "pluggedInAt": None,
+            "vehicleName": "IONIQ 5",
+            "socPercent": 85,
+            "targetPercent": 80,
+            "topupPercent": 0,
+            "action": "skipped_at_target",
+        },
+    ]
+
+
+async def test_get_recent_sessions_none_when_disabled():
+    db._pool = None
+    assert await db.get_recent_sessions(10) is None
+
+
+async def test_get_recent_sessions_none_on_error():
+    db._pool = _BoomPool()
+    try:
+        assert await db.get_recent_sessions(10) is None
+    finally:
+        db._pool = None
 
 
 # --- schedule ------------------------------------------------------------------
