@@ -32,7 +32,27 @@ In Grafana add a **PostgreSQL** datasource:
 | `schedule_snapshots` | when a session is configured              | the Ohme charge schedule for a session |
 | `daily_stats`        | every `DAILY_STATS_INTERVAL` + on dashboard views | per-day energy / cost / savings |
 
+## Ready-made dashboard
+
+A complete dashboard is checked in at [`grafana-dashboard.json`](grafana-dashboard.json).
+Import it via **Dashboards → New → Import → Upload JSON file**, then pick the
+PostgreSQL datasource above when prompted. It surfaces, at a glance:
+
+- **Live status** — battery SOC gauge, charging power, plug state, current
+  session energy, amps/volts and the active charge target.
+- **Charging trends** — power over time and battery SOC vs target.
+- **Daily energy, cost & savings** — totals and blended £/kWh for the range,
+  per-day bars and a cumulative-savings line.
+- **Sessions & schedule** — plug-in counts, configured-vs-skipped outcomes, a
+  recent-sessions table and the captured Ohme charge schedules.
+
+The time range drives every panel (and the "Plug-in events" annotations on the
+time-series), so use the picker to zoom from the last 24h to the last year.
+
 ## Example panels
+
+The dashboard above is built from queries like these — handy if you want to add
+your own panels.
 
 Charging power over time (time-series):
 
