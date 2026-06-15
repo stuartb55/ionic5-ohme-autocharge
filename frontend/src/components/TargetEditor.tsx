@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 interface Props {
   /** The current target from the server. */
@@ -24,9 +24,13 @@ export function TargetEditor({ value, min = 10, max = 100, step = 5, onSave }: P
 
   // Keep the draft in sync with the server value, but only while the user has no
   // pending edit — otherwise a poll would overwrite what they're changing.
-  useEffect(() => {
+  // Adjusting state during render (rather than in an effect) is the React-
+  // recommended way to derive state from a changing prop: no extra render pass.
+  const [prevValue, setPrevValue] = useState(value);
+  if (value !== prevValue) {
+    setPrevValue(value);
     if (!edited) setDraft(value);
-  }, [value, edited]);
+  }
 
   const change = (delta: number) => {
     setError(false);

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { api } from '../api/client';
 import { usePolling } from '../api/usePolling';
+import { useNow } from '../hooks/useNow';
 import { relativeTime } from '../utils/format';
 import { Banner } from './Banner';
 import { ScheduleSection } from './ScheduleSection';
@@ -21,7 +22,9 @@ function SectionSkeleton({ height }: { height: number }) {
 
 export function Dashboard() {
   const [days, setDays] = useState(7);
-  const [, forceTick] = useState(0);
+  // A ticking clock so the "updated Xs ago" label and the freshness dot stay
+  // live without reading the impure Date.now() during render.
+  const now = useNow(5_000);
 
   const status = usePolling(api.getStatus, STATUS_INTERVAL);
   const schedule = usePolling(api.getSchedule, SCHEDULE_INTERVAL);
@@ -48,11 +51,15 @@ export function Dashboard() {
   // Manual refresh: ask the backend to pull a fresh live reading from Ohme,
   // then refetch every section. Even if the force-refresh fails we still
   // refetch so the button does something (shows whatever the backend has).
-  // The button spins until the next status result lands (cleared by the effect
-  // below) or a safety timeout.
-  const [refreshing, setRefreshing] = useState(false);
+  const lastFetchedMs = status.lastUpdated?.getTime();
+  // Rather than toggling a flag and clearing it from an effect when new data
+  // lands, record when the refresh was requested (and the fetch timestamp at
+  // that moment) and *derive* whether we're still spinning: the spinner clears
+  // automatically once a newer status result arrives (lastFetchedMs advances)
+  // or a safety timeout elapses.
+  const [refreshReq, setRefreshReq] = useState<{ at: number; since?: number } | null>(null);
   const handleRefresh = useCallback(() => {
-    setRefreshing(true);
+    setRefreshReq({ at: Date.now(), since: lastFetchedMs });
     void api
       .refresh()
       .catch(() => undefined)
@@ -62,19 +69,10 @@ export function Dashboard() {
         refetchStats();
         refetchSessions();
       });
-    window.setTimeout(() => setRefreshing(false), 5_000);
-  }, [refetchStatus, refetchSchedule, refetchStats, refetchSessions]);
+  }, [lastFetchedMs, refetchStatus, refetchSchedule, refetchStats, refetchSessions]);
 
-  const lastFetchedMs = status.lastUpdated?.getTime();
-  useEffect(() => {
-    setRefreshing(false);
-  }, [lastFetchedMs]);
-
-  // Keep the "updated Xs ago" label fresh without refetching.
-  useEffect(() => {
-    const id = window.setInterval(() => forceTick((t) => t + 1), 5_000);
-    return () => window.clearInterval(id);
-  }, []);
+  const refreshing =
+    refreshReq != null && lastFetchedMs === refreshReq.since && now - refreshReq.at < 5_000;
 
   const offline = status.error && !status.data;
   // Show how long ago the *backend* last polled Ohme (updatedAt), not when the
@@ -82,7 +80,7 @@ export function Dashboard() {
   // pollIntervalSeconds, so judge freshness against that cadence (with slack).
   const lastPolled = status.data?.updatedAt ? new Date(status.data.updatedAt) : null;
   const pollMs = (status.data?.config.pollIntervalSeconds ?? 180) * 1_000;
-  const fresh = lastPolled != null && Date.now() - lastPolled.getTime() < pollMs * 2;
+  const fresh = lastPolled != null && now - lastPolled.getTime() < pollMs * 2;
 
   return (
     <div className="app">
@@ -93,7 +91,7 @@ export function Dashboard() {
         </div>
         <div className="app-meta">
           <span className={`live-dot ${fresh ? '' : 'stale'}`} aria-hidden="true" />
-          <span>Updated {relativeTime(lastPolled)}</span>
+          <span>Updated {relativeTime(lastPolled, new Date(now))}</span>
           <button
             type="button"
             className={`refresh-btn ${refreshing ? 'spinning' : ''}`}

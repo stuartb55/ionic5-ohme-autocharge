@@ -1,4 +1,5 @@
 import type { StatusResponse } from '../api/types';
+import { useNow } from '../hooks/useNow';
 import { formatFinishTime, formatKwh, formatPower } from '../utils/format';
 import { BatteryRing } from './BatteryRing';
 import { ChargeControls } from './ChargeControls';
@@ -29,13 +30,16 @@ export function StatusSection({
 }) {
   const { vehicle, charger } = status;
   const target = charger.targetPercent ?? status.config.chargeTarget;
+  // Tick once a minute so the projection hides itself when the finish time
+  // passes, without reading the impure Date.now() during render.
+  const now = useNow(60_000);
   // Show the projected finish only while it's still ahead of us and the
   // session hasn't already completed.
   const showFinish =
     charger.connected &&
     charger.status !== 'finished' &&
     charger.projectedFinish != null &&
-    new Date(charger.projectedFinish).getTime() > Date.now();
+    new Date(charger.projectedFinish).getTime() > now;
 
   return (
     <section className="card" aria-labelledby="status-heading">

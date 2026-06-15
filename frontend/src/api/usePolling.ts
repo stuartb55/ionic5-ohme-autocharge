@@ -24,9 +24,13 @@ export function usePolling<T>(
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [tick, setTick] = useState(0);
 
-  // Keep the latest fetcher without making it a dependency of the effect.
+  // Keep the latest fetcher without making it a dependency of the effect. The
+  // ref is synced in an effect (not during render) so the next interval tick
+  // always calls the current fetcher; the initial value covers the first run.
   const fetcherRef = useRef(fetcher);
-  fetcherRef.current = fetcher;
+  useEffect(() => {
+    fetcherRef.current = fetcher;
+  });
 
   const refetch = useCallback(() => setTick((t) => t + 1), []);
 

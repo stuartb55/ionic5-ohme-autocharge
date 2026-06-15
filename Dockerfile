@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # Don't write .pyc files (the app dir is root-owned and the process runs as a
 # non-root user) and keep stdout/stderr unbuffered for prompt container logs.
