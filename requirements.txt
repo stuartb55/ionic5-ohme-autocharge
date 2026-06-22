@@ -2,7 +2,7 @@
 # every push to main, and a floating range here would let an upstream release
 # change what ships without any code change. Renovate proposes upgrades as PRs,
 # which run the test suite before automerging.
-hyundai-kia-connect-api==4.19.0
+hyundai-kia-connect-api==4.19.1
 ohme==1.9.1
 python-dotenv==1.2.2
 fastapi==0.138.0
