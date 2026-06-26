@@ -72,6 +72,9 @@ export function StatusSection({
                 <span className="range"> · {formatMiles(vehicle.rangeMiles)}</span>
               )}
             </div>
+            {vehicle.sohPercent != null && (
+              <div className="soh">Battery health {vehicle.sohPercent}%</div>
+            )}
             {showFinish && (
               <div className="finish-eta">
                 Ready by ~{formatFinishTime(charger.projectedFinish as string)}

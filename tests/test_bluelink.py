@@ -9,13 +9,14 @@ def _mock_manager(vehicles: dict):
     return vm
 
 
-def _mock_vehicle(soc, *, ev_range=None, ev_range_unit=None, odometer=None, odometer_unit=None):
+def _mock_vehicle(soc, *, ev_range=None, ev_range_unit=None, odometer=None, odometer_unit=None, soh=None):
     v = MagicMock()
     v.ev_battery_percentage = soc
     v.ev_driving_range = ev_range
     v.ev_driving_range_unit = ev_range_unit
     v.odometer = odometer
     v.odometer_unit = odometer_unit
+    v.ev_battery_soh_percentage = soh
     return v
 
 
@@ -72,6 +73,19 @@ def test_vehicle_state_range_none_on_unknown_unit():
         state = bluelink.get_vehicle_state()
     assert state.range_miles is None
     assert state.odometer_miles is None
+
+
+def test_vehicle_state_reads_soh():
+    vm = _mock_manager({"v": _mock_vehicle(62, soh=98)})
+    with patch("bluelink._get_manager", return_value=vm):
+        assert bluelink.get_vehicle_state().soh_percent == 98
+
+
+def test_vehicle_state_soh_none_when_zero_or_missing():
+    # 0 (and a non-numeric MagicMock default) both mean "not reported".
+    vm = _mock_manager({"v": _mock_vehicle(62, soh=0)})
+    with patch("bluelink._get_manager", return_value=vm):
+        assert bluelink.get_vehicle_state().soh_percent is None
 
 
 def test_get_vehicle_state_selects_by_id():

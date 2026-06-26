@@ -49,6 +49,8 @@ _SCHEMA: tuple[str, ...] = (
     # The odometer (miles) at plug-in lets us derive driving efficiency (mi/kWh)
     # from the distance between consecutive sessions and the energy charged.
     "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS odometer_miles INTEGER",
+    # Battery state of health (%) at plug-in, for a degradation trend over time.
+    "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS soh_percent INTEGER",
     """
     CREATE TABLE IF NOT EXISTS schedule_snapshots (
         id               BIGSERIAL PRIMARY KEY,
@@ -136,6 +138,7 @@ async def record_session(
     topup_percent: Optional[int],
     action: str,
     odometer_miles: Optional[int] = None,
+    soh_percent: Optional[int] = None,
 ) -> Optional[int]:
     """Insert one charge-session row and return its id (None when disabled/failed).
 
@@ -148,9 +151,11 @@ async def record_session(
         async with _pool.connection() as conn:
             cur = await conn.execute(
                 "INSERT INTO charge_sessions "
-                "(vehicle_name, soc_percent, target_percent, topup_percent, action, odometer_miles) "
-                "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-                (vehicle_name, soc_percent, target_percent, topup_percent, action, odometer_miles),
+                "(vehicle_name, soc_percent, target_percent, topup_percent, action, "
+                " odometer_miles, soh_percent) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (vehicle_name, soc_percent, target_percent, topup_percent, action,
+                 odometer_miles, soh_percent),
             )
             row = await cur.fetchone()
             return row[0] if row else None
@@ -171,7 +176,7 @@ async def get_recent_sessions(limit: int) -> Optional[list[dict[str, Any]]]:
         async with _pool.connection() as conn:
             cur = await conn.execute(
                 "SELECT id, plugged_in_at, vehicle_name, soc_percent, target_percent, "
-                "topup_percent, action, odometer_miles FROM charge_sessions "
+                "topup_percent, action, odometer_miles, soh_percent FROM charge_sessions "
                 "ORDER BY plugged_in_at DESC LIMIT %s",
                 (limit,),
             )
@@ -186,6 +191,7 @@ async def get_recent_sessions(limit: int) -> Optional[list[dict[str, Any]]]:
                 "topupPercent": row[5],
                 "action": row[6],
                 "odometerMiles": row[7],
+                "sohPercent": row[8],
             }
             for row in rows
         ]

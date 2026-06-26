@@ -40,6 +40,8 @@ class StatusSnapshot:
     # Estimated driving range (miles) from Bluelink at the last plug-in. None
     # when the car is unplugged or didn't report it.
     range_miles: Optional[int] = None
+    # Battery state of health (%) from the last plug-in reading.
+    soh_percent: Optional[int] = None
 
     # Charger
     charger_status: str = "unknown"  # ChargerStatus value, e.g. "charging"
@@ -96,6 +98,9 @@ class AppState:
         # persisted per session so efficiency (mi/kWh) can be derived later.
         self.last_range_miles: Optional[int] = None
         self.last_odometer_miles: Optional[int] = None
+        # Battery state of health (%) captured at the last plug-in. Logged per
+        # session for a degradation trend; also shown on the dashboard.
+        self.last_soh_percent: Optional[int] = None
         # Monotonic time of the last Bluelink reading, used to pace the mid-charge
         # live-SOC refresh (so it fires LIVE_SOC_INTERVAL after the plug-in read,
         # not immediately). None means no reading held yet.
@@ -192,10 +197,11 @@ class AppState:
         self.last_soc_at = time.monotonic()
 
     def record_vehicle_state(self, state: Any) -> None:
-        """Remember the SOC plus driving range and odometer from a Bluelink read."""
+        """Remember the SOC plus driving range, odometer and SoH from a Bluelink read."""
         self.last_soc = state.soc
         self.last_range_miles = state.range_miles
         self.last_odometer_miles = state.odometer_miles
+        self.last_soh_percent = state.soh_percent
         self.last_soc_at = time.monotonic()
 
     def clear_soc(self) -> None:
@@ -203,6 +209,7 @@ class AppState:
         self.last_soc = None
         self.last_range_miles = None
         self.last_odometer_miles = None
+        self.last_soh_percent = None
         self.last_soc_at = None
         # New session, clean slate for the plug-in failure alert.
         self.plugin_failure_notified = False

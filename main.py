@@ -84,6 +84,7 @@ async def handle_plugin_event(client) -> bool:
                 topup_percent=0,
                 action="skipped_at_target",
                 odometer_miles=vehicle.odometer_miles,
+                soh_percent=vehicle.soh_percent,
             )
         store.plugin_failure_notified = False
         return True
@@ -119,6 +120,7 @@ async def handle_plugin_event(client) -> bool:
                 topup_percent=target - soc,
                 action="configured",
                 odometer_miles=vehicle.odometer_miles,
+                soh_percent=vehicle.soh_percent,
             )
             await db.record_schedule(
                 session_id=session_id,
