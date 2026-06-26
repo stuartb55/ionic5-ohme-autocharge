@@ -194,6 +194,31 @@ async def get_recent_sessions(limit: int) -> Optional[list[dict[str, Any]]]:
         return None
 
 
+async def get_miles_driven(since: datetime.datetime) -> Optional[int]:
+    """Miles driven since ``since``, from the odometer span across charge sessions.
+
+    Returns the difference between the highest and lowest odometer reading among
+    sessions plugged in on/after ``since``. None when persistence is disabled,
+    the read fails, or there aren't at least two odometer readings to span (so
+    we never report a bogus "0 miles driven" from a single data point).
+    """
+    if _pool is None:
+        return None
+    try:
+        async with _pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT MAX(odometer_miles) - MIN(odometer_miles) FROM charge_sessions "
+                "WHERE plugged_in_at >= %s AND odometer_miles IS NOT NULL "
+                "HAVING COUNT(odometer_miles) >= 2",
+                (since,),
+            )
+            row = await cur.fetchone()
+        return row[0] if row else None
+    except Exception:
+        logger.warning("Failed to read odometer span from Postgres", exc_info=True)
+        return None
+
+
 async def record_schedule(
     *,
     session_id: Optional[int],

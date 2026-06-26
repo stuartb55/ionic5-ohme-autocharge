@@ -110,10 +110,17 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
           value={insights.bestDay ? formatKwh(insights.bestDay.energyKwh) : '—'}
           sub={insights.bestDay ? formatDateShort(insights.bestDay.date) : undefined}
         />
+        {insights.efficiencyIsReal && (
+          <Insight
+            label="Efficiency"
+            value={`${insights.milesPerKwh} mi/kWh`}
+            sub={`over ${insights.milesDriven} mi`}
+          />
+        )}
         <Insight
           label="Est. range added"
           value={`${Math.round(insights.estimatedMiles)} mi`}
-          sub="@ 3.5 mi/kWh"
+          sub={`@ ${insights.milesPerKwh} mi/kWh`}
         />
         <Insight label="Total cost" value={formatMoney(totals.costTotal, currency)} />
       </div>

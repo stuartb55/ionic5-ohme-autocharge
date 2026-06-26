@@ -22,6 +22,12 @@ export interface Insights {
   bestDay: DailyStat | null;
   /** Estimated driving range added across the whole range, in miles. */
   estimatedMiles: number;
+  /** mi/kWh the range estimate uses: measured when available, else the assumed default. */
+  milesPerKwh: number;
+  /** True when milesPerKwh is measured from odometer data rather than assumed. */
+  efficiencyIsReal: boolean;
+  /** Miles actually driven over the window (odometer span), or null when unknown. */
+  milesDriven: number | null;
 }
 
 /** Derive higher-level insights from the raw daily/total figures. */
@@ -35,12 +41,20 @@ export function deriveInsights(stats: StatisticsResponse): Insights {
     null,
   );
 
+  // Prefer the measured efficiency from odometer history; fall back to the
+  // assumed average so the range estimate still works before any data exists.
+  const efficiency = stats.efficiency;
+  const milesPerKwh = efficiency?.milesPerKwh ?? MILES_PER_KWH;
+
   return {
     chargingDays: active.length,
     totalDays: daily.length,
     avgPerChargingDay: active.length ? totalEnergy / active.length : 0,
     bestDay: bestDay && bestDay.energyKwh > 0 ? bestDay : null,
-    estimatedMiles: totalEnergy * MILES_PER_KWH,
+    estimatedMiles: totalEnergy * milesPerKwh,
+    milesPerKwh,
+    efficiencyIsReal: efficiency != null,
+    milesDriven: efficiency?.milesDriven ?? null,
   };
 }
 
