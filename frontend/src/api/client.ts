@@ -1,5 +1,6 @@
 import type {
   ChargeActionResponse,
+  DayTargetsUpdateResponse,
   ReadyByUpdateResponse,
   ScheduleResponse,
   SessionsResponse,
@@ -75,6 +76,9 @@ export const api = {
   // Set ("HH:MM") or clear (null) the ready-by departure time.
   setReadyBy: (readyBy: string | null, signal?: AbortSignal) =>
     putJson<ReadyByUpdateResponse>('/api/settings/ready-by', { readyBy }, signal),
+  // Replace the per-weekday target overrides (weekday 0-6 -> percent).
+  setDayTargets: (dayTargets: Record<number, number>, signal?: AbortSignal) =>
+    putJson<DayTargetsUpdateResponse>('/api/settings/day-targets', { dayTargets }, signal),
   // Ask the backend to pull a fresh live reading from Ohme, then the caller
   // refetches the read endpoints to display it.
   refresh: (signal?: AbortSignal) => postJson<RefreshResponse>('/api/refresh', signal),

@@ -41,6 +41,7 @@ def reset_state():
     store.last_soc_at = None
     store.charge_target_override = None
     store.ready_by = None
+    store.day_targets = {}
     store.last_poll_error = None
     store.consecutive_poll_failures = 0
     store.plugin_failure_notified = False
@@ -672,6 +673,64 @@ def test_set_ready_by_passes_target_time_to_ohme(client):
     assert body["applied"] is True
     # The (hour, minute) tuple must be threaded through to Ohme.
     assert mock_set_target.await_args.kwargs["target_time"] == (7, 30)
+
+
+# --- per-weekday (conditional) targets ------------------------------------------
+
+
+def test_set_day_targets_updates_store_and_persists(client):
+    resp = client.put("/api/settings/day-targets", json={"dayTargets": {"4": 100, "5": 90}})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["dayTargets"] == {"4": 100, "5": 90}
+    assert body["persisted"] is True
+    assert store.day_targets == {4: 100, 5: 90}
+    assert settings.load_day_targets() == {4: 100, 5: 90}  # survives a restart
+
+
+def test_set_day_targets_clear_with_empty(client):
+    client.put("/api/settings/day-targets", json={"dayTargets": {"4": 100}})
+    resp = client.put("/api/settings/day-targets", json={"dayTargets": {}})
+    assert resp.status_code == 200
+    assert store.day_targets == {}
+    assert settings.load_day_targets() == {}
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [{"7": 80}, {"-1": 80}, {"4": 9}, {"4": 101}],
+)
+def test_set_day_targets_rejects_bad_input(client, bad):
+    resp = client.put("/api/settings/day-targets", json={"dayTargets": bad})
+    assert resp.status_code == 422
+    assert store.day_targets == {}
+
+
+def test_day_targets_in_status_config(client):
+    _populate_snapshot()
+    client.put("/api/settings/day-targets", json={"dayTargets": {"6": 95}})
+    body = client.get("/api/status").json()
+    assert body["config"]["dayTargets"] == {"6": 95}
+
+
+def test_effective_target_prefers_todays_override(client, monkeypatch):
+    # Pin "today" to Friday (weekday 4) so the assertion is deterministic.
+    monkeypatch.setattr("state._today_weekday", lambda: 4)
+    store.set_charge_target(80)
+    store.set_day_targets({4: 100})
+    assert store.effective_target == 100
+    # A day without an override falls back to the base.
+    monkeypatch.setattr("state._today_weekday", lambda: 2)
+    assert store.effective_target == 80
+
+
+def test_plugin_uses_effective_target_in_snapshot(client, monkeypatch):
+    monkeypatch.setattr("state._today_weekday", lambda: 5)  # Saturday
+    store.set_charge_target(80)
+    store.set_day_targets({5: 100})
+    store.last_soc = 70
+    snap = api.build_snapshot(_charging_client(), connected=True)
+    assert snap.target_percent == 100  # Saturday override, not the 80 base
 
 
 def test_set_target_reapplies_to_ohme_with_fresh_soc(client):

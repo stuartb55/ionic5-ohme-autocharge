@@ -4,6 +4,7 @@ import { formatFinishTime, formatKwh, formatMiles, formatPower } from '../utils/
 import { BatteryRing } from './BatteryRing';
 import { ChargeControls } from './ChargeControls';
 import { ConnectionBadge } from './ConnectionBadge';
+import { DayTargetsEditor } from './DayTargetsEditor';
 import { ReadyByEditor } from './ReadyByEditor';
 import { TargetEditor } from './TargetEditor';
 
@@ -23,17 +24,23 @@ export function StatusSection({
   status,
   onSetTarget,
   onSetReadyBy,
+  onSetDayTargets,
   onChargeChanged,
 }: {
   status: StatusResponse;
   onSetTarget?: (target: number) => Promise<void>;
   /** Persist the ready-by time (or null to clear); editor hidden when omitted. */
   onSetReadyBy?: (value: string | null) => Promise<void>;
+  /** Persist per-weekday target overrides; editor hidden when omitted. */
+  onSetDayTargets?: (map: Record<number, number>) => Promise<void>;
   /** Refetch status after a charge-control action; controls hidden when omitted. */
   onChargeChanged?: () => void;
 }) {
   const { vehicle, charger } = status;
-  const target = charger.targetPercent ?? status.config.chargeTarget;
+  // The base target is what the editor sets; the effective target (which may be
+  // today's per-weekday override) is what the ring and Ohme actually use.
+  const baseTarget = status.config.chargeTarget;
+  const target = charger.targetPercent ?? baseTarget;
   // Tick once a minute so the projection hides itself when the finish time
   // passes, without reading the impure Date.now() during render.
   const now = useNow(60_000);
@@ -72,16 +79,28 @@ export function StatusSection({
             )}
             {onSetTarget ? (
               <TargetEditor
-                value={target}
+                value={baseTarget}
                 min={status.config.targetMin}
                 max={status.config.targetMax}
                 onSave={onSetTarget}
               />
             ) : (
-              <div className="target">Target {target}%</div>
+              <div className="target">Target {baseTarget}%</div>
+            )}
+            {target !== baseTarget && (
+              <div className="today-target">Today: {target}%</div>
             )}
             {onSetReadyBy && (
               <ReadyByEditor value={status.config.readyBy} onSave={onSetReadyBy} />
+            )}
+            {onSetDayTargets && (
+              <DayTargetsEditor
+                value={status.config.dayTargets}
+                base={baseTarget}
+                min={status.config.targetMin}
+                max={status.config.targetMax}
+                onSave={onSetDayTargets}
+              />
             )}
           </div>
         </div>

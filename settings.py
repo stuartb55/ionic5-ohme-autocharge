@@ -114,3 +114,32 @@ def save_ready_by(value: str | None) -> bool:
     else:
         data["readyBy"] = value
     return _save(data)
+
+
+def load_day_targets() -> dict[int, int]:
+    """Return per-weekday target overrides as {0(Mon)..6(Sun): percent}.
+
+    Skips any malformed or out-of-range entries. Empty dict when none are set.
+    """
+    raw = _load().get("dayTargets")
+    if not isinstance(raw, dict):
+        return {}
+    result: dict[int, int] = {}
+    for key, value in raw.items():
+        try:
+            day, pct = int(key), int(value)
+        except (ValueError, TypeError):
+            continue
+        if 0 <= day <= 6 and TARGET_MIN <= pct <= TARGET_MAX:
+            result[day] = pct
+    return result
+
+
+def save_day_targets(day_targets: dict[int, int]) -> bool:
+    """Persist (or clear, when empty) the per-weekday overrides, preserving other settings."""
+    data = _load()
+    if day_targets:
+        data["dayTargets"] = {str(day): int(pct) for day, pct in day_targets.items()}
+    else:
+        data.pop("dayTargets", None)
+    return _save(data)

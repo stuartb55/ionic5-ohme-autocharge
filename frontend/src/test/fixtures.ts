@@ -24,6 +24,7 @@ export const statusFixture: StatusResponse = {
     targetMin: 10,
     targetMax: 100,
     readyBy: null,
+    dayTargets: {},
   },
   updatedAt: '2026-06-02T00:05:00+01:00',
   ready: true,

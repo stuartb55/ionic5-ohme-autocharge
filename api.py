@@ -28,7 +28,7 @@ from zoneinfo import ZoneInfo
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from starlette.middleware.base import BaseHTTPMiddleware
 
 import bluelink
@@ -150,10 +150,11 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
         power_watts=float(power.watts or 0),
         power_amps=float(power.amps or 0),
         power_volts=power.volts,
-        # The active target (runtime override or env default). NB: client.target_soc
-        # holds the *top-up* amount (target − SOC) we send to Ohme, not the absolute
-        # target, so never use it.
-        target_percent=store.charge_target,
+        # The target in effect right now: today's per-weekday override if set,
+        # else the base (runtime override or env default). NB: client.target_soc
+        # holds the *top-up* amount (target − SOC) we send to Ohme, not the
+        # absolute target, so never use it.
+        target_percent=store.effective_target,
         session_energy_wh=float(client.energy or 0),
         slots=[s.to_dict() for s in client.slots],
         next_slot_start=_iso(client.next_slot_start),
@@ -493,15 +494,38 @@ class ReadyByUpdate(BaseModel):
     readyBy: Optional[str] = Field(default=None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
 
 
-async def _reapply_target_if_connected(target: int) -> bool:
-    """Push a newly-set target to Ohme immediately if the car is plugged in.
+class DayTargetsUpdate(BaseModel):
+    """Request body for PUT /api/settings/day-targets.
 
-    Returns True only if Ohme was reconfigured. Best-effort: failure here doesn't
-    fail the request — the target still takes effect on the next plug-in/poll.
+    ``dayTargets`` maps weekday (0=Mon … 6=Sun) to a target percent. The map is
+    a full replacement; omit a day to fall back to the base target.
+    """
+
+    dayTargets: dict[int, int]
+
+    @field_validator("dayTargets")
+    @classmethod
+    def _check_bounds(cls, value: dict[int, int]) -> dict[int, int]:
+        for day, pct in value.items():
+            if not 0 <= day <= 6:
+                raise ValueError("weekday must be 0 (Mon) to 6 (Sun)")
+            if not settings.TARGET_MIN <= pct <= settings.TARGET_MAX:
+                raise ValueError(f"target must be {settings.TARGET_MIN}–{settings.TARGET_MAX}")
+        return value
+
+
+async def _reapply_target_if_connected() -> bool:
+    """Push the current effective target/ready-by to Ohme if the car is plugged in.
+
+    Reads ``store.effective_target`` (and ``store.ready_by``) so any settings
+    change — base target, per-weekday override, or ready-by — re-plans the active
+    session. Returns True only if Ohme was reconfigured. Best-effort: failure
+    here doesn't fail the request; the settings still apply on the next plug-in.
     """
     client = store.client
     if client is None or not store.status.connected:
         return False
+    target = store.effective_target
     # The SOC recorded at plug-in goes stale as the session charges, and the
     # top-up sent to Ohme is computed from it — so re-read the real SOC first.
     # Target changes are rare (someone clicking save), so the extra Bluelink
@@ -551,16 +575,20 @@ async def health() -> JSONResponse:
     )
 
 
+def _reflect_effective_target() -> None:
+    """Update the cached snapshot's target so a GET /api/status right after a
+    settings change sees the new effective target immediately, not next poll."""
+    if store.ready:
+        store.status.target_percent = store.effective_target
+
+
 @app.put("/api/settings/target")
 async def set_charge_target(update: TargetUpdate) -> JSONResponse:
     target = update.targetPercent
     store.set_charge_target(target)
     persisted = settings.save_target(target)
-    applied = await _reapply_target_if_connected(target)
-    # Reflect the new target in the cached snapshot so a subsequent GET /api/status
-    # sees it immediately rather than after the next poll.
-    if store.ready:
-        store.status.target_percent = target
+    applied = await _reapply_target_if_connected()
+    _reflect_effective_target()
     logger.info(
         "Charge target set to %s%% (persisted=%s, applied=%s)", target, persisted, applied
     )
@@ -579,9 +607,32 @@ async def set_ready_by(update: ReadyByUpdate) -> JSONResponse:
     persisted = settings.save_ready_by(ready_by)
     # Reuse the target reapply: it re-reads the SOC and calls set_target, which
     # now carries the ready-by time.
-    applied = await _reapply_target_if_connected(store.charge_target)
+    applied = await _reapply_target_if_connected()
     logger.info("Ready-by time set to %s (persisted=%s, applied=%s)", ready_by, persisted, applied)
     return JSONResponse({"readyBy": ready_by, "persisted": persisted, "applied": applied})
+
+
+@app.put("/api/settings/day-targets")
+async def set_day_targets(update: DayTargetsUpdate) -> JSONResponse:
+    """Replace the per-weekday target overrides (0=Mon … 6=Sun).
+
+    The full map is replaced: include every day you want overridden; omit a day
+    to fall back to the base target. Persisted and re-applied to an active
+    session if today's effective target changed.
+    """
+    day_targets = update.dayTargets
+    store.set_day_targets(day_targets)
+    persisted = settings.save_day_targets(day_targets)
+    applied = await _reapply_target_if_connected()
+    _reflect_effective_target()
+    logger.info("Per-weekday targets set to %s (persisted=%s, applied=%s)", day_targets, persisted, applied)
+    return JSONResponse(
+        {
+            "dayTargets": {str(d): p for d, p in day_targets.items()},
+            "persisted": persisted,
+            "applied": applied,
+        }
+    )
 
 
 @app.get("/api/status")
@@ -617,6 +668,9 @@ async def get_status() -> JSONResponse:
             "targetMax": settings.TARGET_MAX,
             # Optional "ready-by" departure time (HH:MM), or null for ASAP/smart.
             "readyBy": store.ready_by,
+            # Per-weekday target overrides {"0".."6": percent}; empty when none.
+            # charger.targetPercent reflects today's effective target.
+            "dayTargets": {str(d): p for d, p in store.day_targets.items()},
         },
         "updatedAt": store.status.updated_at,
         "ready": store.ready,

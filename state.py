@@ -9,11 +9,25 @@ they never race the loop's own use of the single authenticated Ohme client.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import time
 from dataclasses import dataclass, field, asdict
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 import config
+
+
+def _today_weekday() -> int:
+    """Weekday (Mon=0 … Sun=6) for "now" in the configured timezone.
+
+    Plug-in time decides which day's target applies, and Ohme's day boundaries
+    are local, so use config.TIMEZONE rather than the host (UTC in containers).
+    """
+    try:
+        return datetime.datetime.now(ZoneInfo(config.TIMEZONE)).weekday()
+    except Exception:  # noqa: BLE001 - bad TIMEZONE; fall back to host-local
+        return datetime.datetime.now().weekday()
 
 
 @dataclass
@@ -84,6 +98,9 @@ class AppState:
         # no target time (Ohme charges on its own smart schedule). When set, it's
         # passed to Ohme so the charge completes by then.
         self.ready_by: Optional[str] = None
+        # Per-weekday target overrides {0(Mon)..6(Sun): percent}. Any day not
+        # present falls back to the base charge_target. Drives effective_target.
+        self.day_targets: dict[int, int] = {}
         # Why the most recent poll failed ("poll_failed", "login_failed"), or
         # None when it succeeded. Failures keep the previous snapshot so the
         # dashboard shows last-known-good data rather than going blank.
@@ -108,6 +125,15 @@ class AppState:
     def set_ready_by(self, value: Optional[str]) -> None:
         """Set the runtime ready-by time (does not persist; see settings.save_ready_by)."""
         self.ready_by = value
+
+    def set_day_targets(self, value: dict[int, int]) -> None:
+        """Set the per-weekday target overrides (does not persist; see settings.save_day_targets)."""
+        self.day_targets = dict(value)
+
+    @property
+    def effective_target(self) -> int:
+        """The target to use right now: today's per-weekday override, else the base."""
+        return self.day_targets.get(_today_weekday(), self.charge_target)
 
     @property
     def ready_by_tuple(self) -> Optional[tuple[int, int]]:
