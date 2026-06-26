@@ -34,6 +34,9 @@ export interface StatusResponse {
   config: {
     chargeTarget: number;
     pollIntervalSeconds: number;
+    /** Inclusive bounds for the charge target, enforced by the backend. */
+    targetMin: number;
+    targetMax: number;
   };
   updatedAt: string | null;
   ready: boolean;

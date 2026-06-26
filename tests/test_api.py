@@ -351,13 +351,25 @@ async def test_notifies_when_charging_finishes():
     assert "18.5 kWh" in msg
 
 
+async def test_notifies_when_short_topup_finishes_from_plugged_in():
+    # A brief charge can go plugged_in→finished between two polls without ever
+    # being sampled as "charging"; energy was added, so it should still notify.
+    snap = StatusSnapshot(
+        vehicle_name="IONIQ 5", charger_status="finished", connected=True,
+        session_energy_wh=2300.0,
+    )
+    with patch("ntfy.send", new=AsyncMock()) as mock_notify:
+        await api._maybe_notify_finished("plugged_in", snap)
+    mock_notify.assert_awaited_once()
+
+
 @pytest.mark.parametrize(
     "prev,new",
     [
         ("finished", "finished"),  # no transition
         ("unknown", "finished"),   # restart while already finished
         ("charging", "charging"),  # still charging
-        ("plugged_in", "finished"),  # never actually charged
+        ("plugged_in", "finished"),  # never actually charged (0 kWh added)
     ],
 )
 async def test_no_finish_notification_without_charging_transition(prev, new):
