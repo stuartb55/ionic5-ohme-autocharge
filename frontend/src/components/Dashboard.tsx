@@ -7,6 +7,7 @@ import { Banner } from './Banner';
 import { ScheduleSection } from './ScheduleSection';
 import { SessionsSection } from './SessionsSection';
 import { StatisticsSection } from './StatisticsSection';
+import { PushToggle } from './PushToggle';
 import { StatusSection } from './StatusSection';
 import { TariffSection } from './TariffSection';
 import { ThemeToggle } from './ThemeToggle';
@@ -173,6 +174,7 @@ export function Dashboard() {
           >
             <span aria-hidden="true">⟳</span>
           </button>
+          <PushToggle />
           <ThemeToggle />
         </div>
       </header>
