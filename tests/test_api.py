@@ -582,6 +582,14 @@ def test_build_snapshot_falls_back_to_client_battery_before_first_plugin():
     assert snap.battery_percent == 33
 
 
+def test_build_snapshot_reports_unknown_soc_when_unplugged():
+    # Once unplugged, last_soc is cleared. We must not surface Ohme's stale
+    # estimate — the SOC is unknown until the next plug-in.
+    store.last_soc = None
+    snap = api.build_snapshot(_charging_client(), connected=False)
+    assert snap.battery_percent is None
+
+
 def test_build_snapshot_projects_finish_from_last_slot_end():
     import datetime as dt
 

@@ -131,9 +131,14 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
     return StatusSnapshot(
         vehicle_name=client.current_vehicle,
         # Prefer the real Bluelink SOC captured at plug-in; Ohme's own `battery`
-        # estimate is unreliable. Fall back to it while no plug-in SOC is held
-        # (before the first plug-in, and after unplug clears it).
-        battery_percent=(store.last_soc if store.last_soc is not None else (client.battery or None)),
+        # estimate is unreliable. Fall back to it only while the car is plugged
+        # in but no plug-in SOC is held yet (before the first plug-in of the
+        # session). Once unplugged we report unknown rather than a stale estimate.
+        battery_percent=(
+            store.last_soc
+            if store.last_soc is not None
+            else ((client.battery or None) if connected else None)
+        ),
         charger_status=status_value,
         connected=connected,
         charger_online=bool(client.available),
