@@ -31,6 +31,10 @@ class VehicleState:
     odometer_miles: Optional[int] = None
     # Battery state of health (%). None when the vehicle doesn't report it.
     soh_percent: Optional[int] = None
+    # Read-only lock status and last-known GPS location. None when not reported.
+    is_locked: Optional[bool] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
 
 def _to_miles(value, unit) -> Optional[int]:
@@ -114,16 +118,21 @@ def get_vehicle_state(vehicle_id: Optional[str] = None) -> VehicleState:
         raw_soh = vehicle.ev_battery_soh_percentage
         # SoH is a percentage; 0/None/non-numeric means "not reported".
         soh_percent = int(raw_soh) if isinstance(raw_soh, (int, float)) and raw_soh > 0 else None
+        is_locked = vehicle.is_locked if isinstance(vehicle.is_locked, bool) else None
+        lat, lon = vehicle.location_latitude, vehicle.location_longitude
+        latitude = float(lat) if isinstance(lat, (int, float)) else None
+        longitude = float(lon) if isinstance(lon, (int, float)) else None
 
     if soc is None:
         raise RuntimeError("Vehicle did not report a battery percentage — try again shortly")
 
     logger.info(
-        "Hyundai SOC: %s%%, range: %s mi, odometer: %s mi, SoH: %s%%",
-        soc, range_miles, odometer_miles, soh_percent,
+        "Hyundai SOC: %s%%, range: %s mi, odometer: %s mi, SoH: %s%%, locked: %s",
+        soc, range_miles, odometer_miles, soh_percent, is_locked,
     )
     return VehicleState(
-        soc=soc, range_miles=range_miles, odometer_miles=odometer_miles, soh_percent=soh_percent
+        soc=soc, range_miles=range_miles, odometer_miles=odometer_miles, soh_percent=soh_percent,
+        is_locked=is_locked, latitude=latitude, longitude=longitude,
     )
 
 

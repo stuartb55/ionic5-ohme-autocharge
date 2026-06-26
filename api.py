@@ -163,6 +163,9 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
         # captured at the last plug-in); once unplugged it goes stale like the SOC.
         range_miles=store.last_range_miles if connected else None,
         soh_percent=store.last_soh_percent if connected else None,
+        is_locked=store.last_is_locked if connected else None,
+        latitude=store.last_latitude if connected else None,
+        longitude=store.last_longitude if connected else None,
         charger_status=status_value,
         connected=connected,
         charger_online=bool(client.available),
@@ -734,6 +737,13 @@ async def get_status() -> JSONResponse:
             "batteryPercent": store.status.battery_percent,
             "rangeMiles": store.status.range_miles,
             "sohPercent": store.status.soh_percent,
+            # Read-only lock status and last-known location (null when unknown).
+            "isLocked": store.status.is_locked,
+            "location": (
+                {"latitude": store.status.latitude, "longitude": store.status.longitude}
+                if store.status.latitude is not None and store.status.longitude is not None
+                else None
+            ),
         },
         "charger": {
             "status": store.status.charger_status,

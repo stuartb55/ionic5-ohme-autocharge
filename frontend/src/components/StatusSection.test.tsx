@@ -88,4 +88,22 @@ describe('StatusSection driving range', () => {
     render(<StatusSection status={withVehicle({ sohPercent: null })} />);
     expect(screen.queryByText(/Battery health/)).not.toBeInTheDocument();
   });
+
+  it('shows lock status and a location link', () => {
+    render(
+      <StatusSection
+        status={withVehicle({ isLocked: true, location: { latitude: 51.5, longitude: -0.12 } })}
+      />,
+    );
+    expect(screen.getByText(/Locked/)).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: /view location/i });
+    expect(link).toHaveAttribute('href', 'https://www.google.com/maps?q=51.5,-0.12');
+    expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'));
+  });
+
+  it('shows unlocked state and omits location when unknown', () => {
+    render(<StatusSection status={withVehicle({ isLocked: false, location: null })} />);
+    expect(screen.getByText(/Unlocked/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /view location/i })).not.toBeInTheDocument();
+  });
 });

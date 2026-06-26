@@ -75,6 +75,24 @@ export function StatusSection({
             {vehicle.sohPercent != null && (
               <div className="soh">Battery health {vehicle.sohPercent}%</div>
             )}
+            {(vehicle.isLocked != null || vehicle.location) && (
+              <div className="vehicle-meta">
+                {vehicle.isLocked != null && (
+                  <span className={vehicle.isLocked ? 'locked' : 'unlocked'}>
+                    {vehicle.isLocked ? '🔒 Locked' : '🔓 Unlocked'}
+                  </span>
+                )}
+                {vehicle.location && (
+                  <a
+                    href={`https://www.google.com/maps?q=${vehicle.location.latitude},${vehicle.location.longitude}`}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                  >
+                    View location
+                  </a>
+                )}
+              </div>
+            )}
             {showFinish && (
               <div className="finish-eta">
                 Ready by ~{formatFinishTime(charger.projectedFinish as string)}

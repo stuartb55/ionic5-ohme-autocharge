@@ -6,7 +6,14 @@ import type {
 } from '../api/types';
 
 export const statusFixture: StatusResponse = {
-  vehicle: { name: 'Hyundai IONIQ 5', batteryPercent: 62, rangeMiles: 180, sohPercent: 98 },
+  vehicle: {
+    name: 'Hyundai IONIQ 5',
+    batteryPercent: 62,
+    rangeMiles: 180,
+    sohPercent: 98,
+    isLocked: true,
+    location: { latitude: 51.5, longitude: -0.12 },
+  },
   charger: {
     status: 'charging',
     connected: true,

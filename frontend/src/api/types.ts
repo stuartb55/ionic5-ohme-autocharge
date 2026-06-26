@@ -17,6 +17,10 @@ export interface StatusResponse {
     rangeMiles: number | null;
     /** Battery state of health (%) at the last plug-in, or null. */
     sohPercent: number | null;
+    /** Read-only lock status, or null when unknown. */
+    isLocked: boolean | null;
+    /** Last-known GPS location, or null when unknown. */
+    location: { latitude: number; longitude: number } | null;
   };
   charger: {
     status: ChargerStatus;

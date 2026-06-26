@@ -42,6 +42,10 @@ class StatusSnapshot:
     range_miles: Optional[int] = None
     # Battery state of health (%) from the last plug-in reading.
     soh_percent: Optional[int] = None
+    # Read-only lock status and last-known GPS location from the last reading.
+    is_locked: Optional[bool] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
     # Charger
     charger_status: str = "unknown"  # ChargerStatus value, e.g. "charging"
@@ -101,6 +105,10 @@ class AppState:
         # Battery state of health (%) captured at the last plug-in. Logged per
         # session for a degradation trend; also shown on the dashboard.
         self.last_soh_percent: Optional[int] = None
+        # Read-only lock status and last-known GPS location from the last read.
+        self.last_is_locked: Optional[bool] = None
+        self.last_latitude: Optional[float] = None
+        self.last_longitude: Optional[float] = None
         # Monotonic time of the last Bluelink reading, used to pace the mid-charge
         # live-SOC refresh (so it fires LIVE_SOC_INTERVAL after the plug-in read,
         # not immediately). None means no reading held yet.
@@ -202,6 +210,9 @@ class AppState:
         self.last_range_miles = state.range_miles
         self.last_odometer_miles = state.odometer_miles
         self.last_soh_percent = state.soh_percent
+        self.last_is_locked = state.is_locked
+        self.last_latitude = state.latitude
+        self.last_longitude = state.longitude
         self.last_soc_at = time.monotonic()
 
     def clear_soc(self) -> None:
@@ -210,6 +221,9 @@ class AppState:
         self.last_range_miles = None
         self.last_odometer_miles = None
         self.last_soh_percent = None
+        self.last_is_locked = None
+        self.last_latitude = None
+        self.last_longitude = None
         self.last_soc_at = None
         # New session, clean slate for the plug-in failure alert.
         self.plugin_failure_notified = False
