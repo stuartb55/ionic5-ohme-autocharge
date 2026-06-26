@@ -554,6 +554,12 @@ async def _reapply_target_if_connected() -> bool:
         return False
 
 
+@app.get("/api/version")
+async def version() -> JSONResponse:
+    """Build version (git SHA), or 'dev' when unset (local run)."""
+    return JSONResponse({"version": config.APP_VERSION or "dev"})
+
+
 @app.get("/api/health")
 async def health() -> JSONResponse:
     """Liveness for the container HEALTHCHECK.

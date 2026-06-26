@@ -23,6 +23,10 @@ HYUNDAI_PIN = os.environ["HYUNDAI_PIN"]
 OHME_EMAIL = os.environ["OHME_EMAIL"]
 OHME_PASSWORD = os.environ["OHME_PASSWORD"]
 
+# Build version (git SHA), baked into the image at build time (see Dockerfile).
+# Empty in local/dev runs; surfaced via GET /api/version.
+APP_VERSION = os.getenv("APP_VERSION", "")
+
 CHARGE_TARGET = int(os.getenv("CHARGE_TARGET", "80"))
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "180"))
 

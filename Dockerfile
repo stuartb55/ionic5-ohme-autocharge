@@ -5,6 +5,11 @@ FROM python:3.14-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+# Build-time git SHA, surfaced at runtime via /api/version so the dashboard can
+# show which build is deployed. CI passes --build-arg GIT_SHA=${{ github.sha }}.
+ARG GIT_SHA=""
+ENV APP_VERSION=$GIT_SHA
+
 WORKDIR /app
 
 # Create a non-root user to run the service.
