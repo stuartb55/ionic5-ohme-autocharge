@@ -4,6 +4,7 @@ import { formatFinishTime, formatKwh, formatMiles, formatPower } from '../utils/
 import { BatteryRing } from './BatteryRing';
 import { ChargeControls } from './ChargeControls';
 import { ConnectionBadge } from './ConnectionBadge';
+import { ReadyByEditor } from './ReadyByEditor';
 import { TargetEditor } from './TargetEditor';
 
 function Tile({ label, value, unit }: { label: string; value: string; unit?: string }) {
@@ -21,10 +22,13 @@ function Tile({ label, value, unit }: { label: string; value: string; unit?: str
 export function StatusSection({
   status,
   onSetTarget,
+  onSetReadyBy,
   onChargeChanged,
 }: {
   status: StatusResponse;
   onSetTarget?: (target: number) => Promise<void>;
+  /** Persist the ready-by time (or null to clear); editor hidden when omitted. */
+  onSetReadyBy?: (value: string | null) => Promise<void>;
   /** Refetch status after a charge-control action; controls hidden when omitted. */
   onChargeChanged?: () => void;
 }) {
@@ -75,6 +79,9 @@ export function StatusSection({
               />
             ) : (
               <div className="target">Target {target}%</div>
+            )}
+            {onSetReadyBy && (
+              <ReadyByEditor value={status.config.readyBy} onSave={onSetReadyBy} />
             )}
           </div>
         </div>

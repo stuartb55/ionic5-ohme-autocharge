@@ -80,6 +80,10 @@ class AppState:
         # Runtime charge-target override set from the dashboard. None means "use
         # the CHARGE_TARGET env default"; see the `charge_target` property.
         self.charge_target_override: Optional[int] = None
+        # Optional "ready-by" departure time as an ``HH:MM`` string. None means
+        # no target time (Ohme charges on its own smart schedule). When set, it's
+        # passed to Ohme so the charge completes by then.
+        self.ready_by: Optional[str] = None
         # Why the most recent poll failed ("poll_failed", "login_failed"), or
         # None when it succeeded. Failures keep the previous snapshot so the
         # dashboard shows last-known-good data rather than going blank.
@@ -100,6 +104,17 @@ class AppState:
     def set_charge_target(self, value: int) -> None:
         """Set the runtime charge-target override (does not persist; see settings.save_target)."""
         self.charge_target_override = int(value)
+
+    def set_ready_by(self, value: Optional[str]) -> None:
+        """Set the runtime ready-by time (does not persist; see settings.save_ready_by)."""
+        self.ready_by = value
+
+    @property
+    def ready_by_tuple(self) -> Optional[tuple[int, int]]:
+        """The ready-by time as an (hour, minute) tuple for the Ohme API, or None."""
+        import settings  # local import to avoid a cycle at module load
+
+        return settings.parse_hhmm(self.ready_by) if self.ready_by else None
 
     def update(self, snapshot: StatusSnapshot) -> None:
         self.status = snapshot
