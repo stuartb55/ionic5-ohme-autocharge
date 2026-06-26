@@ -235,6 +235,41 @@ def test_statistics_parses_summary(client):
     assert body["daily"][0]["savings"] == 3.7  # 370p -> £3.70
 
 
+def _summary_client(energy_wh=42000):
+    """An Ohme client whose summary reports a fixed total energy, no daily rows."""
+    mock_client = MagicMock()
+    mock_client.async_get_charge_summary = AsyncMock(
+        return_value={"granularity": "DAY", "totalStats": {"energyChargedTotalWh": energy_wh}, "stats": []}
+    )
+    return mock_client
+
+
+def test_statistics_includes_efficiency_when_data_available(client):
+    store.client = _summary_client(energy_wh=42000)  # 42 kWh charged
+    with patch("db.is_enabled", return_value=True), \
+         patch("db.get_miles_driven", new=AsyncMock(return_value=168)) as mock_miles:
+        body = client.get("/api/statistics?days=30").json()
+
+    # 168 miles driven / 42 kWh charged = 4.0 mi/kWh
+    assert body["efficiency"] == {"milesDriven": 168, "milesPerKwh": 4.0}
+    mock_miles.assert_awaited_once()
+
+
+def test_statistics_efficiency_null_when_persistence_disabled(client):
+    store.client = _summary_client()
+    with patch("db.is_enabled", return_value=False):
+        body = client.get("/api/statistics?days=7").json()
+    assert body["efficiency"] is None
+
+
+def test_statistics_efficiency_null_when_no_odometer_span(client):
+    store.client = _summary_client()
+    with patch("db.is_enabled", return_value=True), \
+         patch("db.get_miles_driven", new=AsyncMock(return_value=None)):
+        body = client.get("/api/statistics?days=90").json()
+    assert body["efficiency"] is None
+
+
 def test_parse_summary_buckets_days_in_account_timezone():
     import datetime as dt
     from zoneinfo import ZoneInfo

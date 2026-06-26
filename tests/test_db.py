@@ -176,6 +176,38 @@ async def test_get_recent_sessions_none_on_error():
         db._pool = None
 
 
+# --- odometer / efficiency ------------------------------------------------------
+
+
+async def test_get_miles_driven_returns_span(fake_pool):
+    import datetime as dt
+
+    conn, _ = fake_pool  # default fake cursor returns row (42,)
+    miles = await db.get_miles_driven(dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc))
+    assert miles == 42
+    sql, _params = conn.executed[0]
+    assert "MAX(odometer_miles) - MIN(odometer_miles)" in sql
+    assert "HAVING COUNT(odometer_miles) >= 2" in sql  # never report from a lone reading
+
+
+async def test_get_miles_driven_none_when_insufficient_data():
+    import datetime as dt
+
+    # fetchone returns None when the HAVING clause filters out the single group.
+    db._pool = _FakePool(_FakeConn(_FakeCursor(row=None)))
+    try:
+        assert await db.get_miles_driven(dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)) is None
+    finally:
+        db._pool = None
+
+
+async def test_get_miles_driven_none_when_disabled():
+    import datetime as dt
+
+    db._pool = None
+    assert await db.get_miles_driven(dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)) is None
+
+
 # --- schedule ------------------------------------------------------------------
 
 

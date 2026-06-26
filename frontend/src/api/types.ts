@@ -118,4 +118,14 @@ export interface StatisticsResponse {
     carbonSavedKgVsGasCar: number;
   };
   daily: DailyStat[];
+  /**
+   * Measured driving efficiency over the range, from odometer history. Null
+   * when persistence is off or there isn't enough data to compute it.
+   */
+  efficiency: {
+    /** Miles driven across the window (odometer span). */
+    milesDriven: number;
+    /** Real-world miles per kWh: milesDriven / energy charged. */
+    milesPerKwh: number;
+  } | null;
 }

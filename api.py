@@ -615,6 +615,24 @@ async def _persist_daily_stats(client: Any, days: int = 90) -> None:
     await db.record_daily_stats(parsed["daily"], parsed["currency"])
 
 
+async def _compute_efficiency(days: int, energy_kwh: float) -> Optional[dict[str, Any]]:
+    """Driving efficiency (mi/kWh) over the window.
+
+    Miles driven (the odometer span across this window's charge sessions)
+    divided by the energy charged. Over a long enough window energy charged ≈
+    energy consumed, so this is a fair real-world figure. None when there isn't
+    enough to compute it: persistence off, no energy, or fewer than two odometer
+    readings to span.
+    """
+    if not db.is_enabled() or energy_kwh <= 0:
+        return None
+    since = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+    miles = await db.get_miles_driven(since)
+    if not miles or miles <= 0:
+        return None
+    return {"milesDriven": miles, "milesPerKwh": round(miles / energy_kwh, 2)}
+
+
 @app.get("/api/statistics")
 async def get_statistics(days: int = Query(default=7, ge=1, le=90)) -> JSONResponse:
     client = store.client
@@ -641,6 +659,8 @@ async def get_statistics(days: int = Query(default=7, ge=1, le=90)) -> JSONRespo
 
     # async_get_charge_summary returns granularity as an enum; drop it before serialising.
     parsed = parse_summary({k: v for k, v in summary.items() if k != "granularity"}, days)
+    # Driving efficiency from the odometer history (null when unavailable).
+    parsed["efficiency"] = await _compute_efficiency(days, parsed["totals"]["energyKwh"])
     _summary_cache.update(key=cache_key, value=parsed, at=now)
     # Opportunistically persist the day totals we just fetched (no-op when disabled).
     await db.record_daily_stats(parsed["daily"], parsed["currency"])

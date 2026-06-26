@@ -22,6 +22,7 @@ const empty: StatisticsResponse = {
     { date: '2026-05-27', energyKwh: 0, savings: 0, cost: 0 },
     { date: '2026-05-28', energyKwh: 0, savings: 0, cost: 0 },
   ],
+  efficiency: null,
 };
 
 describe('deriveInsights', () => {
@@ -41,6 +42,26 @@ describe('deriveInsights', () => {
     expect(insights.avgPerChargingDay).toBe(0);
     expect(insights.bestDay).toBeNull();
     expect(insights.estimatedMiles).toBe(0);
+  });
+
+  it('falls back to the assumed efficiency when none is measured', () => {
+    const insights = deriveInsights(statisticsFixture); // efficiency: null
+    expect(insights.efficiencyIsReal).toBe(false);
+    expect(insights.milesPerKwh).toBe(MILES_PER_KWH);
+    expect(insights.milesDriven).toBeNull();
+  });
+
+  it('uses the measured efficiency for the range estimate when present', () => {
+    const withEff: StatisticsResponse = {
+      ...statisticsFixture,
+      efficiency: { milesDriven: 168, milesPerKwh: 4 },
+    };
+    const insights = deriveInsights(withEff);
+    expect(insights.efficiencyIsReal).toBe(true);
+    expect(insights.milesPerKwh).toBe(4);
+    expect(insights.milesDriven).toBe(168);
+    // 42 kWh charged * 4 mi/kWh
+    expect(insights.estimatedMiles).toBeCloseTo(42 * 4, 5);
   });
 });
 
