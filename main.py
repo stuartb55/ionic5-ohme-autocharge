@@ -38,10 +38,10 @@ def load_persisted_target() -> None:
 async def handle_plugin_event(client) -> bool:
     """Called once per session when the car transitions from unplugged → plugged in.
     Returns True only when Ohme has been successfully updated (or no update was needed)."""
-    logger.info("Plug-in detected — fetching battery SOC from Bluelink...")
+    logger.info("Plug-in detected — fetching vehicle state from Bluelink...")
     try:
         # hyundai_kia_connect_api is synchronous; run it in a thread to avoid blocking the loop
-        soc = await asyncio.to_thread(bluelink.get_battery_percentage)
+        vehicle = await asyncio.to_thread(bluelink.get_vehicle_state)
     except Exception:
         logger.exception("Failed to fetch SOC from Hyundai Bluelink — will retry next poll")
         await _notify_plugin_failure(
@@ -50,9 +50,10 @@ async def handle_plugin_event(client) -> bool:
         )
         return False
 
-    # Remember the real SOC so the dashboard shows it instead of Ohme's
-    # unreliable internal battery estimate.
-    store.record_soc(soc)
+    # Remember the real SOC (plus range/odometer) so the dashboard shows it
+    # instead of Ohme's unreliable internal battery estimate.
+    store.record_vehicle_state(vehicle)
+    soc = vehicle.soc
 
     target = store.charge_target
 
@@ -69,6 +70,7 @@ async def handle_plugin_event(client) -> bool:
                 target_percent=target,
                 topup_percent=0,
                 action="skipped_at_target",
+                odometer_miles=vehicle.odometer_miles,
             )
         store.plugin_failure_notified = False
         return True
@@ -99,6 +101,7 @@ async def handle_plugin_event(client) -> bool:
                 target_percent=target,
                 topup_percent=target - soc,
                 action="configured",
+                odometer_miles=vehicle.odometer_miles,
             )
             await db.record_schedule(
                 session_id=session_id,

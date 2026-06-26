@@ -196,6 +196,10 @@ body {
 .battery-caption .vehicle {
   font-weight: 600;
 }
+.battery-caption .vehicle .range {
+  color: var(--text-muted);
+  font-weight: 400;
+}
 .battery-caption .target {
   color: var(--text-muted);
   font-size: 0.85rem;

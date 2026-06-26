@@ -1,9 +1,15 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
+import bluelink
 import config
 from main import handle_plugin_event, run_loop, run_once
 from state import store
+
+
+def _vstate(soc, *, range_miles=150, odometer_miles=10000):
+    """Build a Bluelink VehicleState for patching bluelink.get_vehicle_state."""
+    return bluelink.VehicleState(soc=soc, range_miles=range_miles, odometer_miles=odometer_miles)
 
 
 def _mock_ohme_client(slots=None):
@@ -15,29 +21,27 @@ def _mock_ohme_client(slots=None):
 @pytest.fixture(autouse=True)
 def _reset_session_state():
     """Plug-in handling mutates the shared store; keep tests independent."""
-    store.last_soc = None
-    store.plugin_failure_notified = False
+    store.clear_soc()
     yield
-    store.last_soc = None
-    store.plugin_failure_notified = False
+    store.clear_soc()
 
 
 async def test_returns_false_when_bluelink_fails():
-    with patch("bluelink.get_battery_percentage", side_effect=RuntimeError("No vehicles found")):
+    with patch("bluelink.get_vehicle_state", side_effect=RuntimeError("No vehicles found")):
         result = await handle_plugin_event(_mock_ohme_client())
     assert result is False
 
 
 async def test_returns_true_when_soc_already_at_target(monkeypatch):
     monkeypatch.setattr(config, "CHARGE_TARGET", 80)
-    with patch("bluelink.get_battery_percentage", return_value=80):
+    with patch("bluelink.get_vehicle_state", return_value=_vstate(80)):
         result = await handle_plugin_event(_mock_ohme_client())
     assert result is True
 
 
 async def test_returns_true_when_soc_above_target(monkeypatch):
     monkeypatch.setattr(config, "CHARGE_TARGET", 80)
-    with patch("bluelink.get_battery_percentage", return_value=95):
+    with patch("bluelink.get_vehicle_state", return_value=_vstate(95)):
         result = await handle_plugin_event(_mock_ohme_client())
     assert result is True
 
@@ -46,7 +50,7 @@ async def test_sets_ohme_target_and_sends_notification_when_below_target(monkeyp
     monkeypatch.setattr(config, "CHARGE_TARGET", 80)
     client = _mock_ohme_client()
 
-    with patch("bluelink.get_battery_percentage", return_value=62), \
+    with patch("bluelink.get_vehicle_state", return_value=_vstate(62)), \
          patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target, \
          patch("ntfy.send", new=AsyncMock()) as mock_notify:
         result = await handle_plugin_event(client)
@@ -67,7 +71,7 @@ async def test_notification_includes_charge_schedule_when_slots_available(monkey
     slot.__str__ = lambda self: "01:00-03:30"
     client = _mock_ohme_client(slots=[slot])
 
-    with patch("bluelink.get_battery_percentage", return_value=62), \
+    with patch("bluelink.get_vehicle_state", return_value=_vstate(62)), \
          patch("ohme_client.set_target", new=AsyncMock()), \
          patch("ntfy.send", new=AsyncMock()) as mock_notify:
         await handle_plugin_event(client)
@@ -83,7 +87,7 @@ async def test_records_session_and_schedule_when_db_enabled(monkeypatch):
     client.next_slot_start = None
     client.next_slot_end = None
 
-    with patch("bluelink.get_battery_percentage", return_value=62), \
+    with patch("bluelink.get_vehicle_state", return_value=_vstate(62)), \
          patch("ohme_client.set_target", new=AsyncMock()), \
          patch("ntfy.send", new=AsyncMock()), \
          patch("db.is_enabled", return_value=True), \
@@ -93,7 +97,8 @@ async def test_records_session_and_schedule_when_db_enabled(monkeypatch):
 
     assert result is True
     mock_session.assert_awaited_once_with(
-        vehicle_name="IONIQ 5", soc_percent=62, target_percent=80, topup_percent=18, action="configured"
+        vehicle_name="IONIQ 5", soc_percent=62, target_percent=80, topup_percent=18,
+        action="configured", odometer_miles=10000,
     )
     mock_schedule.assert_awaited_once()
     assert mock_schedule.call_args.kwargs["session_id"] == 7
@@ -104,21 +109,22 @@ async def test_records_skipped_session_when_already_at_target(monkeypatch):
     client = _mock_ohme_client()
     client.current_vehicle = "IONIQ 5"
 
-    with patch("bluelink.get_battery_percentage", return_value=90), \
+    with patch("bluelink.get_vehicle_state", return_value=_vstate(90, odometer_miles=12000)), \
          patch("db.is_enabled", return_value=True), \
          patch("db.record_session", new=AsyncMock(return_value=1)) as mock_session:
         result = await handle_plugin_event(client)
 
     assert result is True
     mock_session.assert_awaited_once_with(
-        vehicle_name="IONIQ 5", soc_percent=90, target_percent=80, topup_percent=0, action="skipped_at_target"
+        vehicle_name="IONIQ 5", soc_percent=90, target_percent=80, topup_percent=0,
+        action="skipped_at_target", odometer_miles=12000,
     )
 
 
 async def test_returns_false_when_ohme_fails_and_sends_only_failure_alert(monkeypatch):
     monkeypatch.setattr(config, "CHARGE_TARGET", 80)
 
-    with patch("bluelink.get_battery_percentage", return_value=62), \
+    with patch("bluelink.get_vehicle_state", return_value=_vstate(62)), \
          patch("ohme_client.set_target", new=AsyncMock(side_effect=Exception("Ohme API error"))), \
          patch("ntfy.send", new=AsyncMock()) as mock_notify:
         result = await handle_plugin_event(_mock_ohme_client())
@@ -134,7 +140,7 @@ async def test_returns_false_when_ohme_fails_and_sends_only_failure_alert(monkey
 async def test_no_ohme_call_when_soc_at_or_above_target(monkeypatch):
     monkeypatch.setattr(config, "CHARGE_TARGET", 80)
 
-    with patch("bluelink.get_battery_percentage", return_value=80), \
+    with patch("bluelink.get_vehicle_state", return_value=_vstate(80)), \
          patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
         await handle_plugin_event(_mock_ohme_client())
 
@@ -145,7 +151,7 @@ async def test_no_ohme_call_when_soc_at_or_above_target(monkeypatch):
 
 
 async def test_bluelink_failure_notifies_once_per_session():
-    with patch("bluelink.get_battery_percentage", side_effect=RuntimeError("down")), \
+    with patch("bluelink.get_vehicle_state", side_effect=RuntimeError("down")), \
          patch("ntfy.send", new=AsyncMock()) as mock_notify:
         # The poll loop retries every interval; only the first failure alerts.
         await handle_plugin_event(_mock_ohme_client())
@@ -157,7 +163,7 @@ async def test_bluelink_failure_notifies_once_per_session():
 
 async def test_ohme_failure_notifies_once_per_session(monkeypatch):
     monkeypatch.setattr(config, "CHARGE_TARGET", 80)
-    with patch("bluelink.get_battery_percentage", return_value=62), \
+    with patch("bluelink.get_vehicle_state", return_value=_vstate(62)), \
          patch("ohme_client.set_target", new=AsyncMock(side_effect=Exception("boom"))), \
          patch("ntfy.send", new=AsyncMock()) as mock_notify:
         await handle_plugin_event(_mock_ohme_client())
@@ -170,7 +176,7 @@ async def test_successful_handling_resets_failure_notice(monkeypatch):
     monkeypatch.setattr(config, "CHARGE_TARGET", 80)
     store.plugin_failure_notified = True  # a previous attempt alerted
 
-    with patch("bluelink.get_battery_percentage", return_value=62), \
+    with patch("bluelink.get_vehicle_state", return_value=_vstate(62)), \
          patch("ohme_client.set_target", new=AsyncMock()), \
          patch("ntfy.send", new=AsyncMock()):
         result = await handle_plugin_event(_mock_ohme_client())

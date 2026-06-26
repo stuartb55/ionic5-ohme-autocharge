@@ -22,6 +22,9 @@ class StatusSnapshot:
     # Vehicle
     vehicle_name: Optional[str] = None
     battery_percent: Optional[int] = None
+    # Estimated driving range (miles) from Bluelink at the last plug-in. None
+    # when the car is unplugged or didn't report it.
+    range_miles: Optional[int] = None
 
     # Charger
     charger_status: str = "unknown"  # ChargerStatus value, e.g. "charging"
@@ -64,6 +67,11 @@ class AppState:
         # Ohme client's own `battery` reading is unreliable, so the snapshot
         # prefers this value when available.
         self.last_soc: Optional[int] = None
+        # Driving range (miles) and odometer (miles) captured alongside the SOC
+        # at the last plug-in. Range is shown next to the SOC; the odometer is
+        # persisted per session so efficiency (mi/kWh) can be derived later.
+        self.last_range_miles: Optional[int] = None
+        self.last_odometer_miles: Optional[int] = None
         # Runtime charge-target override set from the dashboard. None means "use
         # the CHARGE_TARGET env default"; see the `charge_target` property.
         self.charge_target_override: Optional[int] = None
@@ -104,9 +112,17 @@ class AppState:
         """Remember the real vehicle SOC fetched from Bluelink at plug-in."""
         self.last_soc = soc
 
+    def record_vehicle_state(self, state: Any) -> None:
+        """Remember the SOC plus driving range and odometer from a Bluelink read."""
+        self.last_soc = state.soc
+        self.last_range_miles = state.range_miles
+        self.last_odometer_miles = state.odometer_miles
+
     def clear_soc(self) -> None:
-        """Forget the plug-in SOC — it is stale the moment the car unplugs."""
+        """Forget the plug-in readings — they're stale the moment the car unplugs."""
         self.last_soc = None
+        self.last_range_miles = None
+        self.last_odometer_miles = None
         # New session, clean slate for the plug-in failure alert.
         self.plugin_failure_notified = False
 

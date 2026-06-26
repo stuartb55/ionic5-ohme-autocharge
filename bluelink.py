@@ -1,5 +1,8 @@
 import logging
 import threading
+from dataclasses import dataclass
+from typing import Optional
+
 from hyundai_kia_connect_api import VehicleManager
 
 import config
@@ -8,6 +11,43 @@ logger = logging.getLogger(__name__)
 
 # Region 1 = Europe, Brand 2 = Hyundai
 _manager: VehicleManager | None = None
+
+# The SDK reports distances in the account's configured unit ("km", "mi", or
+# None). This app is UK-only, so normalise everything to miles for display.
+_KM_TO_MILES = 0.621371
+
+
+@dataclass
+class VehicleState:
+    """A snapshot of the vehicle read from Bluelink at a point in time.
+
+    ``range_miles`` and ``odometer_miles`` are None when the vehicle didn't
+    report them (or reported an unrecognised unit) — they're nice-to-haves, so a
+    missing value must never block the SOC the charging logic depends on.
+    """
+
+    soc: int
+    range_miles: Optional[int] = None
+    odometer_miles: Optional[int] = None
+
+
+def _to_miles(value, unit) -> Optional[int]:
+    """Convert an SDK distance (value + unit string) to whole miles, or None.
+
+    Defensive: the SDK fields can be absent or non-numeric (and in tests are
+    MagicMocks), so anything that isn't a real number in a known unit yields
+    None rather than a wrong reading.
+    """
+    try:
+        miles = float(value)
+    except (TypeError, ValueError):
+        return None
+    if unit == "km":
+        miles *= _KM_TO_MILES
+    elif unit != "mi":
+        # Unknown/absent unit — don't guess at the scale.
+        return None
+    return round(miles)
 
 # The VehicleManager is a shared, mutable singleton and the SDK is not
 # thread-safe. get_battery_percentage runs via asyncio.to_thread and has two
@@ -30,8 +70,12 @@ def _get_manager() -> VehicleManager:
     return _manager
 
 
-def get_battery_percentage() -> int:
-    """Return the current battery SOC % for the first vehicle on the account."""
+def get_vehicle_state() -> VehicleState:
+    """Return SOC (plus driving range and odometer) for the first vehicle.
+
+    SOC is required — a missing one raises, since the charging logic can't
+    proceed without it. Range and odometer are best-effort extras.
+    """
     with _lock:
         vm = _get_manager()
         vm.check_and_refresh_token()
@@ -42,9 +86,16 @@ def get_battery_percentage() -> int:
 
         vehicle = next(iter(vm.vehicles.values()))
         soc = vehicle.ev_battery_percentage
+        range_miles = _to_miles(vehicle.ev_driving_range, vehicle.ev_driving_range_unit)
+        odometer_miles = _to_miles(vehicle.odometer, vehicle.odometer_unit)
 
     if soc is None:
         raise RuntimeError("Vehicle did not report a battery percentage — try again shortly")
 
-    logger.info("Hyundai battery SOC: %s%%", soc)
-    return soc
+    logger.info("Hyundai SOC: %s%%, range: %s mi, odometer: %s mi", soc, range_miles, odometer_miles)
+    return VehicleState(soc=soc, range_miles=range_miles, odometer_miles=odometer_miles)
+
+
+def get_battery_percentage() -> int:
+    """Return just the current battery SOC % for the first vehicle on the account."""
+    return get_vehicle_state().soc

@@ -46,3 +46,19 @@ describe('StatusSection projected finish', () => {
     expect(screen.queryByText(/ready by/i)).not.toBeInTheDocument();
   });
 });
+
+describe('StatusSection driving range', () => {
+  function withVehicle(overrides: Partial<StatusResponse['vehicle']>): StatusResponse {
+    return { ...statusFixture, vehicle: { ...statusFixture.vehicle, ...overrides } };
+  }
+
+  it('shows the range next to the vehicle name', () => {
+    render(<StatusSection status={withVehicle({ rangeMiles: 180 })} />);
+    expect(screen.getByText(/180 mi/)).toBeInTheDocument();
+  });
+
+  it('omits the range when not reported', () => {
+    render(<StatusSection status={withVehicle({ rangeMiles: null })} />);
+    expect(screen.queryByText(/mi$/)).not.toBeInTheDocument();
+  });
+});

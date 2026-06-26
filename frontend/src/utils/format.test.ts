@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatFinishTime,
   formatKwh,
+  formatMiles,
   formatMoney,
   formatPower,
   formatPricePerKwh,
@@ -64,6 +65,18 @@ describe('statusLabel', () => {
     expect(statusLabel('charging')).toBe('Charging');
     expect(statusLabel('unplugged')).toBe('Unplugged');
     expect(statusLabel('pending_approval')).toBe('Awaiting approval');
+  });
+});
+
+describe('formatMiles', () => {
+  it('renders whole miles', () => {
+    expect(formatMiles(180)).toBe('180 mi');
+    expect(formatMiles(180.6)).toBe('181 mi');
+  });
+  it('renders empty for null/negative', () => {
+    expect(formatMiles(null)).toBe('');
+    expect(formatMiles(undefined)).toBe('');
+    expect(formatMiles(-5)).toBe('');
   });
 });
 
