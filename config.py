@@ -26,6 +26,13 @@ OHME_PASSWORD = os.environ["OHME_PASSWORD"]
 CHARGE_TARGET = int(os.getenv("CHARGE_TARGET", "80"))
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "180"))
 
+# How often (seconds) to re-read the live SOC from Bluelink while a charge is
+# actively running, so the dashboard battery ring climbs during the session
+# instead of sitting at the plug-in reading. Reads Hyundai's server-side cached
+# state (the car pushes updates while charging), so it never wakes/drains the
+# car. Default 30 min; 0 disables mid-charge refresh (SOC stays at plug-in).
+LIVE_SOC_INTERVAL = int(os.getenv("LIVE_SOC_INTERVAL", str(30 * 60)))
+
 NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")
 NTFY_URL = os.getenv("NTFY_URL", "https://ntfy.sh")
 NTFY_TOKEN = os.getenv("NTFY_TOKEN", "")

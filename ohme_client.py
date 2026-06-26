@@ -26,6 +26,11 @@ def is_connected(status: ChargerStatus) -> bool:
     return status is not ChargerStatus.UNPLUGGED
 
 
+def is_charging(status: ChargerStatus) -> bool:
+    """True when the charger is actively delivering energy to the car."""
+    return status is ChargerStatus.CHARGING
+
+
 async def set_target(client: OhmeApiClient, current_soc: int, target_percent: int) -> None:
     """Calculate charge needed and set Ohme to add that amount (does not send SOC to charger)."""
     # async_update_device_info must run first to populate _cars and serial (needed for internal API calls).

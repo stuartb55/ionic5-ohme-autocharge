@@ -49,7 +49,7 @@ The app has these modules that form a thin pipeline:
 
 ## Configuration
 
-Copy `.env.example` to `.env`. Required vars: `HYUNDAI_USERNAME`, `HYUNDAI_PASSWORD`, `HYUNDAI_PIN`, `OHME_EMAIL`, `OHME_PASSWORD`. Optional: `CHARGE_TARGET` (default 80, the initial/fallback target), `POLL_INTERVAL` (default 180s), `SETTINGS_PATH` (default `/app/data/settings.json`; a named volume is mounted there in both compose files so a dashboard-changed target survives restarts), `NTFY_TOPIC`, `NTFY_URL`, `NTFY_TOKEN`, `CORS_ORIGINS`, `DATABASE_URL` (blank disables Postgres history persistence; both compose files bundle a `postgres` service and default this to it), `DAILY_STATS_INTERVAL` (default 6h; how often the poll loop refreshes Ohme's daily totals into Postgres).
+Copy `.env.example` to `.env`. Required vars: `HYUNDAI_USERNAME`, `HYUNDAI_PASSWORD`, `HYUNDAI_PIN`, `OHME_EMAIL`, `OHME_PASSWORD`. Optional: `CHARGE_TARGET` (default 80, the initial/fallback target), `POLL_INTERVAL` (default 180s), `LIVE_SOC_INTERVAL` (default 30min; how often the poll loop re-reads the SOC from Bluelink *while charging* so the battery ring climbs through the session — reads Hyundai's cached state so it never wakes the car; 0 disables it), `SETTINGS_PATH` (default `/app/data/settings.json`; a named volume is mounted there in both compose files so a dashboard-changed target survives restarts), `NTFY_TOPIC`, `NTFY_URL`, `NTFY_TOKEN`, `CORS_ORIGINS`, `DATABASE_URL` (blank disables Postgres history persistence; both compose files bundle a `postgres` service and default this to it), `DAILY_STATS_INTERVAL` (default 6h; how often the poll loop refreshes Ohme's daily totals into Postgres).
 
 ## Testing
 

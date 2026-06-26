@@ -189,6 +189,29 @@ async def _make_client_with_retry() -> Any:
 _ACTIVE_STATUSES = frozenset({"charging", "plugged_in", "paused"})
 
 
+async def _maybe_refresh_live_soc(status: Any) -> None:
+    """Re-read the SOC from Bluelink mid-charge so the battery ring climbs.
+
+    No-op unless the charger is actively charging and the last reading is older
+    than ``LIVE_SOC_INTERVAL`` (0 disables it). The plug-in read and this share
+    ``store.last_soc_at``, so the first refresh lands one interval after plug-in.
+    Reads Hyundai's cached state, so it never wakes the car. Display-only — it
+    does not reconfigure the Ohme target (that was set at plug-in).
+    """
+    if config.LIVE_SOC_INTERVAL <= 0 or not ohme_client.is_charging(status):
+        return
+    last = store.last_soc_at
+    if last is not None and time.monotonic() - last < config.LIVE_SOC_INTERVAL:
+        return
+    try:
+        vehicle = await asyncio.to_thread(bluelink.get_vehicle_state)
+    except Exception:  # noqa: BLE001 - a failed refresh just leaves the prior reading
+        logger.warning("Live SOC refresh from Bluelink failed — keeping last reading", exc_info=True)
+        return
+    store.record_vehicle_state(vehicle)
+    logger.info("Live SOC refreshed mid-charge: %s%%", vehicle.soc)
+
+
 async def _maybe_notify_finished(prev_status: str, snap: StatusSnapshot) -> None:
     """Send a session summary when an active charge transitions to finished.
 
@@ -260,6 +283,10 @@ async def poll_loop() -> None:
                 # just its quick Ohme write, so that write is still serialised against
                 # the dashboard's set_target and the charge-summary readers.
                 now_connected = await detector.update(client, status)
+
+                # Keep the battery ring climbing during a charge by re-reading the
+                # SOC on a slow cadence (outside client_lock — Bluelink only).
+                await _maybe_refresh_live_soc(status)
 
                 prev_status = store.status.charger_status
                 recovered = store.consecutive_poll_failures >= POLL_FAILURE_ALERT_AFTER
