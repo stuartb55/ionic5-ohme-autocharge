@@ -15,6 +15,8 @@ export interface StatusResponse {
     batteryPercent: number | null;
     /** Estimated driving range in miles at the last plug-in, or null. */
     rangeMiles: number | null;
+    /** Battery state of health (%) at the last plug-in, or null. */
+    sohPercent: number | null;
   };
   charger: {
     status: ChargerStatus;
@@ -143,6 +145,8 @@ export interface ChargeSessionEntry {
   action: string | null;
   /** Odometer (miles) at plug-in, or null when not reported. */
   odometerMiles: number | null;
+  /** Battery state of health (%) at plug-in, or null. */
+  sohPercent: number | null;
 }
 
 export interface SessionsResponse {

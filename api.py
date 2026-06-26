@@ -162,6 +162,7 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
         # Driving range is only meaningful while plugged in (it's the reading
         # captured at the last plug-in); once unplugged it goes stale like the SOC.
         range_miles=store.last_range_miles if connected else None,
+        soh_percent=store.last_soh_percent if connected else None,
         charger_status=status_value,
         connected=connected,
         charger_online=bool(client.available),
@@ -732,6 +733,7 @@ async def get_status() -> JSONResponse:
             "name": store.status.vehicle_name,
             "batteryPercent": store.status.battery_percent,
             "rangeMiles": store.status.range_miles,
+            "sohPercent": store.status.soh_percent,
         },
         "charger": {
             "status": store.status.charger_status,

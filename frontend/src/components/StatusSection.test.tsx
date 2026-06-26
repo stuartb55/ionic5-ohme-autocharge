@@ -78,4 +78,14 @@ describe('StatusSection driving range', () => {
     render(<StatusSection status={withVehicle({ rangeMiles: null })} />);
     expect(screen.queryByText(/mi$/)).not.toBeInTheDocument();
   });
+
+  it('shows battery health when reported', () => {
+    render(<StatusSection status={withVehicle({ sohPercent: 98 })} />);
+    expect(screen.getByText(/Battery health 98%/)).toBeInTheDocument();
+  });
+
+  it('omits battery health when not reported', () => {
+    render(<StatusSection status={withVehicle({ sohPercent: null })} />);
+    expect(screen.queryByText(/Battery health/)).not.toBeInTheDocument();
+  });
 });

@@ -38,6 +38,7 @@ def reset_state():
     store.last_soc = None
     store.last_range_miles = None
     store.last_odometer_miles = None
+    store.last_soh_percent = None
     store.last_soc_at = None
     store.charge_target_override = None
     store.ready_by = None
@@ -1047,6 +1048,12 @@ def test_build_snapshot_includes_range_when_connected():
     assert api.build_snapshot(_charging_client(), connected=True).range_miles == 180
     # Range is the plug-in reading, so it goes stale (None) once unplugged.
     assert api.build_snapshot(_charging_client(), connected=False).range_miles is None
+
+
+def test_build_snapshot_includes_soh_when_connected():
+    store.last_soh_percent = 98
+    assert api.build_snapshot(_charging_client(), connected=True).soh_percent == 98
+    assert api.build_snapshot(_charging_client(), connected=False).soh_percent is None
 
 
 def _slot(energy, end=None):

@@ -93,10 +93,20 @@ ORDER BY stat_date;
 Recent charge sessions (table):
 
 ```sql
-SELECT plugged_in_at, vehicle_name, soc_percent, target_percent, topup_percent, action, odometer_miles
+SELECT plugged_in_at, vehicle_name, soc_percent, target_percent, topup_percent, action, odometer_miles, soh_percent
 FROM charge_sessions
 ORDER BY plugged_in_at DESC
 LIMIT 50;
+```
+
+Battery health (state of health) over time — a degradation trend (time
+series). One point per plug-in that reported SoH:
+
+```sql
+SELECT plugged_in_at AS time, soh_percent
+FROM charge_sessions
+WHERE $__timeFilter(plugged_in_at) AND soh_percent IS NOT NULL
+ORDER BY plugged_in_at;
 ```
 
 Driving efficiency (miles per kWh) over the selected range — distance covered

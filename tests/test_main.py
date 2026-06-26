@@ -7,9 +7,11 @@ from main import handle_plugin_event, run_loop, run_once
 from state import store
 
 
-def _vstate(soc, *, range_miles=150, odometer_miles=10000):
+def _vstate(soc, *, range_miles=150, odometer_miles=10000, soh_percent=None):
     """Build a Bluelink VehicleState for patching bluelink.get_vehicle_state."""
-    return bluelink.VehicleState(soc=soc, range_miles=range_miles, odometer_miles=odometer_miles)
+    return bluelink.VehicleState(
+        soc=soc, range_miles=range_miles, odometer_miles=odometer_miles, soh_percent=soh_percent
+    )
 
 
 def _mock_ohme_client(slots=None):
@@ -89,7 +91,7 @@ async def test_records_session_and_schedule_when_db_enabled(monkeypatch):
     client.next_slot_start = None
     client.next_slot_end = None
 
-    with patch("bluelink.get_vehicle_state", return_value=_vstate(62)), \
+    with patch("bluelink.get_vehicle_state", return_value=_vstate(62, soh_percent=98)), \
          patch("ohme_client.set_target", new=AsyncMock()), \
          patch("ntfy.send", new=AsyncMock()), \
          patch("db.is_enabled", return_value=True), \
@@ -100,7 +102,7 @@ async def test_records_session_and_schedule_when_db_enabled(monkeypatch):
     assert result is True
     mock_session.assert_awaited_once_with(
         vehicle_name="IONIQ 5", soc_percent=62, target_percent=80, topup_percent=18,
-        action="configured", odometer_miles=10000,
+        action="configured", odometer_miles=10000, soh_percent=98,
     )
     mock_schedule.assert_awaited_once()
     assert mock_schedule.call_args.kwargs["session_id"] == 7
@@ -111,7 +113,7 @@ async def test_records_skipped_session_when_already_at_target(monkeypatch):
     client = _mock_ohme_client()
     client.current_vehicle = "IONIQ 5"
 
-    with patch("bluelink.get_vehicle_state", return_value=_vstate(90, odometer_miles=12000)), \
+    with patch("bluelink.get_vehicle_state", return_value=_vstate(90, odometer_miles=12000, soh_percent=97)), \
          patch("db.is_enabled", return_value=True), \
          patch("db.record_session", new=AsyncMock(return_value=1)) as mock_session:
         result = await handle_plugin_event(client)
@@ -119,7 +121,7 @@ async def test_records_skipped_session_when_already_at_target(monkeypatch):
     assert result is True
     mock_session.assert_awaited_once_with(
         vehicle_name="IONIQ 5", soc_percent=90, target_percent=80, topup_percent=0,
-        action="skipped_at_target", odometer_miles=12000,
+        action="skipped_at_target", odometer_miles=12000, soh_percent=97,
     )
 
 

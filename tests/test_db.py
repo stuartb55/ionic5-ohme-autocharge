@@ -107,13 +107,13 @@ async def test_record_session_inserts_and_returns_id(fake_pool):
     conn, _ = fake_pool
     session_id = await db.record_session(
         vehicle_name="IONIQ 5", soc_percent=62, target_percent=80, topup_percent=18,
-        action="configured", odometer_miles=12450,
+        action="configured", odometer_miles=12450, soh_percent=98,
     )
     assert session_id == 42
     sql, params = conn.executed[0]
     assert "INSERT INTO charge_sessions" in sql
     assert "RETURNING id" in sql
-    assert params == ("IONIQ 5", 62, 80, 18, "configured", 12450)
+    assert params == ("IONIQ 5", 62, 80, 18, "configured", 12450, 98)
 
 
 async def test_record_session_swallows_errors():
@@ -135,8 +135,8 @@ async def test_get_recent_sessions_maps_rows(fake_pool):
 
     conn, cursor = fake_pool
     cursor.rows = [
-        (3, dt.datetime(2026, 6, 1, 21, 42, tzinfo=dt.timezone.utc), "IONIQ 5", 54, 80, 26, "configured", 12450),
-        (2, None, "IONIQ 5", 85, 80, 0, "skipped_at_target", None),
+        (3, dt.datetime(2026, 6, 1, 21, 42, tzinfo=dt.timezone.utc), "IONIQ 5", 54, 80, 26, "configured", 12450, 98),
+        (2, None, "IONIQ 5", 85, 80, 0, "skipped_at_target", None, None),
     ]
 
     sessions = await db.get_recent_sessions(10)
@@ -154,6 +154,7 @@ async def test_get_recent_sessions_maps_rows(fake_pool):
             "topupPercent": 26,
             "action": "configured",
             "odometerMiles": 12450,
+            "sohPercent": 98,
         },
         {
             "id": 2,
@@ -164,6 +165,7 @@ async def test_get_recent_sessions_maps_rows(fake_pool):
             "topupPercent": 0,
             "action": "skipped_at_target",
             "odometerMiles": None,
+            "sohPercent": None,
         },
     ]
 
