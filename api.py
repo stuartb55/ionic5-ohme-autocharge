@@ -965,6 +965,28 @@ async def _maybe_send_weekly_digest(client: Any) -> None:
     logger.info("Sent weekly charging digest")
 
 
+async def _previous_period_totals(client: Any, current_start_ts: int, days: int) -> Optional[dict[str, Any]]:
+    """Totals for the equal-length window immediately before the current one.
+
+    Used for the month-over-month comparison. Best-effort: None on any failure,
+    so the comparison simply hides rather than failing the statistics request.
+    """
+    prev_end = current_start_ts
+    prev_start = prev_end - days * 24 * 60 * 60 * 1000
+    try:
+        async with store.client_lock:
+            summary = await client.async_get_charge_summary(start_ts=prev_start, end_ts=prev_end)
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not fetch previous-period summary for comparison", exc_info=True)
+        return None
+    totals = parse_summary({k: v for k, v in summary.items() if k != "granularity"}, days)["totals"]
+    return {
+        "energyKwh": totals["energyKwh"],
+        "costTotal": totals["costTotal"],
+        "savingsVsStandard": totals["savingsVsStandard"],
+    }
+
+
 async def _compute_efficiency(days: int, energy_kwh: float) -> Optional[dict[str, Any]]:
     """Driving efficiency (mi/kWh) over the window.
 
@@ -1012,6 +1034,9 @@ async def get_statistics(days: int = Query(default=7, ge=1, le=90)) -> JSONRespo
     _cache_avg_price(parsed)
     # Driving efficiency from the odometer history (null when unavailable).
     parsed["efficiency"] = await _compute_efficiency(days, parsed["totals"]["energyKwh"])
+    # Period-over-period comparison: the previous equal-length window (best-effort).
+    previous = await _previous_period_totals(client, start_ts, days)
+    parsed["comparison"] = {"previous": previous} if previous is not None else None
     _summary_cache.update(key=cache_key, value=parsed, at=now)
     # Opportunistically persist the day totals we just fetched (no-op when disabled).
     await db.record_daily_stats(parsed["daily"], parsed["currency"])

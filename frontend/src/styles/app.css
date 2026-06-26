@@ -778,6 +778,25 @@ body {
   color: var(--text-muted);
   font-size: 0.85rem;
 }
+
+/* --- period-over-period delta badges --- */
+.stat-delta {
+  margin-top: 2px;
+}
+.delta {
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.delta.good {
+  color: var(--success, #16a34a);
+}
+.delta.bad {
+  color: var(--danger);
+}
+.delta.neutral {
+  color: var(--text-muted);
+}
 .vehicle-picker {
   display: inline-flex;
   align-items: center;

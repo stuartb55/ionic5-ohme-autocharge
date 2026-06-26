@@ -204,4 +204,15 @@ export interface StatisticsResponse {
     /** Real-world miles per kWh: milesDriven / energy charged. */
     milesPerKwh: number;
   } | null;
+  /**
+   * Totals for the previous equal-length period, for a period-over-period
+   * comparison. Null when the previous window couldn't be fetched.
+   */
+  comparison: {
+    previous: {
+      energyKwh: number;
+      costTotal: number;
+      savingsVsStandard: number;
+    };
+  } | null;
 }
