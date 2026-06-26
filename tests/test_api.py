@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 import api
 import bluelink
+import config
 import settings
 from state import StatusSnapshot, store
 
@@ -37,6 +38,7 @@ def reset_state():
     store.last_soc = None
     store.last_range_miles = None
     store.last_odometer_miles = None
+    store.last_soc_at = None
     store.charge_target_override = None
     store.last_poll_error = None
     store.consecutive_poll_failures = 0
@@ -428,6 +430,93 @@ def test_consecutive_failures_count_and_reset():
     assert store.consecutive_poll_failures == 2
     _populate_snapshot()  # a successful poll
     assert store.consecutive_poll_failures == 0
+
+
+# --- live SOC refresh -----------------------------------------------------------
+
+
+async def test_live_soc_refreshes_when_charging_and_due(monkeypatch):
+    from ohme import ChargerStatus
+
+    monkeypatch.setattr(config, "LIVE_SOC_INTERVAL", 1800)
+    store.last_soc = 60
+    store.last_soc_at = None  # no reading yet -> due immediately
+
+    with patch("bluelink.get_vehicle_state", return_value=_vstate(67, range_miles=210)) as mock_get:
+        await api._maybe_refresh_live_soc(ChargerStatus.CHARGING)
+
+    mock_get.assert_called_once()
+    assert store.last_soc == 67
+    assert store.last_range_miles == 210
+    assert store.last_soc_at is not None  # timer reset so the next one waits
+
+
+async def test_live_soc_skips_when_not_charging(monkeypatch):
+    from ohme import ChargerStatus
+
+    monkeypatch.setattr(config, "LIVE_SOC_INTERVAL", 1800)
+    store.last_soc = 60
+    store.last_soc_at = None
+
+    with patch("bluelink.get_vehicle_state") as mock_get:
+        await api._maybe_refresh_live_soc(ChargerStatus.PLUGGED_IN)
+
+    mock_get.assert_not_called()
+    assert store.last_soc == 60  # untouched
+
+
+async def test_live_soc_skips_when_recently_read(monkeypatch):
+    import time as _time
+    from ohme import ChargerStatus
+
+    monkeypatch.setattr(config, "LIVE_SOC_INTERVAL", 1800)
+    store.last_soc = 60
+    store.last_soc_at = _time.monotonic()  # just read -> not due
+
+    with patch("bluelink.get_vehicle_state") as mock_get:
+        await api._maybe_refresh_live_soc(ChargerStatus.CHARGING)
+
+    mock_get.assert_not_called()
+
+
+async def test_live_soc_refreshes_when_reading_is_stale(monkeypatch):
+    import time as _time
+    from ohme import ChargerStatus
+
+    monkeypatch.setattr(config, "LIVE_SOC_INTERVAL", 1800)
+    store.last_soc = 60
+    store.last_soc_at = _time.monotonic() - 3600  # an hour ago -> due
+
+    with patch("bluelink.get_vehicle_state", return_value=_vstate(72)) as mock_get:
+        await api._maybe_refresh_live_soc(ChargerStatus.CHARGING)
+
+    mock_get.assert_called_once()
+    assert store.last_soc == 72
+
+
+async def test_live_soc_disabled_when_interval_zero(monkeypatch):
+    from ohme import ChargerStatus
+
+    monkeypatch.setattr(config, "LIVE_SOC_INTERVAL", 0)
+    store.last_soc_at = None
+
+    with patch("bluelink.get_vehicle_state") as mock_get:
+        await api._maybe_refresh_live_soc(ChargerStatus.CHARGING)
+
+    mock_get.assert_not_called()
+
+
+async def test_live_soc_swallows_bluelink_error_keeps_reading(monkeypatch):
+    from ohme import ChargerStatus
+
+    monkeypatch.setattr(config, "LIVE_SOC_INTERVAL", 1800)
+    store.last_soc = 60
+    store.last_soc_at = None
+
+    with patch("bluelink.get_vehicle_state", side_effect=RuntimeError("Bluelink down")):
+        await api._maybe_refresh_live_soc(ChargerStatus.CHARGING)  # must not raise
+
+    assert store.last_soc == 60  # prior reading preserved
 
 
 # --- charge controls -------------------------------------------------------------

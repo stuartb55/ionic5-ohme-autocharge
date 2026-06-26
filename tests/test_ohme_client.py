@@ -53,6 +53,18 @@ def test_is_connected_false_for_unplugged():
     assert ohme_client.is_connected(ChargerStatus.UNPLUGGED) is False
 
 
+def test_is_charging_only_true_when_charging():
+    assert ohme_client.is_charging(ChargerStatus.CHARGING) is True
+    for status in (
+        ChargerStatus.UNPLUGGED,
+        ChargerStatus.PLUGGED_IN,
+        ChargerStatus.PAUSED,
+        ChargerStatus.FINISHED,
+        ChargerStatus.PENDING_APPROVAL,
+    ):
+        assert ohme_client.is_charging(status) is False
+
+
 async def test_set_target_calls_methods_in_correct_order():
     client = _mock_client()
     call_order = []

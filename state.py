@@ -9,6 +9,7 @@ they never race the loop's own use of the single authenticated Ohme client.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field, asdict
 from typing import Any, Optional
 
@@ -72,6 +73,10 @@ class AppState:
         # persisted per session so efficiency (mi/kWh) can be derived later.
         self.last_range_miles: Optional[int] = None
         self.last_odometer_miles: Optional[int] = None
+        # Monotonic time of the last Bluelink reading, used to pace the mid-charge
+        # live-SOC refresh (so it fires LIVE_SOC_INTERVAL after the plug-in read,
+        # not immediately). None means no reading held yet.
+        self.last_soc_at: Optional[float] = None
         # Runtime charge-target override set from the dashboard. None means "use
         # the CHARGE_TARGET env default"; see the `charge_target` property.
         self.charge_target_override: Optional[int] = None
@@ -111,18 +116,21 @@ class AppState:
     def record_soc(self, soc: int) -> None:
         """Remember the real vehicle SOC fetched from Bluelink at plug-in."""
         self.last_soc = soc
+        self.last_soc_at = time.monotonic()
 
     def record_vehicle_state(self, state: Any) -> None:
         """Remember the SOC plus driving range and odometer from a Bluelink read."""
         self.last_soc = state.soc
         self.last_range_miles = state.range_miles
         self.last_odometer_miles = state.odometer_miles
+        self.last_soc_at = time.monotonic()
 
     def clear_soc(self) -> None:
         """Forget the plug-in readings — they're stale the moment the car unplugs."""
         self.last_soc = None
         self.last_range_miles = None
         self.last_odometer_miles = None
+        self.last_soc_at = None
         # New session, clean slate for the plug-in failure alert.
         self.plugin_failure_notified = False
 
