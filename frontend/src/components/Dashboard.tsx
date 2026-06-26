@@ -22,6 +22,17 @@ function SectionSkeleton({ height }: { height: number }) {
   return <div className="card"><div className="skeleton" style={{ height }} /></div>;
 }
 
+function SectionError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="card section-error" role="alert">
+      <span>{message}</span>
+      <button type="button" className="ghost-button" onClick={onRetry}>
+        Retry
+      </button>
+    </div>
+  );
+}
+
 export function Dashboard() {
   const [days, setDays] = useState(7);
   // A ticking clock so the "updated Xs ago" label and the freshness dot stay
@@ -198,9 +209,17 @@ export function Dashboard() {
         ) : (
           <SectionSkeleton height={260} />
         )}
-        {schedule.data ? <ScheduleSection schedule={schedule.data} /> : <SectionSkeleton height={180} />}
+        {schedule.data ? (
+          <ScheduleSection schedule={schedule.data} />
+        ) : schedule.error ? (
+          <SectionError message="Couldn’t load the charge schedule." onRetry={refetchSchedule} />
+        ) : (
+          <SectionSkeleton height={180} />
+        )}
         {stats.data ? (
           <StatisticsSection stats={stats.data} days={days} onDaysChange={setDays} />
+        ) : stats.error ? (
+          <SectionError message="Couldn’t load statistics." onRetry={refetchStats} />
         ) : (
           <SectionSkeleton height={320} />
         )}

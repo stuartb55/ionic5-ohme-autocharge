@@ -47,6 +47,7 @@ def reset_state():
     store.consecutive_poll_failures = 0
     store.plugin_failure_notified = False
     store.last_digest_date = None
+    api._last_telemetry_sig = None
     api._summary_cache.update(key=None, value=None, at=0.0)
     api._last_refresh_at = None
     if os.path.exists(settings.SETTINGS_PATH):
@@ -576,6 +577,32 @@ def test_selected_vehicle_id_falls_back_to_env(client, monkeypatch):
     assert store.selected_vehicle_id == "env-car"
     store.set_vehicle_id("runtime-car")  # runtime override wins
     assert store.selected_vehicle_id == "runtime-car"
+
+
+# --- telemetry dedupe -----------------------------------------------------------
+
+
+async def test_telemetry_dedupes_identical_idle_rows():
+    snap = StatusSnapshot(connected=False, charger_status="unplugged", battery_percent=None)
+    with patch("db.record_telemetry", new=AsyncMock()) as mock_rec:
+        await api._maybe_record_telemetry(snap)
+        await api._maybe_record_telemetry(snap)  # identical + disconnected -> skipped
+    mock_rec.assert_awaited_once()
+
+
+async def test_telemetry_records_when_idle_state_changes():
+    with patch("db.record_telemetry", new=AsyncMock()) as mock_rec:
+        await api._maybe_record_telemetry(StatusSnapshot(connected=False, charger_status="unplugged"))
+        await api._maybe_record_telemetry(StatusSnapshot(connected=False, charger_status="finished"))
+    assert mock_rec.await_count == 2
+
+
+async def test_telemetry_always_records_while_connected():
+    snap = StatusSnapshot(connected=True, charger_status="charging", session_energy_wh=1000.0)
+    with patch("db.record_telemetry", new=AsyncMock()) as mock_rec:
+        await api._maybe_record_telemetry(snap)
+        await api._maybe_record_telemetry(snap)  # identical but connected -> still recorded
+    assert mock_rec.await_count == 2
 
 
 # --- weekly digest --------------------------------------------------------------

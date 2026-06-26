@@ -230,6 +230,30 @@ async def _maybe_notify_finished(prev_status: str, snap: StatusSnapshot) -> None
     await ntfy.send(f"{name} charging finished — {kwh:.1f} kWh added this session")
 
 
+# Signature of the last telemetry row written, to skip identical idle repeats.
+_last_telemetry_sig: Optional[tuple] = None
+
+
+async def _maybe_record_telemetry(snap: StatusSnapshot) -> None:
+    """Append a telemetry row, but skip identical consecutive rows while the car
+    is disconnected so the table doesn't fill with unchanging idle points. While
+    connected every poll is kept (power/energy keep moving)."""
+    global _last_telemetry_sig
+    sig = (
+        snap.connected,
+        snap.charger_status,
+        snap.battery_percent,
+        snap.power_watts,
+        snap.power_amps,
+        snap.session_energy_wh,
+        snap.target_percent,
+    )
+    if not snap.connected and sig == _last_telemetry_sig:
+        return
+    _last_telemetry_sig = sig
+    await db.record_telemetry(snap)
+
+
 def _on_poll_task_done(task: asyncio.Task) -> None:
     """Log loudly if the poll loop ever exits unexpectedly.
 
@@ -299,8 +323,8 @@ async def poll_loop() -> None:
 
                 # Append a telemetry point for Grafana (best-effort, no-op when
                 # persistence is disabled). Outside the lock: it doesn't touch the
-                # Ohme client.
-                await db.record_telemetry(store.status)
+                # Ohme client. Identical idle rows are de-duplicated.
+                await _maybe_record_telemetry(store.status)
 
                 # Refresh Ohme's daily totals into Postgres on a slow cadence so
                 # the history is populated even when nobody opens the dashboard.

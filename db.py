@@ -296,29 +296,27 @@ async def record_daily_stats(daily: list[dict[str, Any]], currency: Optional[str
     """
     if _pool is None or not daily:
         return
+    rows = [
+        (day["date"], day.get("energyKwh"), day.get("savings"), day.get("cost"), currency)
+        for day in daily
+        if day.get("date")
+    ]
+    if not rows:
+        return
     try:
         async with _pool.connection() as conn:
             async with conn.cursor() as cur:
-                for day in daily:
-                    if not day.get("date"):
-                        continue
-                    await cur.execute(
-                        "INSERT INTO daily_stats "
-                        "(stat_date, energy_kwh, savings, cost, currency) "
-                        "VALUES (%s, %s, %s, %s, %s) "
-                        "ON CONFLICT (stat_date) DO UPDATE SET "
-                        "  energy_kwh = EXCLUDED.energy_kwh, "
-                        "  savings    = EXCLUDED.savings, "
-                        "  cost       = EXCLUDED.cost, "
-                        "  currency   = EXCLUDED.currency, "
-                        "  updated_at = now()",
-                        (
-                            day["date"],
-                            day.get("energyKwh"),
-                            day.get("savings"),
-                            day.get("cost"),
-                            currency,
-                        ),
-                    )
+                await cur.executemany(
+                    "INSERT INTO daily_stats "
+                    "(stat_date, energy_kwh, savings, cost, currency) "
+                    "VALUES (%s, %s, %s, %s, %s) "
+                    "ON CONFLICT (stat_date) DO UPDATE SET "
+                    "  energy_kwh = EXCLUDED.energy_kwh, "
+                    "  savings    = EXCLUDED.savings, "
+                    "  cost       = EXCLUDED.cost, "
+                    "  currency   = EXCLUDED.currency, "
+                    "  updated_at = now()",
+                    rows,
+                )
     except Exception:
         logger.warning("Failed to record daily stats to Postgres", exc_info=True)
