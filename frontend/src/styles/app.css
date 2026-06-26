@@ -679,6 +679,27 @@ body {
   font-family: var(--font-mono, monospace);
 }
 
+.vehicle-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--space-3);
+}
+.vehicle-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.vehicle-picker select {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 3px 8px;
+  font-size: 0.85rem;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .skeleton, .badge.charging .pip { animation: none; }
 }

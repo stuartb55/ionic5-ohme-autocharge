@@ -205,7 +205,7 @@ async def _maybe_refresh_live_soc(status: Any) -> None:
     if last is not None and time.monotonic() - last < config.LIVE_SOC_INTERVAL:
         return
     try:
-        vehicle = await asyncio.to_thread(bluelink.get_vehicle_state)
+        vehicle = await asyncio.to_thread(bluelink.get_vehicle_state, store.selected_vehicle_id)
     except Exception:  # noqa: BLE001 - a failed refresh just leaves the prior reading
         logger.warning("Live SOC refresh from Bluelink failed — keeping last reading", exc_info=True)
         return
@@ -517,6 +517,12 @@ class DayTargetsUpdate(BaseModel):
         return value
 
 
+class VehicleUpdate(BaseModel):
+    """Request body for PUT /api/settings/vehicle (null selects the first vehicle)."""
+
+    vehicleId: Optional[str] = None
+
+
 async def _reapply_target_if_connected() -> bool:
     """Push the current effective target/ready-by to Ohme if the car is plugged in.
 
@@ -535,7 +541,7 @@ async def _reapply_target_if_connected() -> bool:
     # round-trip is fine; fall back to the plug-in reading if it fails. The full
     # vehicle read also refreshes the displayed range/odometer.
     try:
-        vehicle = await asyncio.to_thread(bluelink.get_vehicle_state)
+        vehicle = await asyncio.to_thread(bluelink.get_vehicle_state, store.selected_vehicle_id)
         store.record_vehicle_state(vehicle)
         soc = vehicle.soc
     except Exception:  # noqa: BLE001
@@ -642,6 +648,33 @@ async def set_day_targets(update: DayTargetsUpdate) -> JSONResponse:
             "applied": applied,
         }
     )
+
+
+@app.get("/api/vehicles")
+async def get_vehicles() -> JSONResponse:
+    """List the Hyundai vehicles on the account, with the selected one flagged.
+
+    Used by the dashboard's vehicle picker (shown only when there's more than
+    one). A live Bluelink call, so fetched on demand rather than polled.
+    """
+    try:
+        vehicles = await asyncio.to_thread(bluelink.list_vehicles)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not list vehicles from Bluelink", exc_info=True)
+        raise HTTPException(status_code=502, detail="Could not list vehicles from Bluelink") from exc
+    return JSONResponse({"vehicles": vehicles, "selected": store.selected_vehicle_id})
+
+
+@app.put("/api/settings/vehicle")
+async def set_vehicle(update: VehicleUpdate) -> JSONResponse:
+    """Select which Hyundai vehicle to read (null = first). Persisted; re-reads
+    the new vehicle's SOC and re-applies to an active session."""
+    vehicle_id = update.vehicleId or None
+    store.set_vehicle_id(vehicle_id)
+    persisted = settings.save_vehicle_id(vehicle_id)
+    applied = await _reapply_target_if_connected()
+    logger.info("Vehicle selection set to %s (persisted=%s, applied=%s)", vehicle_id, persisted, applied)
+    return JSONResponse({"vehicleId": vehicle_id, "persisted": persisted, "applied": applied})
 
 
 @app.get("/api/status")

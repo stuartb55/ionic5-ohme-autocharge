@@ -42,6 +42,7 @@ def reset_state():
     store.charge_target_override = None
     store.ready_by = None
     store.day_targets = {}
+    store.vehicle_id_override = None
     store.last_poll_error = None
     store.consecutive_poll_failures = 0
     store.plugin_failure_notified = False
@@ -530,6 +531,51 @@ async def test_live_soc_swallows_bluelink_error_keeps_reading(monkeypatch):
         await api._maybe_refresh_live_soc(ChargerStatus.CHARGING)  # must not raise
 
     assert store.last_soc == 60  # prior reading preserved
+
+
+# --- multi-vehicle --------------------------------------------------------------
+
+
+def test_get_vehicles_lists_and_flags_selected(client, monkeypatch):
+    monkeypatch.setattr(config, "HYUNDAI_VEHICLE_ID", "")
+    store.set_vehicle_id("car-2")
+    fleet = [
+        {"id": "car-1", "name": "IONIQ 5", "vin": "VIN1", "model": "IONIQ 5"},
+        {"id": "car-2", "name": "Kona", "vin": "VIN2", "model": "Kona"},
+    ]
+    with patch("bluelink.list_vehicles", return_value=fleet):
+        body = client.get("/api/vehicles").json()
+    assert body["vehicles"] == fleet
+    assert body["selected"] == "car-2"
+
+
+def test_get_vehicles_502_on_bluelink_error(client):
+    with patch("bluelink.list_vehicles", side_effect=RuntimeError("Bluelink down")):
+        assert client.get("/api/vehicles").status_code == 502
+
+
+def test_set_vehicle_updates_store_and_persists(client):
+    resp = client.put("/api/settings/vehicle", json={"vehicleId": "car-2"})
+    assert resp.status_code == 200
+    assert resp.json()["vehicleId"] == "car-2"
+    assert store.selected_vehicle_id == "car-2"
+    assert settings.load_vehicle_id() == "car-2"  # survives a restart
+
+
+def test_set_vehicle_clear_with_null(client):
+    client.put("/api/settings/vehicle", json={"vehicleId": "car-2"})
+    resp = client.put("/api/settings/vehicle", json={"vehicleId": None})
+    assert resp.status_code == 200
+    assert store.vehicle_id_override is None
+    assert settings.load_vehicle_id() is None
+
+
+def test_selected_vehicle_id_falls_back_to_env(client, monkeypatch):
+    monkeypatch.setattr(config, "HYUNDAI_VEHICLE_ID", "env-car")
+    store.vehicle_id_override = None
+    assert store.selected_vehicle_id == "env-car"
+    store.set_vehicle_id("runtime-car")  # runtime override wins
+    assert store.selected_vehicle_id == "runtime-car"
 
 
 # --- weekly digest --------------------------------------------------------------

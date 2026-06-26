@@ -6,6 +6,17 @@ import { scheduleFixture, sessionsFixture, statisticsFixture, statusFixture } fr
 export const handlers = [
   http.get('*/api/status', () => HttpResponse.json(statusFixture)),
   http.get('*/api/version', () => HttpResponse.json({ version: 'testsha1234567' })),
+  // Single vehicle by default, so the dashboard picker stays hidden in tests.
+  http.get('*/api/vehicles', () =>
+    HttpResponse.json({
+      vehicles: [{ id: 'car-1', name: 'IONIQ 5', vin: 'VIN1', model: 'IONIQ 5' }],
+      selected: null,
+    }),
+  ),
+  http.put('*/api/settings/vehicle', async ({ request }) => {
+    const body = (await request.json()) as { vehicleId: string | null };
+    return HttpResponse.json({ vehicleId: body.vehicleId, persisted: true, applied: false });
+  }),
   http.get('*/api/schedule', () => HttpResponse.json(scheduleFixture)),
   http.get('*/api/sessions', () => HttpResponse.json(sessionsFixture)),
   http.get('*/api/statistics', ({ request }) => {
