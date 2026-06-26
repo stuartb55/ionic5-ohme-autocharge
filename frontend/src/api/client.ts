@@ -61,6 +61,24 @@ async function postJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function postJsonBody<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    signal,
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new ApiError(`Request to ${path} failed`, res.status);
+  }
+  return (await res.json()) as T;
+}
+
+export interface PushConfig {
+  enabled: boolean;
+  publicKey: string;
+}
+
 export interface RefreshResponse {
   ok: boolean;
   updatedAt: string | null;
@@ -80,6 +98,12 @@ export const api = {
   getSessions: (limit = 8, signal?: AbortSignal) =>
     getJson<SessionsResponse>(`/api/sessions?limit=${limit}`, signal),
   getTariff: (signal?: AbortSignal) => getJson<TariffResponse>('/api/tariff', signal),
+  // Web push.
+  getPushConfig: (signal?: AbortSignal) => getJson<PushConfig>('/api/push/config', signal),
+  subscribePush: (subscription: unknown, signal?: AbortSignal) =>
+    postJsonBody<{ ok: boolean }>('/api/push/subscribe', subscription, signal),
+  unsubscribePush: (endpoint: string, signal?: AbortSignal) =>
+    postJsonBody<{ ok: boolean }>('/api/push/unsubscribe', { endpoint }, signal),
   getVersion: (signal?: AbortSignal) => getJson<VersionResponse>('/api/version', signal),
   getVehicles: (signal?: AbortSignal) => getJson<VehiclesResponse>('/api/vehicles', signal),
   // Select which Hyundai vehicle to read (null = first).
