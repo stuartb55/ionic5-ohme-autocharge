@@ -1,6 +1,6 @@
 import type { StatusResponse } from '../api/types';
 import { useNow } from '../hooks/useNow';
-import { formatFinishTime, formatKwh, formatMiles, formatPower } from '../utils/format';
+import { formatFinishTime, formatKwh, formatMiles, formatMoney, formatPower } from '../utils/format';
 import { BatteryRing } from './BatteryRing';
 import { ChargeControls } from './ChargeControls';
 import { ConnectionBadge } from './ConnectionBadge';
@@ -113,6 +113,13 @@ export function StatusSection({
             unit="A"
           />
           <Tile label="Added this session" value={formatKwh(charger.sessionEnergyKwh)} />
+          {charger.projectedCost != null && (
+            <Tile
+              label="Est. cost"
+              value={formatMoney(charger.projectedCost, charger.projectedCostCurrency)}
+              unit={`· ${formatKwh(charger.plannedEnergyKwh)}`}
+            />
+          )}
           <Tile label="Charger" value={charger.model ?? '—'} unit={charger.online ? '· online' : '· offline'} />
         </div>
       </div>

@@ -32,6 +32,12 @@ export interface StatusResponse {
     sessionEnergyKwh: number;
     /** ISO time the charge is projected to finish (end of the last slot), or null. */
     projectedFinish: string | null;
+    /** Total grid energy (kWh) the session is planned to draw. */
+    plannedEnergyKwh: number;
+    /** Estimated session cost (planned energy × recent avg price), or null. */
+    projectedCost: number | null;
+    /** Currency for projectedCost. */
+    projectedCostCurrency: string | null;
   };
   config: {
     chargeTarget: number;

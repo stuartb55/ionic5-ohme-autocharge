@@ -47,6 +47,23 @@ describe('StatusSection projected finish', () => {
   });
 });
 
+describe('StatusSection projected cost', () => {
+  function withCharger(overrides: Partial<StatusResponse['charger']>): StatusResponse {
+    return { ...statusFixture, charger: { ...statusFixture.charger, ...overrides } };
+  }
+
+  it('shows the estimated session cost when available', () => {
+    render(<StatusSection status={withCharger({ projectedCost: 1.31, projectedCostCurrency: 'GBP' })} />);
+    expect(screen.getByText('Est. cost')).toBeInTheDocument();
+    expect(screen.getByText(/£1\.31/)).toBeInTheDocument();
+  });
+
+  it('hides the cost tile when no estimate is available', () => {
+    render(<StatusSection status={withCharger({ projectedCost: null })} />);
+    expect(screen.queryByText('Est. cost')).not.toBeInTheDocument();
+  });
+});
+
 describe('StatusSection driving range', () => {
   function withVehicle(overrides: Partial<StatusResponse['vehicle']>): StatusResponse {
     return { ...statusFixture, vehicle: { ...statusFixture.vehicle, ...overrides } };

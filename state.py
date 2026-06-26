@@ -53,6 +53,11 @@ class StatusSnapshot:
     power_volts: Optional[int] = None
     target_percent: Optional[int] = None
     session_energy_wh: float = 0.0
+    # Estimated total grid energy and cost for the session (planned slot energy ×
+    # recent average price). None/0 when disconnected or the price isn't known.
+    planned_energy_kwh: float = 0.0
+    projected_cost: Optional[float] = None
+    projected_cost_currency: Optional[str] = None
 
     # Schedule
     slots: list[dict[str, Any]] = field(default_factory=list)
@@ -104,6 +109,11 @@ class AppState:
         # Runtime-selected Hyundai vehicle id (when the account has more than
         # one). None means "use config.HYUNDAI_VEHICLE_ID, else the first".
         self.vehicle_id_override: Optional[str] = None
+        # Most recent average price (£/kWh) and currency from a charge summary,
+        # cached so build_snapshot can estimate the current session's cost
+        # without its own upstream call. None until the first summary is parsed.
+        self.avg_price_per_kwh: Optional[float] = None
+        self.price_currency: Optional[str] = None
         # Why the most recent poll failed ("poll_failed", "login_failed"), or
         # None when it succeeded. Failures keep the previous snapshot so the
         # dashboard shows last-known-good data rather than going blank.

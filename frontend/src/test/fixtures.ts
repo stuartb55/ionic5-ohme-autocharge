@@ -17,6 +17,9 @@ export const statusFixture: StatusResponse = {
     targetPercent: 80,
     sessionEnergyKwh: 4.5,
     projectedFinish: '2026-06-02T05:00:00+01:00',
+    plannedEnergyKwh: 18,
+    projectedCost: 1.31,
+    projectedCostCurrency: 'GBP',
   },
   config: {
     chargeTarget: 80,
