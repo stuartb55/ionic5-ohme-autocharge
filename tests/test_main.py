@@ -56,7 +56,9 @@ async def test_sets_ohme_target_and_sends_notification_when_below_target(monkeyp
         result = await handle_plugin_event(client)
 
     assert result is True
-    mock_set_target.assert_called_once_with(client, current_soc=62, target_percent=80)
+    mock_set_target.assert_called_once_with(
+        client, current_soc=62, target_percent=80, target_time=None
+    )
     mock_notify.assert_called_once()
     msg = mock_notify.call_args[0][0]
     assert "62%" in msg

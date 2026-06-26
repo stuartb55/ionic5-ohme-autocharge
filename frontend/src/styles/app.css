@@ -283,6 +283,55 @@ body {
   font-size: 0.78rem;
 }
 
+/* --- ready-by editor --- */
+.ready-by-editor {
+  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+.ready-by-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+.ready-by-field input[type='time'] {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 3px 6px;
+  font-size: 0.85rem;
+}
+.ready-by-actions {
+  display: inline-flex;
+  gap: var(--space-2);
+}
+.ready-by-actions .save,
+.ready-by-actions .cancel {
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  border: 1px solid var(--border);
+}
+.ready-by-actions .save {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+.ready-by-actions .save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.ready-by-actions .cancel {
+  background: transparent;
+  color: var(--text-muted);
+}
+
 .charge-controls {
   display: flex;
   flex-wrap: wrap;

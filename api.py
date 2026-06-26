@@ -247,7 +247,7 @@ def _on_poll_task_done(task: asyncio.Task) -> None:
 
 async def poll_loop() -> None:
     """Background task: detect plug-in events and refresh the status snapshot."""
-    main.load_persisted_target()
+    main.load_persisted_settings()
     logger.info(
         "API poll loop starting (interval=%ss, target=%s%%)",
         config.POLL_INTERVAL,
@@ -483,6 +483,16 @@ class TargetUpdate(BaseModel):
     targetPercent: int = Field(ge=settings.TARGET_MIN, le=settings.TARGET_MAX)
 
 
+class ReadyByUpdate(BaseModel):
+    """Request body for PUT /api/settings/ready-by.
+
+    ``readyBy`` is a 24h ``HH:MM`` string, or null to clear it (charge ASAP on
+    Ohme's smart schedule).
+    """
+
+    readyBy: Optional[str] = Field(default=None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
+
+
 async def _reapply_target_if_connected(target: int) -> bool:
     """Push a newly-set target to Ohme immediately if the car is plugged in.
 
@@ -511,7 +521,9 @@ async def _reapply_target_if_connected(target: int) -> bool:
         return False
     try:
         async with store.client_lock:
-            await ohme_client.set_target(client, current_soc=soc, target_percent=target)
+            await ohme_client.set_target(
+                client, current_soc=soc, target_percent=target, target_time=store.ready_by_tuple
+            )
         return True
     except Exception:  # noqa: BLE001 - never let an Ohme hiccup fail the settings write
         logger.warning("Could not re-apply charge target to Ohme", exc_info=True)
@@ -555,6 +567,23 @@ async def set_charge_target(update: TargetUpdate) -> JSONResponse:
     return JSONResponse({"targetPercent": target, "persisted": persisted, "applied": applied})
 
 
+@app.put("/api/settings/ready-by")
+async def set_ready_by(update: ReadyByUpdate) -> JSONResponse:
+    """Set (or clear, with null) the ready-by departure time.
+
+    Persisted and, if the car is plugged in, pushed to Ohme immediately so the
+    active session re-plans to finish by the new time.
+    """
+    ready_by = update.readyBy
+    store.set_ready_by(ready_by)
+    persisted = settings.save_ready_by(ready_by)
+    # Reuse the target reapply: it re-reads the SOC and calls set_target, which
+    # now carries the ready-by time.
+    applied = await _reapply_target_if_connected(store.charge_target)
+    logger.info("Ready-by time set to %s (persisted=%s, applied=%s)", ready_by, persisted, applied)
+    return JSONResponse({"readyBy": ready_by, "persisted": persisted, "applied": applied})
+
+
 @app.get("/api/status")
 async def get_status() -> JSONResponse:
     payload = {
@@ -586,6 +615,8 @@ async def get_status() -> JSONResponse:
             # validation on PUT /api/settings/target rather than hardcoding them.
             "targetMin": settings.TARGET_MIN,
             "targetMax": settings.TARGET_MAX,
+            # Optional "ready-by" departure time (HH:MM), or null for ASAP/smart.
+            "readyBy": store.ready_by,
         },
         "updatedAt": store.status.updated_at,
         "ready": store.ready,

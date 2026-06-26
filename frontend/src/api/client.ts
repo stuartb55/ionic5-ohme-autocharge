@@ -1,5 +1,6 @@
 import type {
   ChargeActionResponse,
+  ReadyByUpdateResponse,
   ScheduleResponse,
   SessionsResponse,
   StatisticsResponse,
@@ -71,6 +72,9 @@ export const api = {
     getJson<SessionsResponse>(`/api/sessions?limit=${limit}`, signal),
   setTarget: (targetPercent: number, signal?: AbortSignal) =>
     putJson<TargetUpdateResponse>('/api/settings/target', { targetPercent }, signal),
+  // Set ("HH:MM") or clear (null) the ready-by departure time.
+  setReadyBy: (readyBy: string | null, signal?: AbortSignal) =>
+    putJson<ReadyByUpdateResponse>('/api/settings/ready-by', { readyBy }, signal),
   // Ask the backend to pull a fresh live reading from Ohme, then the caller
   // refetches the read endpoints to display it.
   refresh: (signal?: AbortSignal) => postJson<RefreshResponse>('/api/refresh', signal),

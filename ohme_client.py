@@ -31,19 +31,30 @@ def is_charging(status: ChargerStatus) -> bool:
     return status is ChargerStatus.CHARGING
 
 
-async def set_target(client: OhmeApiClient, current_soc: int, target_percent: int) -> None:
-    """Calculate charge needed and set Ohme to add that amount (does not send SOC to charger)."""
+async def set_target(
+    client: OhmeApiClient,
+    current_soc: int,
+    target_percent: int,
+    target_time: tuple[int, int] | None = None,
+) -> None:
+    """Calculate charge needed and set Ohme to add that amount (does not send SOC to charger).
+
+    ``target_time`` is an optional ``(hour, minute)`` "ready-by" time; when given,
+    Ohme schedules the charge to complete by then instead of on its default
+    smart schedule.
+    """
     # async_update_device_info must run first to populate _cars and serial (needed for internal API calls).
     await client.async_update_device_info()
     await client.async_get_charge_session()
     topup = target_percent - current_soc
-    await client.async_set_target(target_percent=topup)
+    await client.async_set_target(target_percent=topup, target_time=target_time)
     await client.async_get_charge_session()  # refresh so client.slots reflects the new schedule
     logger.info(
-        "Ohme target set: current SOC=%s%%, target=%s%%, top-up=%s%%",
+        "Ohme target set: current SOC=%s%%, target=%s%%, top-up=%s%%, ready_by=%s",
         current_soc,
         target_percent,
         topup,
+        target_time,
     )
 
 

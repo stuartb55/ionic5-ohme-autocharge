@@ -40,6 +40,7 @@ def reset_state():
     store.last_odometer_miles = None
     store.last_soc_at = None
     store.charge_target_override = None
+    store.ready_by = None
     store.last_poll_error = None
     store.consecutive_poll_failures = 0
     store.plugin_failure_notified = False
@@ -621,6 +622,58 @@ def test_set_target_rejects_out_of_range(client, bad):
     assert store.charge_target_override is None
 
 
+# --- ready-by time --------------------------------------------------------------
+
+
+def test_set_ready_by_updates_store_and_persists(client):
+    resp = client.put("/api/settings/ready-by", json={"readyBy": "07:30"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["readyBy"] == "07:30"
+    assert body["persisted"] is True
+    assert store.ready_by == "07:30"
+    assert settings.load_ready_by() == "07:30"  # survives a restart
+
+
+def test_set_ready_by_clear_with_null(client):
+    client.put("/api/settings/ready-by", json={"readyBy": "06:15"})
+    resp = client.put("/api/settings/ready-by", json={"readyBy": None})
+    assert resp.status_code == 200
+    assert resp.json()["readyBy"] is None
+    assert store.ready_by is None
+    assert settings.load_ready_by() is None
+
+
+def test_ready_by_reflected_in_status(client):
+    _populate_snapshot()
+    client.put("/api/settings/ready-by", json={"readyBy": "08:00"})
+    body = client.get("/api/status").json()
+    assert body["config"]["readyBy"] == "08:00"
+
+
+@pytest.mark.parametrize("bad", ["7:30", "24:00", "07:60", "0730", "garbage", "07:30:00"])
+def test_set_ready_by_rejects_bad_time(client, bad):
+    resp = client.put("/api/settings/ready-by", json={"readyBy": bad})
+    assert resp.status_code == 422
+    assert store.ready_by is None
+
+
+def test_set_ready_by_passes_target_time_to_ohme(client):
+    mock_client = MagicMock()
+    store.client = mock_client
+    store.last_soc = 50
+    store.status = StatusSnapshot(connected=True)
+    store.ready = True
+
+    with patch("bluelink.get_vehicle_state", return_value=_vstate(55)), \
+         patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
+        body = client.put("/api/settings/ready-by", json={"readyBy": "07:30"}).json()
+
+    assert body["applied"] is True
+    # The (hour, minute) tuple must be threaded through to Ohme.
+    assert mock_set_target.await_args.kwargs["target_time"] == (7, 30)
+
+
 def test_set_target_reapplies_to_ohme_with_fresh_soc(client):
     mock_client = MagicMock()
     store.client = mock_client
@@ -634,7 +687,9 @@ def test_set_target_reapplies_to_ohme_with_fresh_soc(client):
 
     assert body["applied"] is True
     # The top-up must be computed from the fresh reading, not the plug-in one.
-    mock_set_target.assert_awaited_once_with(mock_client, current_soc=68, target_percent=90)
+    mock_set_target.assert_awaited_once_with(
+        mock_client, current_soc=68, target_percent=90, target_time=None
+    )
     assert store.last_soc == 68  # the dashboard now shows the fresh SOC too
     assert store.last_range_miles == 205  # ...and the refreshed range
 
@@ -651,7 +706,9 @@ def test_set_target_falls_back_to_plugin_soc_when_bluelink_fails(client):
         body = client.put("/api/settings/target", json={"targetPercent": 90}).json()
 
     assert body["applied"] is True
-    mock_set_target.assert_awaited_once_with(mock_client, current_soc=50, target_percent=90)
+    mock_set_target.assert_awaited_once_with(
+        mock_client, current_soc=50, target_percent=90, target_time=None
+    )
 
 
 def test_set_target_does_not_reapply_when_fresh_soc_at_target(client):

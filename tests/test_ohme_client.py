@@ -80,5 +80,12 @@ async def test_set_target_calls_methods_in_correct_order():
 async def test_set_target_passes_correct_values():
     client = _mock_client()
     await ohme_client.set_target(client, current_soc=55, target_percent=80)
-    client.async_set_target.assert_called_once_with(target_percent=25)  # top-up = 80 - 55
+    # top-up = 80 - 55; no ready-by time set
+    client.async_set_target.assert_called_once_with(target_percent=25, target_time=None)
     client.async_set_state_of_charge.assert_not_called()
+
+
+async def test_set_target_passes_ready_by_time():
+    client = _mock_client()
+    await ohme_client.set_target(client, current_soc=55, target_percent=80, target_time=(7, 30))
+    client.async_set_target.assert_called_once_with(target_percent=25, target_time=(7, 30))

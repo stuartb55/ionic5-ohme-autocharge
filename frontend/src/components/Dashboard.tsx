@@ -48,6 +48,15 @@ export function Dashboard() {
     [refetchStatus],
   );
 
+  // Persist (or clear) the ready-by time, then refetch status.
+  const handleSetReadyBy = useCallback(
+    async (value: string | null) => {
+      await api.setReadyBy(value);
+      refetchStatus();
+    },
+    [refetchStatus],
+  );
+
   // Manual refresh: ask the backend to pull a fresh live reading from Ohme,
   // then refetch every section. Even if the force-refresh fails we still
   // refetch so the button does something (shows whatever the backend has).
@@ -125,6 +134,7 @@ export function Dashboard() {
           <StatusSection
             status={status.data}
             onSetTarget={handleSetTarget}
+            onSetReadyBy={handleSetReadyBy}
             onChargeChanged={refetchStatus}
           />
         ) : (

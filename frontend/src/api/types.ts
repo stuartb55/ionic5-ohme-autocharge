@@ -39,6 +39,8 @@ export interface StatusResponse {
     /** Inclusive bounds for the charge target, enforced by the backend. */
     targetMin: number;
     targetMax: number;
+    /** Ready-by departure time as "HH:MM", or null when charging ASAP/smart. */
+    readyBy: string | null;
   };
   updatedAt: string | null;
   ready: boolean;
@@ -63,6 +65,13 @@ export interface TargetUpdateResponse {
   /** Whether the new target was written to the persistent settings file. */
   persisted: boolean;
   /** Whether the new target was pushed to Ohme immediately (car plugged in). */
+  applied: boolean;
+}
+
+export interface ReadyByUpdateResponse {
+  /** The new ready-by time ("HH:MM"), or null when cleared. */
+  readyBy: string | null;
+  persisted: boolean;
   applied: boolean;
 }
 

@@ -27,12 +27,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def load_persisted_target() -> None:
-    """Apply any persisted charge target to the store at startup."""
+def load_persisted_settings() -> None:
+    """Apply any persisted dashboard settings (charge target, ready-by) at startup."""
     persisted = settings.load_target()
     if persisted is not None:
         store.set_charge_target(persisted)
         logger.info("Loaded persisted charge target: %s%%", persisted)
+    ready_by = settings.load_ready_by()
+    if ready_by is not None:
+        store.set_ready_by(ready_by)
+        logger.info("Loaded persisted ready-by time: %s", ready_by)
 
 
 async def handle_plugin_event(client) -> bool:
@@ -87,9 +91,13 @@ async def handle_plugin_event(client) -> bool:
         # slow Bluelink SOC fetch above stays outside the lock so it never stalls
         # the API; only the quick Ohme mutation is serialised.
         async with store.client_lock:
-            await ohme_client.set_target(client, current_soc=soc, target_percent=target)
+            await ohme_client.set_target(
+                client, current_soc=soc, target_percent=target, target_time=store.ready_by_tuple
+            )
         vehicle_name = client.current_vehicle or "EV"
         msg = f"{vehicle_name} plugged in at {soc}% → {target}%"
+        if store.ready_by:
+            msg += f" (ready by {store.ready_by})"
         schedule = ", ".join(str(s) for s in client.slots)
         if schedule:
             msg += f". Charge schedule: {schedule}"
@@ -181,7 +189,7 @@ class PlugInDetector:
 
 
 async def run_loop() -> None:
-    load_persisted_target()
+    load_persisted_settings()
     logger.info(
         "Starting poll loop (interval=%ss, target=%s%%)",
         config.POLL_INTERVAL,
@@ -234,7 +242,7 @@ async def run_once() -> int:
     configuration failed, so CI/smoke callers actually see the failure.
     """
     logger.info("Running in one-shot mode")
-    load_persisted_target()
+    load_persisted_settings()
     await db.init()
     client = await ohme_client.make_client()
     try:
