@@ -112,6 +112,10 @@ class AppState:
         # is failing, so the per-poll retries don't re-notify. Cleared when a
         # plug-in is handled successfully and when the car unplugs.
         self.plugin_failure_notified: bool = False
+        # Local date the weekly digest was last sent, so it goes out once on its
+        # scheduled day rather than every poll during the digest hour. In-memory:
+        # a restart within that hour could re-send once (rare, low-harm).
+        self.last_digest_date: Optional[datetime.date] = None
 
     @property
     def charge_target(self) -> int:
