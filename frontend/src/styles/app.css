@@ -675,6 +675,9 @@ body {
   color: var(--text-subtle);
   font-size: 0.8rem;
 }
+.app-footer .version {
+  font-family: var(--font-mono, monospace);
+}
 
 @media (prefers-reduced-motion: reduce) {
   .skeleton, .badge.charging .pip { animation: none; }

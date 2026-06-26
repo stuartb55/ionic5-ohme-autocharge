@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { usePolling } from '../api/usePolling';
 import { useNow } from '../hooks/useNow';
@@ -25,6 +25,17 @@ export function Dashboard() {
   // A ticking clock so the "updated Xs ago" label and the freshness dot stay
   // live without reading the impure Date.now() during render.
   const now = useNow(5_000);
+
+  // Build version for the footer — fetched once; it doesn't change at runtime.
+  const [version, setVersion] = useState<string | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    api
+      .getVersion(controller.signal)
+      .then((r) => setVersion(r.version))
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, []);
 
   const status = usePolling(api.getStatus, STATUS_INTERVAL);
   const schedule = usePolling(api.getSchedule, SCHEDULE_INTERVAL);
@@ -162,6 +173,14 @@ export function Dashboard() {
 
       <footer className="app-footer">
         Data from Ohme &amp; Hyundai Bluelink · refreshed automatically
+        {version && (
+          <>
+            {' · '}
+            <span className="version" title={version}>
+              {version === 'dev' ? 'dev' : version.slice(0, 7)}
+            </span>
+          </>
+        )}
       </footer>
     </div>
   );

@@ -64,6 +64,11 @@ export interface RefreshResponse {
   ready: boolean;
 }
 
+export interface VersionResponse {
+  /** Build git SHA, or "dev" in local runs. */
+  version: string;
+}
+
 export const api = {
   getStatus: (signal?: AbortSignal) => getJson<StatusResponse>('/api/status', signal),
   getSchedule: (signal?: AbortSignal) => getJson<ScheduleResponse>('/api/schedule', signal),
@@ -71,6 +76,7 @@ export const api = {
     getJson<StatisticsResponse>(`/api/statistics?days=${days}`, signal),
   getSessions: (limit = 8, signal?: AbortSignal) =>
     getJson<SessionsResponse>(`/api/sessions?limit=${limit}`, signal),
+  getVersion: (signal?: AbortSignal) => getJson<VersionResponse>('/api/version', signal),
   setTarget: (targetPercent: number, signal?: AbortSignal) =>
     putJson<TargetUpdateResponse>('/api/settings/target', { targetPercent }, signal),
   // Set ("HH:MM") or clear (null) the ready-by departure time.

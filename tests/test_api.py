@@ -84,6 +84,16 @@ def test_health_ok(client):
     assert resp.json()["status"] == "ok"
 
 
+def test_version_reports_app_version(client, monkeypatch):
+    monkeypatch.setattr(config, "APP_VERSION", "abc1234")
+    assert client.get("/api/version").json() == {"version": "abc1234"}
+
+
+def test_version_defaults_to_dev(client, monkeypatch):
+    monkeypatch.setattr(config, "APP_VERSION", "")
+    assert client.get("/api/version").json() == {"version": "dev"}
+
+
 def test_health_503_when_poll_task_dead(client):
     dead = MagicMock()
     dead.done.return_value = True

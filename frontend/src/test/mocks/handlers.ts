@@ -5,6 +5,7 @@ import { scheduleFixture, sessionsFixture, statisticsFixture, statusFixture } fr
 // of the jsdom base URL used by the test environment.
 export const handlers = [
   http.get('*/api/status', () => HttpResponse.json(statusFixture)),
+  http.get('*/api/version', () => HttpResponse.json({ version: 'testsha1234567' })),
   http.get('*/api/schedule', () => HttpResponse.json(scheduleFixture)),
   http.get('*/api/sessions', () => HttpResponse.json(sessionsFixture)),
   http.get('*/api/statistics', ({ request }) => {
@@ -14,6 +15,14 @@ export const handlers = [
   http.put('*/api/settings/target', async ({ request }) => {
     const body = (await request.json()) as { targetPercent: number };
     return HttpResponse.json({ targetPercent: body.targetPercent, persisted: true, applied: false });
+  }),
+  http.put('*/api/settings/ready-by', async ({ request }) => {
+    const body = (await request.json()) as { readyBy: string | null };
+    return HttpResponse.json({ readyBy: body.readyBy, persisted: true, applied: false });
+  }),
+  http.put('*/api/settings/day-targets', async ({ request }) => {
+    const body = (await request.json()) as { dayTargets: Record<string, number> };
+    return HttpResponse.json({ dayTargets: body.dayTargets, persisted: true, applied: false });
   }),
   http.post('*/api/refresh', () =>
     HttpResponse.json({ ok: true, updatedAt: statusFixture.updatedAt, ready: true }),
