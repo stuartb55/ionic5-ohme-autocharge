@@ -66,6 +66,10 @@ class StatusSnapshot:
     # End of the last scheduled slot — when the charge is projected to finish.
     # None when disconnected or no schedule is allocated yet.
     projected_finish: Optional[str] = None
+    # Ohme's own configured target ("ready-by") time as "HH:MM", read back from
+    # the charge rule. Set even when unplugged (Ohme keeps a rule), so the
+    # dashboard's ready-by field can auto-populate. None when no time is set.
+    ohme_ready_by: Optional[str] = None
 
     # Meta
     updated_at: Optional[str] = None

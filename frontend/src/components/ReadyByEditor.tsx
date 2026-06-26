@@ -3,6 +3,12 @@ import { useState } from 'react';
 interface Props {
   /** Current ready-by time ("HH:MM") from the server, or null when unset. */
   value: string | null;
+  /**
+   * Whether the value is a clearable local override. When false (e.g. the time
+   * came from Ohme's own rule), the Clear button is hidden — there's nothing of
+   * ours to clear; editing the time creates an override instead.
+   */
+  clearable?: boolean;
   /** Persist a new time, or null to clear it. Rejects on failure. */
   onSave: (value: string | null) => Promise<void>;
 }
@@ -11,7 +17,7 @@ interface Props {
  * Optional "ready-by" departure time. Edits are local until saved, so a
  * background poll refreshing `value` can't clobber an in-progress edit.
  */
-export function ReadyByEditor({ value, onSave }: Props) {
+export function ReadyByEditor({ value, clearable = true, onSave }: Props) {
   const [draft, setDraft] = useState(value ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(false);
@@ -62,7 +68,7 @@ export function ReadyByEditor({ value, onSave }: Props) {
             {saving ? 'Saving…' : 'Save'}
           </button>
         )}
-        {value != null && (
+        {value != null && clearable && (
           <button
             type="button"
             className="cancel"

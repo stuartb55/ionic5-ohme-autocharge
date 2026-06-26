@@ -128,6 +128,14 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
     except Exception:  # pragma: no cover - defensive: malformed session
         status_value = "unknown"
 
+    # Ohme's own configured target time, read back from the charge rule (valid
+    # even when unplugged). (0, 0) means no time set.
+    try:
+        th, tm = client.target_time
+        ohme_ready_by = f"{th:02d}:{tm:02d}" if (th or tm) else None
+    except Exception:  # noqa: BLE001 - defensive: malformed/absent rule
+        ohme_ready_by = None
+
     slots = client.slots
     # Total energy the charger will draw this session — the sum of all allocated
     # slots is grid-side (watts × hours), so it already includes charging losses.
@@ -179,6 +187,7 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
         projected_finish=(
             _iso(max((s.end for s in slots), default=None)) if connected else None
         ),
+        ohme_ready_by=ohme_ready_by,
         updated_at=now,
     )
 
@@ -752,8 +761,11 @@ async def get_status() -> JSONResponse:
             # validation on PUT /api/settings/target rather than hardcoding them.
             "targetMin": settings.TARGET_MIN,
             "targetMax": settings.TARGET_MAX,
-            # Optional "ready-by" departure time (HH:MM), or null for ASAP/smart.
-            "readyBy": store.ready_by,
+            # Ready-by departure time (HH:MM): the user's override if set, else
+            # Ohme's own configured time (which exists even when unplugged), else
+            # null. readyByIsManual flags whether the value is our stored override.
+            "readyBy": store.ready_by if store.ready_by is not None else store.status.ohme_ready_by,
+            "readyByIsManual": store.ready_by is not None,
             # Per-weekday target overrides {"0".."6": percent}; empty when none.
             # charger.targetPercent reflects today's effective target.
             "dayTargets": {str(d): p for d, p in store.day_targets.items()},
