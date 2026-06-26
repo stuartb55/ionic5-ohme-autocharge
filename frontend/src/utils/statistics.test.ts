@@ -6,6 +6,7 @@ import {
   dailyToCsv,
   deriveInsights,
   formatMetric,
+  percentChange,
 } from './statistics';
 
 const empty: StatisticsResponse = {
@@ -23,6 +24,7 @@ const empty: StatisticsResponse = {
     { date: '2026-05-28', energyKwh: 0, savings: 0, cost: 0 },
   ],
   efficiency: null,
+  comparison: null,
 };
 
 describe('deriveInsights', () => {
@@ -62,6 +64,16 @@ describe('deriveInsights', () => {
     expect(insights.milesDriven).toBe(168);
     // 42 kWh charged * 4 mi/kWh
     expect(insights.estimatedMiles).toBeCloseTo(42 * 4, 5);
+  });
+});
+
+describe('percentChange', () => {
+  it('computes the change relative to the previous value', () => {
+    expect(percentChange(110, 100)).toBeCloseTo(10, 5);
+    expect(percentChange(80, 100)).toBeCloseTo(-20, 5);
+  });
+  it('returns null when there is no prior value', () => {
+    expect(percentChange(50, 0)).toBeNull();
   });
 });
 

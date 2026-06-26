@@ -58,6 +58,16 @@ export function deriveInsights(stats: StatisticsResponse): Insights {
   };
 }
 
+/**
+ * Percent change from ``previous`` to ``current``. Null when there's no prior
+ * value to compare against (so callers can hide the badge rather than divide by
+ * zero or show a meaningless "∞%").
+ */
+export function percentChange(current: number, previous: number): number | null {
+  if (!previous) return null;
+  return ((current - previous) / Math.abs(previous)) * 100;
+}
+
 /** Format a chart value for the given metric, with units/currency. */
 export function formatMetric(
   value: number,

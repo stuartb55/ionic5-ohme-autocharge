@@ -286,6 +286,43 @@ def test_statistics_efficiency_null_when_persistence_disabled(client):
     assert body["efficiency"] is None
 
 
+def test_statistics_includes_period_comparison(client):
+    cur = {
+        "granularity": "DAY",
+        "totalStats": {
+            "energyChargedTotalWh": 42000,
+            "costStats": {"moneyCostTotal": {"amount": "525", "currencyCode": "GBP"}},
+        },
+        "stats": [],
+    }
+    prev = {
+        "granularity": "DAY",
+        "totalStats": {
+            "energyChargedTotalWh": 30000,
+            "costStats": {"moneyCostTotal": {"amount": "400", "currencyCode": "GBP"}},
+        },
+        "stats": [],
+    }
+    mock_client = MagicMock()
+    mock_client.async_get_charge_summary = AsyncMock(side_effect=[cur, prev])
+    store.client = mock_client
+
+    body = client.get("/api/statistics?days=7").json()
+    assert body["comparison"]["previous"]["energyKwh"] == 30.0
+    assert body["comparison"]["previous"]["costTotal"] == 4.0  # 400p -> £4
+
+
+def test_statistics_comparison_null_when_previous_fetch_fails(client):
+    cur = {"granularity": "DAY", "totalStats": {"energyChargedTotalWh": 42000}, "stats": []}
+    mock_client = MagicMock()
+    # Current fetch succeeds; the previous-window fetch raises.
+    mock_client.async_get_charge_summary = AsyncMock(side_effect=[cur, RuntimeError("boom")])
+    store.client = mock_client
+
+    body = client.get("/api/statistics?days=7").json()
+    assert body["comparison"] is None
+
+
 def test_statistics_efficiency_null_when_no_odometer_span(client):
     store.client = _summary_client()
     with patch("db.is_enabled", return_value=True), \

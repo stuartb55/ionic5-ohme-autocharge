@@ -35,6 +35,18 @@ describe('StatisticsSection insights', () => {
     // The range estimate uses the measured rate, not the assumed 3.5.
     expect(screen.getByText('@ 4 mi/kWh')).toBeInTheDocument();
   });
+
+  it('shows period-over-period deltas when a comparison is present', () => {
+    // Fixture: energy 42 vs prev 35 -> +20% up; savings 8.4 vs 7.2 -> +17% up.
+    renderSection();
+    expect(screen.getByText('▲ 20%')).toBeInTheDocument();
+    expect(screen.getByText('▲ 17%')).toBeInTheDocument();
+  });
+
+  it('omits deltas when there is no comparison', () => {
+    renderSection({ ...statisticsFixture, comparison: null });
+    expect(screen.queryByText(/▲|▼/)).not.toBeInTheDocument();
+  });
 });
 
 describe('StatisticsSection chart metric toggle', () => {

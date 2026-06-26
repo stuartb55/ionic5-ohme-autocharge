@@ -1,8 +1,39 @@
+import type { ReactNode } from 'react';
 import { useState } from 'react';
 import type { StatisticsResponse } from '../api/types';
 import { formatDateShort, formatKwh, formatMoney, formatPricePerKwh } from '../utils/format';
-import { deriveInsights, downloadDailyCsv, type ChartMetric } from '../utils/statistics';
+import { deriveInsights, downloadDailyCsv, percentChange, type ChartMetric } from '../utils/statistics';
 import { EnergyBarChart } from './EnergyBarChart';
+
+/**
+ * "▲ 12% / ▼ 8%" change vs the previous period. ``goodWhen`` colours the badge:
+ * for savings up is good; for cost up is bad; energy is neutral. Hidden when
+ * there's no prior value to compare against.
+ */
+function DeltaBadge({
+  current,
+  previous,
+  goodWhen,
+}: {
+  current: number;
+  previous: number;
+  goodWhen: 'up' | 'down' | 'neutral';
+}) {
+  const pct = percentChange(current, previous);
+  if (pct === null) return null;
+  if (Math.abs(pct) < 0.5) return <span className="delta neutral">±0%</span>;
+  const up = pct > 0;
+  let tone = 'neutral';
+  if (goodWhen !== 'neutral') {
+    const good = (up && goodWhen === 'up') || (!up && goodWhen === 'down');
+    tone = good ? 'good' : 'bad';
+  }
+  return (
+    <span className={`delta ${tone}`} title="vs previous period">
+      {up ? '▲' : '▼'} {Math.abs(pct).toFixed(0)}%
+    </span>
+  );
+}
 
 interface Props {
   stats: StatisticsResponse;
@@ -28,20 +59,23 @@ function StatCard({
   label,
   value,
   highlight = false,
+  delta,
 }: {
   label: string;
   value: string;
   highlight?: boolean;
+  delta?: ReactNode;
 }) {
   return (
     <div className={`stat-card${highlight ? ' highlight' : ''}`}>
       <div className="label">{label}</div>
       <div className="value">{value}</div>
+      {delta && <div className="stat-delta">{delta}</div>}
     </div>
   );
 }
 
-function Insight({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function Insight({ label, value, sub }: { label: string; value: string; sub?: ReactNode }) {
   return (
     <div className="insight">
       <span className="insight-label">{label}</span>
@@ -55,6 +89,7 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
   const [metric, setMetric] = useState<ChartMetric>('energyKwh');
   const { totals, currency } = stats;
   const insights = deriveInsights(stats);
+  const prev = stats.comparison?.previous;
 
   return (
     <section className="card" aria-labelledby="stats-heading">
@@ -88,11 +123,20 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
       </header>
 
       <div className="stat-cards">
-        <StatCard label="Energy charged" value={formatKwh(totals.energyKwh)} />
+        <StatCard
+          label="Energy charged"
+          value={formatKwh(totals.energyKwh)}
+          delta={prev && <DeltaBadge current={totals.energyKwh} previous={prev.energyKwh} goodWhen="neutral" />}
+        />
         <StatCard
           label="Saved vs standard tariff"
           value={formatMoney(totals.savingsVsStandard, currency)}
           highlight
+          delta={
+            prev && (
+              <DeltaBadge current={totals.savingsVsStandard} previous={prev.savingsVsStandard} goodWhen="up" />
+            )
+          }
         />
         <StatCard label="Avg. price / kWh" value={formatPricePerKwh(totals.averageKwhPrice, currency)} />
         <StatCard label="CO₂ saved vs petrol" value={`${totals.carbonSavedKgVsGasCar} kg`} />
@@ -122,7 +166,11 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
           value={`${Math.round(insights.estimatedMiles)} mi`}
           sub={`@ ${insights.milesPerKwh} mi/kWh`}
         />
-        <Insight label="Total cost" value={formatMoney(totals.costTotal, currency)} />
+        <Insight
+          label="Total cost"
+          value={formatMoney(totals.costTotal, currency)}
+          sub={prev && <DeltaBadge current={totals.costTotal} previous={prev.costTotal} goodWhen="down" />}
+        />
       </div>
 
       <header style={{ marginBottom: 'var(--space-4)' }}>
