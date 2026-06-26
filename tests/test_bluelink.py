@@ -74,6 +74,24 @@ def test_vehicle_state_range_none_on_unknown_unit():
     assert state.odometer_miles is None
 
 
+def test_get_vehicle_state_selects_by_id():
+    vm = _mock_manager({"a": _mock_vehicle(60), "b": _mock_vehicle(90)})
+    with patch("bluelink._get_manager", return_value=vm):
+        assert bluelink.get_vehicle_state("b").soc == 90
+        assert bluelink.get_vehicle_state("missing").soc == 60  # unknown id -> first
+        assert bluelink.get_vehicle_state().soc == 60  # None -> first
+
+
+def test_list_vehicles_maps_fields():
+    v = _mock_vehicle(60)
+    v.id, v.name, v.VIN, v.model = "a", "IONIQ 5", "VIN1", "IONIQ 5"
+    vm = _mock_manager({"a": v})
+    with patch("bluelink._get_manager", return_value=vm):
+        assert bluelink.list_vehicles() == [
+            {"id": "a", "name": "IONIQ 5", "vin": "VIN1", "model": "IONIQ 5"}
+        ]
+
+
 def test_singleton_manager_created_once():
     """_get_manager should reuse the same VehicleManager instance across calls."""
     bluelink._manager = None  # reset singleton

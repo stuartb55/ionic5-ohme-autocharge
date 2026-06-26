@@ -87,6 +87,25 @@ export interface DayTargetsUpdateResponse {
   applied: boolean;
 }
 
+export interface Vehicle {
+  id: string;
+  name: string | null;
+  vin: string | null;
+  model: string | null;
+}
+
+export interface VehiclesResponse {
+  vehicles: Vehicle[];
+  /** The selected vehicle id, or null when using the first. */
+  selected: string | null;
+}
+
+export interface VehicleUpdateResponse {
+  vehicleId: string | null;
+  persisted: boolean;
+  applied: boolean;
+}
+
 export interface ChargeSlot {
   start: string;
   end: string;

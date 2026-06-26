@@ -7,6 +7,8 @@ import type {
   StatisticsResponse,
   StatusResponse,
   TargetUpdateResponse,
+  VehicleUpdateResponse,
+  VehiclesResponse,
 } from './types';
 
 // Same-origin relative base: in production nginx proxies /api to the backend;
@@ -77,6 +79,10 @@ export const api = {
   getSessions: (limit = 8, signal?: AbortSignal) =>
     getJson<SessionsResponse>(`/api/sessions?limit=${limit}`, signal),
   getVersion: (signal?: AbortSignal) => getJson<VersionResponse>('/api/version', signal),
+  getVehicles: (signal?: AbortSignal) => getJson<VehiclesResponse>('/api/vehicles', signal),
+  // Select which Hyundai vehicle to read (null = first).
+  setVehicle: (vehicleId: string | null, signal?: AbortSignal) =>
+    putJson<VehicleUpdateResponse>('/api/settings/vehicle', { vehicleId }, signal),
   setTarget: (targetPercent: number, signal?: AbortSignal) =>
     putJson<TargetUpdateResponse>('/api/settings/target', { targetPercent }, signal),
   // Set ("HH:MM") or clear (null) the ready-by departure time.

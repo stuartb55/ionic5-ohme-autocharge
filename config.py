@@ -20,6 +20,11 @@ HYUNDAI_USERNAME = os.environ["HYUNDAI_USERNAME"]
 HYUNDAI_PASSWORD = os.environ["HYUNDAI_PASSWORD"]
 HYUNDAI_PIN = os.environ["HYUNDAI_PIN"]
 
+# Optional: pin which vehicle to read when the account has more than one (the
+# vehicle id from GET /api/vehicles). Blank = use the first vehicle. The
+# dashboard can override this at runtime (persisted in settings.json).
+HYUNDAI_VEHICLE_ID = os.getenv("HYUNDAI_VEHICLE_ID", "")
+
 OHME_EMAIL = os.environ["OHME_EMAIL"]
 OHME_PASSWORD = os.environ["OHME_PASSWORD"]
 

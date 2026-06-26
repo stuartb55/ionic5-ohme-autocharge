@@ -9,6 +9,8 @@ import { SessionsSection } from './SessionsSection';
 import { StatisticsSection } from './StatisticsSection';
 import { StatusSection } from './StatusSection';
 import { ThemeToggle } from './ThemeToggle';
+import { VehiclePicker } from './VehiclePicker';
+import type { VehiclesResponse } from '../api/types';
 
 const STATUS_INTERVAL = 15_000;
 const SCHEDULE_INTERVAL = 30_000;
@@ -36,6 +38,21 @@ export function Dashboard() {
       .catch(() => undefined);
     return () => controller.abort();
   }, []);
+
+  // Account vehicles — fetched on demand (a live Bluelink call), so not polled.
+  // The picker only appears when there's more than one.
+  const [vehicles, setVehicles] = useState<VehiclesResponse | null>(null);
+  const loadVehicles = useCallback((signal?: AbortSignal) => {
+    api
+      .getVehicles(signal)
+      .then(setVehicles)
+      .catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    loadVehicles(controller.signal);
+    return () => controller.abort();
+  }, [loadVehicles]);
 
   const status = usePolling(api.getStatus, STATUS_INTERVAL);
   const schedule = usePolling(api.getSchedule, SCHEDULE_INTERVAL);
@@ -75,6 +92,16 @@ export function Dashboard() {
       refetchStatus();
     },
     [refetchStatus],
+  );
+
+  // Switch the tracked Hyundai vehicle, then refresh vehicles + status.
+  const handleSelectVehicle = useCallback(
+    async (id: string) => {
+      await api.setVehicle(id);
+      loadVehicles();
+      refetchStatus();
+    },
+    [loadVehicles, refetchStatus],
   );
 
   // Manual refresh: ask the backend to pull a fresh live reading from Ohme,
@@ -147,6 +174,16 @@ export function Dashboard() {
         <Banner variant="error">
           Can&apos;t reach Ohme — showing the last known data. Retrying automatically…
         </Banner>
+      )}
+
+      {vehicles && vehicles.vehicles.length > 1 && (
+        <div className="vehicle-bar">
+          <VehiclePicker
+            vehicles={vehicles.vehicles}
+            selected={vehicles.selected}
+            onSelect={handleSelectVehicle}
+          />
+        </div>
       )}
 
       <div className="sections">

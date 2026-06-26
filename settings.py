@@ -143,3 +143,19 @@ def save_day_targets(day_targets: dict[int, int]) -> bool:
     else:
         data.pop("dayTargets", None)
     return _save(data)
+
+
+def load_vehicle_id() -> str | None:
+    """Return the persisted selected Hyundai vehicle id, or None if unset/invalid."""
+    value = _load().get("vehicleId")
+    return value if isinstance(value, str) and value else None
+
+
+def save_vehicle_id(value: str | None) -> bool:
+    """Persist (or clear, when None) the selected vehicle id, preserving other settings."""
+    data = _load()
+    if value:
+        data["vehicleId"] = value
+    else:
+        data.pop("vehicleId", None)
+    return _save(data)

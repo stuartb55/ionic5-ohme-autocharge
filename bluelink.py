@@ -70,11 +70,32 @@ def _get_manager() -> VehicleManager:
     return _manager
 
 
-def get_vehicle_state() -> VehicleState:
-    """Return SOC (plus driving range and odometer) for the first vehicle.
+def _select_vehicle(vm: VehicleManager, vehicle_id: Optional[str]):
+    """Pick the configured vehicle by id, falling back to the first one."""
+    if vehicle_id and vehicle_id in vm.vehicles:
+        return vm.vehicles[vehicle_id]
+    return next(iter(vm.vehicles.values()))
 
-    SOC is required — a missing one raises, since the charging logic can't
-    proceed without it. Range and odometer are best-effort extras.
+
+def list_vehicles() -> list[dict]:
+    """Return all vehicles on the account as {id, name, vin, model} dicts."""
+    with _lock:
+        vm = _get_manager()
+        vm.check_and_refresh_token()
+        vm.update_all_vehicles_with_cached_state()
+        return [
+            {"id": v.id, "name": v.name, "vin": v.VIN, "model": v.model}
+            for v in vm.vehicles.values()
+        ]
+
+
+def get_vehicle_state(vehicle_id: Optional[str] = None) -> VehicleState:
+    """Return SOC (plus driving range and odometer) for the selected vehicle.
+
+    ``vehicle_id`` picks a specific vehicle when the account has more than one;
+    when None (or unknown) the first vehicle is used. SOC is required — a missing
+    one raises, since the charging logic can't proceed without it. Range and
+    odometer are best-effort extras.
     """
     with _lock:
         vm = _get_manager()
@@ -84,7 +105,7 @@ def get_vehicle_state() -> VehicleState:
         if not vm.vehicles:
             raise RuntimeError("No vehicles found on this Hyundai account")
 
-        vehicle = next(iter(vm.vehicles.values()))
+        vehicle = _select_vehicle(vm, vehicle_id)
         soc = vehicle.ev_battery_percentage
         range_miles = _to_miles(vehicle.ev_driving_range, vehicle.ev_driving_range_unit)
         odometer_miles = _to_miles(vehicle.odometer, vehicle.odometer_unit)
@@ -96,6 +117,6 @@ def get_vehicle_state() -> VehicleState:
     return VehicleState(soc=soc, range_miles=range_miles, odometer_miles=odometer_miles)
 
 
-def get_battery_percentage() -> int:
-    """Return just the current battery SOC % for the first vehicle on the account."""
-    return get_vehicle_state().soc
+def get_battery_percentage(vehicle_id: Optional[str] = None) -> int:
+    """Return just the current battery SOC % for the selected vehicle."""
+    return get_vehicle_state(vehicle_id).soc

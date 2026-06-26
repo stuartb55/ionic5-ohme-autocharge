@@ -41,6 +41,10 @@ def load_persisted_settings() -> None:
     if day_targets:
         store.set_day_targets(day_targets)
         logger.info("Loaded persisted per-weekday targets: %s", day_targets)
+    vehicle_id = settings.load_vehicle_id()
+    if vehicle_id is not None:
+        store.set_vehicle_id(vehicle_id)
+        logger.info("Loaded persisted vehicle selection: %s", vehicle_id)
 
 
 async def handle_plugin_event(client) -> bool:
@@ -49,7 +53,7 @@ async def handle_plugin_event(client) -> bool:
     logger.info("Plug-in detected — fetching vehicle state from Bluelink...")
     try:
         # hyundai_kia_connect_api is synchronous; run it in a thread to avoid blocking the loop
-        vehicle = await asyncio.to_thread(bluelink.get_vehicle_state)
+        vehicle = await asyncio.to_thread(bluelink.get_vehicle_state, store.selected_vehicle_id)
     except Exception:
         logger.exception("Failed to fetch SOC from Hyundai Bluelink — will retry next poll")
         await _notify_plugin_failure(

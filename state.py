@@ -101,6 +101,9 @@ class AppState:
         # Per-weekday target overrides {0(Mon)..6(Sun): percent}. Any day not
         # present falls back to the base charge_target. Drives effective_target.
         self.day_targets: dict[int, int] = {}
+        # Runtime-selected Hyundai vehicle id (when the account has more than
+        # one). None means "use config.HYUNDAI_VEHICLE_ID, else the first".
+        self.vehicle_id_override: Optional[str] = None
         # Why the most recent poll failed ("poll_failed", "login_failed"), or
         # None when it succeeded. Failures keep the previous snapshot so the
         # dashboard shows last-known-good data rather than going blank.
@@ -133,6 +136,17 @@ class AppState:
     def set_day_targets(self, value: dict[int, int]) -> None:
         """Set the per-weekday target overrides (does not persist; see settings.save_day_targets)."""
         self.day_targets = dict(value)
+
+    def set_vehicle_id(self, value: Optional[str]) -> None:
+        """Set the runtime vehicle selection (does not persist; see settings.save_vehicle_id)."""
+        self.vehicle_id_override = value
+
+    @property
+    def selected_vehicle_id(self) -> Optional[str]:
+        """The Hyundai vehicle id to read: runtime override, else the env default, else None (first)."""
+        if self.vehicle_id_override is not None:
+            return self.vehicle_id_override
+        return config.HYUNDAI_VEHICLE_ID or None
 
     @property
     def effective_target(self) -> int:
