@@ -41,6 +41,12 @@ NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")
 NTFY_URL = os.getenv("NTFY_URL", "https://ntfy.sh")
 NTFY_TOKEN = os.getenv("NTFY_TOKEN", "")
 
+# Weekly charging-summary digest via ntfy. Sent once a week on this weekday
+# (0=Mon … 6=Sun) at this local hour. -1 (or any value outside 0–6) disables it;
+# it also requires NTFY_TOPIC. Default: Monday 08:00.
+WEEKLY_DIGEST_DAY = int(os.getenv("WEEKLY_DIGEST_DAY", "0"))
+WEEKLY_DIGEST_HOUR = int(os.getenv("WEEKLY_DIGEST_HOUR", "8"))
+
 # Optional Postgres persistence for charging history (consumed by Grafana). When
 # blank, history persistence is disabled and the app runs entirely in memory as
 # before. Example: postgresql://autocharge:secret@postgres:5432/autocharge

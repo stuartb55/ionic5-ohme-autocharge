@@ -45,6 +45,7 @@ def reset_state():
     store.last_poll_error = None
     store.consecutive_poll_failures = 0
     store.plugin_failure_notified = False
+    store.last_digest_date = None
     api._summary_cache.update(key=None, value=None, at=0.0)
     api._last_refresh_at = None
     if os.path.exists(settings.SETTINGS_PATH):
@@ -529,6 +530,82 @@ async def test_live_soc_swallows_bluelink_error_keeps_reading(monkeypatch):
         await api._maybe_refresh_live_soc(ChargerStatus.CHARGING)  # must not raise
 
     assert store.last_soc == 60  # prior reading preserved
+
+
+# --- weekly digest --------------------------------------------------------------
+
+
+import datetime as _dt  # noqa: E402
+
+# 2026-06-01 is a Monday (weekday 0).
+_MONDAY_8AM = _dt.datetime(2026, 6, 1, 8, 0)
+
+
+def test_format_digest_gbp():
+    parsed = {
+        "currency": "GBP",
+        "totals": {
+            "energyKwh": 42.1,
+            "costTotal": 5.25,
+            "savingsVsStandard": 8.4,
+            "carbonSavedKgVsGasCar": 12.0,
+        },
+    }
+    msg = api._format_digest(parsed)
+    assert "42.1 kWh" in msg
+    assert "£5.25" in msg
+    assert "£8.40" in msg
+    assert "12 kg" in msg
+
+
+async def test_weekly_digest_sends_on_schedule(monkeypatch):
+    monkeypatch.setattr(config, "NTFY_TOPIC", "topic")
+    monkeypatch.setattr(config, "WEEKLY_DIGEST_DAY", 0)
+    monkeypatch.setattr(config, "WEEKLY_DIGEST_HOUR", 8)
+    monkeypatch.setattr(api, "_now_local", lambda: _MONDAY_8AM)
+
+    with patch("ntfy.send", new=AsyncMock()) as mock_notify:
+        await api._maybe_send_weekly_digest(_summary_client())
+
+    mock_notify.assert_awaited_once()
+    assert mock_notify.call_args.kwargs["title"] == "Weekly charging summary"
+    assert store.last_digest_date == _MONDAY_8AM.date()  # guards re-send
+
+
+async def test_weekly_digest_not_resent_same_day(monkeypatch):
+    monkeypatch.setattr(config, "NTFY_TOPIC", "topic")
+    monkeypatch.setattr(config, "WEEKLY_DIGEST_DAY", 0)
+    monkeypatch.setattr(config, "WEEKLY_DIGEST_HOUR", 8)
+    monkeypatch.setattr(api, "_now_local", lambda: _MONDAY_8AM)
+    store.last_digest_date = _MONDAY_8AM.date()  # already sent today
+
+    with patch("ntfy.send", new=AsyncMock()) as mock_notify:
+        await api._maybe_send_weekly_digest(_summary_client())
+
+    mock_notify.assert_not_called()
+
+
+async def test_weekly_digest_skips_wrong_day(monkeypatch):
+    monkeypatch.setattr(config, "NTFY_TOPIC", "topic")
+    monkeypatch.setattr(config, "WEEKLY_DIGEST_DAY", 2)  # Wednesday, but it's Monday
+    monkeypatch.setattr(config, "WEEKLY_DIGEST_HOUR", 8)
+    monkeypatch.setattr(api, "_now_local", lambda: _MONDAY_8AM)
+
+    with patch("ntfy.send", new=AsyncMock()) as mock_notify:
+        await api._maybe_send_weekly_digest(_summary_client())
+
+    mock_notify.assert_not_called()
+
+
+async def test_weekly_digest_disabled_without_ntfy(monkeypatch):
+    monkeypatch.setattr(config, "NTFY_TOPIC", "")
+    monkeypatch.setattr(config, "WEEKLY_DIGEST_DAY", 0)
+    monkeypatch.setattr(api, "_now_local", lambda: _MONDAY_8AM)
+
+    with patch("ntfy.send", new=AsyncMock()) as mock_notify:
+        await api._maybe_send_weekly_digest(_summary_client())
+
+    mock_notify.assert_not_called()
 
 
 # --- charge controls -------------------------------------------------------------

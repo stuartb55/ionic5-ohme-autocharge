@@ -312,6 +312,9 @@ async def poll_loop() -> None:
                         # from growing without bound.
                         await db.prune_telemetry(config.TELEMETRY_RETENTION_DAYS)
                         last_daily_sync = now_mono
+
+                # Send the weekly summary digest if it's due (no-op otherwise).
+                await _maybe_send_weekly_digest(client)
             except Exception:
                 # Keep the last good snapshot: a transient Ohme hiccup shouldn't
                 # blank the dashboard. The failure is surfaced via lastError and
@@ -731,6 +734,59 @@ async def _persist_daily_stats(client: Any, days: int = 90) -> None:
         return
     parsed = parse_summary({k: v for k, v in summary.items() if k != "granularity"}, days)
     await db.record_daily_stats(parsed["daily"], parsed["currency"])
+
+
+def _now_local() -> datetime.datetime:
+    """Current time in the configured timezone (host-local if it's unset/bad)."""
+    return datetime.datetime.now(_STATS_TZ) if _STATS_TZ else datetime.datetime.now()
+
+
+def _format_digest(parsed: dict[str, Any]) -> str:
+    """One-line weekly summary from a parsed charge summary."""
+    totals = parsed["totals"]
+    currency = parsed["currency"]
+    symbol = "£" if currency == "GBP" else ""
+
+    def money(value: float) -> str:
+        return f"{symbol}{value:.2f}" if symbol else f"{value:.2f} {currency or ''}".strip()
+
+    return (
+        f"Last 7 days: {totals['energyKwh']:.1f} kWh charged · "
+        f"cost {money(totals['costTotal'])} · "
+        f"saved {money(totals['savingsVsStandard'])} vs standard · "
+        f"{totals['carbonSavedKgVsGasCar']:.0f} kg CO₂ saved"
+    )
+
+
+async def _maybe_send_weekly_digest(client: Any) -> None:
+    """Send a weekly ntfy summary of the last 7 days, once on its scheduled slot.
+
+    No-op unless ntfy is configured, the digest day is valid (0–6), and it's the
+    configured weekday + hour in the local timezone. ``store.last_digest_date``
+    guards against re-sending across the polls within that hour.
+    """
+    if not config.NTFY_TOPIC or not (0 <= config.WEEKLY_DIGEST_DAY <= 6):
+        return
+    now_local = _now_local()
+    if now_local.weekday() != config.WEEKLY_DIGEST_DAY or now_local.hour != config.WEEKLY_DIGEST_HOUR:
+        return
+    today = now_local.date()
+    if store.last_digest_date == today:
+        return
+
+    end_ts = int(time.time() * 1000)
+    start_ts = end_ts - 7 * 24 * 60 * 60 * 1000
+    try:
+        async with store.client_lock:
+            summary = await client.async_get_charge_summary(start_ts=start_ts, end_ts=end_ts)
+    except Exception:
+        logger.warning("Weekly digest: could not fetch charge summary", exc_info=True)
+        return
+    parsed = parse_summary({k: v for k, v in summary.items() if k != "granularity"}, 7)
+    # Mark sent before awaiting ntfy so a slow/failed send can't double-fire.
+    store.last_digest_date = today
+    await ntfy.send(_format_digest(parsed), title="Weekly charging summary")
+    logger.info("Sent weekly charging digest")
 
 
 async def _compute_efficiency(days: int, energy_kwh: float) -> Optional[dict[str, Any]]:
