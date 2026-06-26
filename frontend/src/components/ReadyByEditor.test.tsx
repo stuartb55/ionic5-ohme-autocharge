@@ -28,6 +28,13 @@ describe('ReadyByEditor', () => {
     expect(screen.queryByRole('button', { name: /clear/i })).not.toBeInTheDocument();
   });
 
+  it('hides Clear for a non-clearable (Ohme-sourced) value', () => {
+    render(<ReadyByEditor value="07:00" clearable={false} onSave={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: /clear/i })).not.toBeInTheDocument();
+    // The time still shows and remains editable.
+    expect((screen.getByLabelText(/ready-by time/i) as HTMLInputElement).value).toBe('07:00');
+  });
+
   it('shows an error when saving fails', async () => {
     const onSave = vi.fn().mockRejectedValue(new Error('nope'));
     render(<ReadyByEditor value={null} onSave={onSave} />);

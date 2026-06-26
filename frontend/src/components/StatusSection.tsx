@@ -91,7 +91,11 @@ export function StatusSection({
               <div className="today-target">Today: {target}%</div>
             )}
             {onSetReadyBy && (
-              <ReadyByEditor value={status.config.readyBy} onSave={onSetReadyBy} />
+              <ReadyByEditor
+                value={status.config.readyBy}
+                clearable={status.config.readyByIsManual}
+                onSave={onSetReadyBy}
+              />
             )}
             {onSetDayTargets && (
               <DayTargetsEditor

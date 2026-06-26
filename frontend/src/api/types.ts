@@ -45,8 +45,13 @@ export interface StatusResponse {
     /** Inclusive bounds for the charge target, enforced by the backend. */
     targetMin: number;
     targetMax: number;
-    /** Ready-by departure time as "HH:MM", or null when charging ASAP/smart. */
+    /**
+     * Ready-by departure time as "HH:MM" — the user's override if set, else
+     * Ohme's own configured time (present even when unplugged), else null.
+     */
     readyBy: string | null;
+    /** True when readyBy is our stored override rather than Ohme's own time. */
+    readyByIsManual: boolean;
     /**
      * Per-weekday target overrides keyed by weekday ("0"=Mon … "6"=Sun). Empty
      * when none set. charger.targetPercent reflects today's effective target.

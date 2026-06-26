@@ -980,6 +980,7 @@ def _charging_client():
     client.slots = []
     client.next_slot_start = None
     client.next_slot_end = None
+    client.target_time = (0, 0)  # no Ohme ready-by time by default
     return client
 
 
@@ -1011,6 +1012,34 @@ def test_build_snapshot_reports_unknown_soc_when_unplugged():
     store.last_soc = None
     snap = api.build_snapshot(_charging_client(), connected=False)
     assert snap.battery_percent is None
+
+
+def test_build_snapshot_reads_ohme_ready_by():
+    client = _charging_client()
+    client.target_time = (7, 5)
+    assert api.build_snapshot(client, connected=True).ohme_ready_by == "07:05"
+    # (0, 0) means no time set.
+    client.target_time = (0, 0)
+    assert api.build_snapshot(client, connected=True).ohme_ready_by is None
+
+
+def test_status_ready_by_auto_populates_from_ohme(client):
+    # No user override, but Ohme has a configured time — the status should show it.
+    store.status = StatusSnapshot(ohme_ready_by="06:30")
+    store.ready = True
+    store.ready_by = None
+    body = client.get("/api/status").json()
+    assert body["config"]["readyBy"] == "06:30"
+    assert body["config"]["readyByIsManual"] is False
+
+
+def test_status_ready_by_prefers_user_override(client):
+    store.status = StatusSnapshot(ohme_ready_by="06:30")
+    store.ready = True
+    store.ready_by = "08:00"
+    body = client.get("/api/status").json()
+    assert body["config"]["readyBy"] == "08:00"
+    assert body["config"]["readyByIsManual"] is True
 
 
 def test_build_snapshot_includes_range_when_connected():
