@@ -179,13 +179,24 @@ async def _make_client_with_retry() -> Any:
             delay = min(delay * 2, LOGIN_RETRY_MAX)
 
 
+# Prior charger statuses that represent a live, in-progress session. A move from
+# any of these to "finished" means a charge just completed and is worth a
+# notification. "unknown" is intentionally excluded so a restart that boots
+# straight into a finished session (unknown→finished) doesn't re-notify.
+_ACTIVE_STATUSES = frozenset({"charging", "plugged_in", "paused"})
+
+
 async def _maybe_notify_finished(prev_status: str, snap: StatusSnapshot) -> None:
     """Send a session summary when an active charge transitions to finished.
 
-    Triggered only on a charging→finished transition, so a restart while the
-    car sits finished overnight (unknown→finished) doesn't re-notify.
+    Triggered on an active→finished transition where energy was actually added —
+    so a short top-up that goes plugged_in→finished between two polls still
+    notifies, but a plug-in skipped at target (0 kWh) doesn't. unknown→finished
+    is excluded too, so a restart into a finished session doesn't re-notify.
     """
-    if prev_status != "charging" or snap.charger_status != "finished":
+    if prev_status not in _ACTIVE_STATUSES or snap.charger_status != "finished":
+        return
+    if snap.session_energy_wh <= 0:
         return
     name = snap.vehicle_name or "EV"
     kwh = snap.session_energy_wh / 1000
@@ -225,13 +236,11 @@ async def poll_loop() -> None:
     except Exception:
         logger.warning("Could not fetch device info on startup", exc_info=True)
 
-    was_connected = False
-    session_handled = False
+    # The plug-in transition state machine is shared with main.run_loop.
+    detector = main.PlugInDetector()
     try:
         initial_status = await ohme_client.get_charger_status(client)
-        was_connected = ohme_client.is_connected(initial_status)
-        if was_connected:
-            logger.info("Car already connected on startup — will reconfigure on next poll")
+        detector.prime(initial_status)
     except Exception:
         logger.warning("Could not determine initial charge state", exc_info=True)
 
@@ -241,26 +250,13 @@ async def poll_loop() -> None:
             try:
                 async with store.client_lock:
                     status = await ohme_client.get_charger_status(client)
-                now_connected = ohme_client.is_connected(status)
-
-                if now_connected and not was_connected:
-                    session_handled = False
-                if now_connected and not session_handled:
-                    # Deliberately NOT under client_lock: handle_plugin_event makes a
-                    # slow Bluelink SOC fetch (in a thread) that doesn't use the Ohme
-                    # client, so holding the lock here would stall /api/statistics for
-                    # the whole plug-in event. Its Ohme writes (set_target) touch state
-                    # disjoint from the charge-summary call, so this is safe to run
-                    # unlocked, and the loop awaits it before the next snapshot build.
-                    session_handled = await main.handle_plugin_event(client)
-                if not now_connected and was_connected:
-                    logger.info("Car unplugged (status=%s)", status)
-                    session_handled = False
-                    # The plug-in SOC is meaningless once the car drives away;
-                    # the snapshot falls back to Ohme's estimate until the next
-                    # plug-in records a fresh Bluelink reading.
-                    store.clear_soc()
-                was_connected = now_connected
+                # detector.update may call handle_plugin_event, which makes a slow
+                # Bluelink SOC fetch (in a thread) that doesn't use the Ohme client —
+                # so it runs OUTSIDE client_lock to avoid stalling /api/statistics for
+                # the whole plug-in event. The event acquires client_lock itself around
+                # just its quick Ohme write, so that write is still serialised against
+                # the dashboard's set_target and the charge-summary readers.
+                now_connected = await detector.update(client, status)
 
                 prev_status = store.status.charger_status
                 recovered = store.consecutive_poll_failures >= POLL_FAILURE_ALERT_AFTER
@@ -553,6 +549,10 @@ async def get_status() -> JSONResponse:
         "config": {
             "chargeTarget": store.charge_target,
             "pollIntervalSeconds": config.POLL_INTERVAL,
+            # Bounds for the target editor, so the UI stays in sync with the
+            # validation on PUT /api/settings/target rather than hardcoding them.
+            "targetMin": settings.TARGET_MIN,
+            "targetMax": settings.TARGET_MAX,
         },
         "updatedAt": store.status.updated_at,
         "ready": store.ready,

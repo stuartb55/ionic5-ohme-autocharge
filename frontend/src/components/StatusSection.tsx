@@ -62,7 +62,12 @@ export function StatusSection({
               </div>
             )}
             {onSetTarget ? (
-              <TargetEditor value={target} onSave={onSetTarget} />
+              <TargetEditor
+                value={target}
+                min={status.config.targetMin}
+                max={status.config.targetMax}
+                onSave={onSetTarget}
+              />
             ) : (
               <div className="target">Target {target}%</div>
             )}

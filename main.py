@@ -79,7 +79,13 @@ async def handle_plugin_event(client) -> bool:
         target,
     )
     try:
-        await ohme_client.set_target(client, current_soc=soc, target_percent=target)
+        # Serialise the Ohme write behind client_lock so it can't interleave with
+        # the dashboard's own set_target (_reapply_target_if_connected holds the
+        # same lock) or a concurrent charge-summary read on the shared client. The
+        # slow Bluelink SOC fetch above stays outside the lock so it never stalls
+        # the API; only the quick Ohme mutation is serialised.
+        async with store.client_lock:
+            await ohme_client.set_target(client, current_soc=soc, target_percent=target)
         vehicle_name = client.current_vehicle or "EV"
         msg = f"{vehicle_name} plugged in at {soc}% → {target}%"
         schedule = ", ".join(str(s) for s in client.slots)
@@ -123,6 +129,54 @@ async def _notify_plugin_failure(message: str) -> None:
     await ntfy.send(message, title="Autocharge problem", priority="high")
 
 
+class PlugInDetector:
+    """Tracks plug/unplug transitions and fires :func:`handle_plugin_event` once
+    per plug-in session.
+
+    Shared by :func:`run_loop` and :func:`api.poll_loop` so the transition state
+    machine lives in one place. The caller fetches the charger status each tick
+    (``api`` does it under ``client_lock``; ``main`` doesn't) and hands it to
+    :meth:`update`, which owns the once-per-session and unplug logic.
+    """
+
+    def __init__(self) -> None:
+        self.was_connected = False
+        self.session_handled = False
+
+    def prime(self, status) -> None:
+        """Seed the initial connection state from a startup snapshot so a restart
+        mid-charge keeps reconfiguring Ohme on the next poll rather than waiting
+        for a fresh plug-in transition."""
+        self.was_connected = ohme_client.is_connected(status)
+        if self.was_connected:
+            logger.info("Car already connected on startup — will reconfigure Ohme on next poll")
+
+    async def update(self, client, status) -> bool:
+        """Advance the state machine for one poll. Calls
+        :func:`handle_plugin_event` once when a plug-in is first seen (retrying
+        each tick until it succeeds) and clears the recorded SOC on unplug.
+
+        Returns whether the car is currently connected.
+        """
+        now_connected = ohme_client.is_connected(status)
+
+        if now_connected and not self.was_connected:
+            # Transition: disconnected → connected (car just plugged in)
+            self.session_handled = False
+
+        if now_connected and not self.session_handled:
+            self.session_handled = await handle_plugin_event(client)
+
+        if not now_connected and self.was_connected:
+            logger.info("Car unplugged (status=%s). Waiting for next session.", status)
+            self.session_handled = False
+            # The plug-in SOC is meaningless once the car drives away.
+            store.clear_soc()
+
+        self.was_connected = now_connected
+        return now_connected
+
+
 async def run_loop() -> None:
     load_persisted_target()
     logger.info(
@@ -149,39 +203,18 @@ async def run_loop() -> None:
 
     # Snapshot real initial state so a container restart mid-charge doesn't
     # reconfigure Ohme and interrupt an active session.
-    was_connected = False
-    session_handled = False
+    detector = PlugInDetector()
     try:
         initial_status = await ohme_client.get_charger_status(client)
-        was_connected = ohme_client.is_connected(initial_status)
-        if was_connected:
-            logger.info("Car already connected on startup — will reconfigure Ohme on next poll")
+        detector.prime(initial_status)
     except Exception:
         logger.warning("Could not determine initial charge state — will treat as disconnected")
-        was_connected = False
-        session_handled = False
 
     try:
         while True:
             try:
                 status = await ohme_client.get_charger_status(client)
-                now_connected = ohme_client.is_connected(status)
-
-                if now_connected and not was_connected:
-                    # Transition: disconnected → connected (car just plugged in)
-                    session_handled = False
-
-                if now_connected and not session_handled:
-                    session_handled = await handle_plugin_event(client)
-
-                if not now_connected and was_connected:
-                    logger.info("Car unplugged (status=%s). Waiting for next session.", status)
-                    session_handled = False
-                    # The plug-in SOC is meaningless once the car drives away.
-                    store.clear_soc()
-
-                was_connected = now_connected
-
+                await detector.update(client, status)
             except Exception:
                 logger.exception("Error during poll — will retry next interval")
 
