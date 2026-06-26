@@ -9,7 +9,8 @@ def _mock_manager(vehicles: dict):
     return vm
 
 
-def _mock_vehicle(soc, *, ev_range=None, ev_range_unit=None, odometer=None, odometer_unit=None, soh=None):
+def _mock_vehicle(soc, *, ev_range=None, ev_range_unit=None, odometer=None, odometer_unit=None,
+                  soh=None, is_locked=None, latitude=None, longitude=None):
     v = MagicMock()
     v.ev_battery_percentage = soc
     v.ev_driving_range = ev_range
@@ -17,6 +18,9 @@ def _mock_vehicle(soc, *, ev_range=None, ev_range_unit=None, odometer=None, odom
     v.odometer = odometer
     v.odometer_unit = odometer_unit
     v.ev_battery_soh_percentage = soh
+    v.is_locked = is_locked
+    v.location_latitude = latitude
+    v.location_longitude = longitude
     return v
 
 
@@ -86,6 +90,23 @@ def test_vehicle_state_soh_none_when_zero_or_missing():
     vm = _mock_manager({"v": _mock_vehicle(62, soh=0)})
     with patch("bluelink._get_manager", return_value=vm):
         assert bluelink.get_vehicle_state().soh_percent is None
+
+
+def test_vehicle_state_reads_lock_and_location():
+    vm = _mock_manager({"v": _mock_vehicle(62, is_locked=True, latitude=51.5, longitude=-0.12)})
+    with patch("bluelink._get_manager", return_value=vm):
+        s = bluelink.get_vehicle_state()
+    assert s.is_locked is True
+    assert (s.latitude, s.longitude) == (51.5, -0.12)
+
+
+def test_vehicle_state_lock_location_none_when_absent():
+    # Default mock leaves these as non-numeric/non-bool MagicMocks -> None.
+    vm = _mock_manager({"v": _mock_vehicle(62)})
+    with patch("bluelink._get_manager", return_value=vm):
+        s = bluelink.get_vehicle_state()
+    assert s.is_locked is None
+    assert s.latitude is None and s.longitude is None
 
 
 def test_get_vehicle_state_selects_by_id():

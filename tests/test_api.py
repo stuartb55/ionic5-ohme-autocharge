@@ -39,6 +39,9 @@ def reset_state():
     store.last_range_miles = None
     store.last_odometer_miles = None
     store.last_soh_percent = None
+    store.last_is_locked = None
+    store.last_latitude = None
+    store.last_longitude = None
     store.last_soc_at = None
     store.charge_target_override = None
     store.ready_by = None
@@ -1054,6 +1057,34 @@ def test_build_snapshot_includes_soh_when_connected():
     store.last_soh_percent = 98
     assert api.build_snapshot(_charging_client(), connected=True).soh_percent == 98
     assert api.build_snapshot(_charging_client(), connected=False).soh_percent is None
+
+
+def test_build_snapshot_includes_lock_and_location_when_connected():
+    store.last_is_locked = True
+    store.last_latitude = 51.5
+    store.last_longitude = -0.12
+    snap = api.build_snapshot(_charging_client(), connected=True)
+    assert snap.is_locked is True
+    assert (snap.latitude, snap.longitude) == (51.5, -0.12)
+    # Cleared once unplugged.
+    off = api.build_snapshot(_charging_client(), connected=False)
+    assert off.is_locked is None and off.latitude is None
+
+
+def test_status_exposes_lock_and_location(client):
+    store.status = StatusSnapshot(is_locked=False, latitude=51.5, longitude=-0.12)
+    store.ready = True
+    body = client.get("/api/status").json()
+    assert body["vehicle"]["isLocked"] is False
+    assert body["vehicle"]["location"] == {"latitude": 51.5, "longitude": -0.12}
+
+
+def test_status_location_null_without_coords(client):
+    store.status = StatusSnapshot(is_locked=True, latitude=None, longitude=None)
+    store.ready = True
+    body = client.get("/api/status").json()
+    assert body["vehicle"]["location"] is None
+    assert body["vehicle"]["isLocked"] is True
 
 
 def _slot(energy, end=None):
