@@ -119,6 +119,16 @@ describe('Dashboard integration', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/can't reach the charging service/i);
   });
 
+  it('shows a per-section error with retry when the schedule fails to load', async () => {
+    server.use(http.get('*/api/schedule', () => HttpResponse.error()));
+    render(<Dashboard />);
+
+    // Status still loads fine; only the schedule card shows an error.
+    expect(await screen.findByText('Hyundai IONIQ 5')).toBeInTheDocument();
+    expect(await screen.findByText(/couldn’t load the charge schedule/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+  });
+
   it('flags stale data when the backend cannot reach Ohme', async () => {
     server.use(
       http.get('*/api/status', () =>

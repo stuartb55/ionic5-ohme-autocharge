@@ -16,9 +16,14 @@ class _FakeCursor:
         self._row = row
         self.rows = rows or []
         self.executed: list[tuple] = []
+        self.executemany_calls: list[tuple] = []
 
     async def execute(self, sql, params=None):
         self.executed.append((sql, params))
+        return self
+
+    async def executemany(self, sql, params_seq):
+        self.executemany_calls.append((sql, list(params_seq)))
         return self
 
     async def fetchone(self):
@@ -288,15 +293,24 @@ async def test_record_daily_stats_upserts_each_dated_row(fake_pool):
         {"date": "2026-06-02", "energyKwh": 12.0, "savings": 2.1, "cost": 1.4},
     ]
     await db.record_daily_stats(daily, "GBP")
-    # Only the two dated rows are written.
-    assert len(cursor.executed) == 2
-    sql, params = cursor.executed[0]
+    # One executemany with only the two dated rows.
+    assert len(cursor.executemany_calls) == 1
+    sql, rows = cursor.executemany_calls[0]
     assert "INSERT INTO daily_stats" in sql
     assert "ON CONFLICT (stat_date) DO UPDATE" in sql
-    assert params == ("2026-06-01", 18.5, 3.7, 2.3, "GBP")
+    assert rows == [
+        ("2026-06-01", 18.5, 3.7, 2.3, "GBP"),
+        ("2026-06-02", 12.0, 2.1, 1.4, "GBP"),
+    ]
 
 
 async def test_record_daily_stats_empty_is_noop(fake_pool):
     _, cursor = fake_pool
     await db.record_daily_stats([], "GBP")
-    assert cursor.executed == []
+    assert cursor.executemany_calls == []
+
+
+async def test_record_daily_stats_all_dateless_is_noop(fake_pool):
+    _, cursor = fake_pool
+    await db.record_daily_stats([{"date": None, "energyKwh": 1}], "GBP")
+    assert cursor.executemany_calls == []
