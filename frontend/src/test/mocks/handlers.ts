@@ -19,6 +19,8 @@ export const handlers = [
   }),
   http.get('*/api/schedule', () => HttpResponse.json(scheduleFixture)),
   http.get('*/api/sessions', () => HttpResponse.json(sessionsFixture)),
+  // Tariff feature off by default, so the card stays hidden in tests.
+  http.get('*/api/tariff', () => HttpResponse.json({ enabled: false, rates: [], cheapest: [] })),
   http.get('*/api/statistics', ({ request }) => {
     const days = Number(new URL(request.url).searchParams.get('days') ?? 7);
     return HttpResponse.json({ ...statisticsFixture, rangeDays: days });

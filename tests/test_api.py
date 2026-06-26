@@ -55,6 +55,7 @@ def reset_state():
     store.last_digest_date = None
     api._last_telemetry_sig = None
     api._summary_cache.update(key=None, value=None, at=0.0)
+    api._tariff_cache.update(value=None, at=0.0)
     api._last_refresh_at = None
     if os.path.exists(settings.SETTINGS_PATH):
         os.remove(settings.SETTINGS_PATH)
@@ -538,6 +539,51 @@ async def test_live_soc_swallows_bluelink_error_keeps_reading(monkeypatch):
         await api._maybe_refresh_live_soc(ChargerStatus.CHARGING)  # must not raise
 
     assert store.last_soc == 60  # prior reading preserved
+
+
+# --- tariff (Octopus Agile) -----------------------------------------------------
+
+
+def test_tariff_disabled_returns_enabled_false(client):
+    with patch("octopus.is_enabled", return_value=False):
+        body = client.get("/api/tariff").json()
+    assert body == {"enabled": False, "rates": [], "cheapest": []}
+
+
+def test_tariff_returns_rates_and_cheapest(client):
+    rates = [
+        {"from": "2026-06-26T17:00:00Z", "to": "2026-06-26T17:30:00Z", "pricePerKwh": 0.20},
+        {"from": "2026-06-26T17:30:00Z", "to": "2026-06-26T18:00:00Z", "pricePerKwh": 0.08},
+        {"from": "2026-06-26T18:00:00Z", "to": "2026-06-26T18:30:00Z", "pricePerKwh": 0.15},
+    ]
+    with patch("octopus.is_enabled", return_value=True), \
+         patch("octopus.fetch_rates", new=AsyncMock(return_value=rates)):
+        body = client.get("/api/tariff").json()
+    assert body["enabled"] is True
+    assert len(body["rates"]) == 3
+    # Cheapest first, capped at 3.
+    assert body["cheapest"][0]["pricePerKwh"] == 0.08
+
+
+def test_tariff_caches_between_requests(client):
+    rates = [{"from": "2026-06-26T17:00:00Z", "to": "2026-06-26T17:30:00Z", "pricePerKwh": 0.1}]
+    fetch = AsyncMock(return_value=rates)
+    with patch("octopus.is_enabled", return_value=True), patch("octopus.fetch_rates", new=fetch):
+        client.get("/api/tariff")
+        client.get("/api/tariff")
+    fetch.assert_awaited_once()  # second request served from cache
+
+
+def test_tariff_serves_stale_cache_on_fetch_failure(client):
+    good = [{"from": "2026-06-26T17:00:00Z", "to": "2026-06-26T17:30:00Z", "pricePerKwh": 0.1}]
+    with patch("octopus.is_enabled", return_value=True):
+        with patch("octopus.fetch_rates", new=AsyncMock(return_value=good)):
+            client.get("/api/tariff")
+        # Force past the cache TTL, then a failing fetch — last good payload wins.
+        api._tariff_cache["at"] = 0.0
+        with patch("octopus.fetch_rates", new=AsyncMock(return_value=None)):
+            body = client.get("/api/tariff").json()
+    assert body["rates"] == good
 
 
 # --- multi-vehicle --------------------------------------------------------------

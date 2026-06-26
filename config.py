@@ -57,6 +57,13 @@ WEEKLY_DIGEST_HOUR = int(os.getenv("WEEKLY_DIGEST_HOUR", "8"))
 # before. Example: postgresql://autocharge:secret@postgres:5432/autocharge
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
+# Optional Octopus Agile (dynamic tariff) awareness. Both must be set to enable;
+# blank disables the tariff card. PRODUCT_CODE is the Agile product (e.g.
+# "AGILE-24-10-01"); REGION is the single-letter DNO region (A–P). Used to build
+# the public unit-rate URL — no account/auth needed.
+OCTOPUS_PRODUCT_CODE = os.getenv("OCTOPUS_PRODUCT_CODE", "")
+OCTOPUS_REGION = os.getenv("OCTOPUS_REGION", "")
+
 # How often (seconds) the poll loop refreshes Ohme's daily totals into Postgres.
 # Independent of the dashboard being open. Default 6h.
 DAILY_STATS_INTERVAL = int(os.getenv("DAILY_STATS_INTERVAL", str(6 * 60 * 60)))

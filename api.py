@@ -36,6 +36,7 @@ import config
 import db
 import main
 import ntfy
+import octopus
 import ohme_client
 import settings
 from state import StatusSnapshot, store
@@ -48,7 +49,7 @@ logger = logging.getLogger(__name__)
 # events we actually care about, so we drop those access-log lines. Anything that
 # errors (status >= 400) is still logged.
 _QUIET_ACCESS_PATHS = frozenset(
-    {"/api/health", "/api/status", "/api/schedule", "/api/statistics", "/api/sessions"}
+    {"/api/health", "/api/status", "/api/schedule", "/api/statistics", "/api/sessions", "/api/tariff"}
 )
 
 
@@ -802,6 +803,35 @@ async def get_schedule() -> JSONResponse:
             "updatedAt": store.status.updated_at,
         }
     )
+
+
+_TARIFF_CACHE_TTL = 1800  # 30 min; Agile rates change at most once a day
+_tariff_cache: dict[str, Any] = {"value": None, "at": 0.0}
+
+
+@app.get("/api/tariff")
+async def get_tariff() -> JSONResponse:
+    """Upcoming Octopus Agile half-hourly rates and the cheapest upcoming slots.
+
+    ``enabled`` is false when the tariff feature is unconfigured — the dashboard
+    hides the card. Cached for 30 min; a transient fetch failure serves the last
+    good payload (or empty) rather than erroring.
+    """
+    if not octopus.is_enabled():
+        return JSONResponse({"enabled": False, "rates": [], "cheapest": []})
+    now = time.time()
+    if _tariff_cache["value"] is not None and now - _tariff_cache["at"] < _TARIFF_CACHE_TTL:
+        return JSONResponse(_tariff_cache["value"])
+    rates = await octopus.fetch_rates()
+    if rates is None:
+        if _tariff_cache["value"] is not None:
+            return JSONResponse(_tariff_cache["value"])
+        return JSONResponse({"enabled": True, "currency": "GBP", "rates": [], "cheapest": []})
+    upcoming = rates[:24]  # next ~12 hours
+    cheapest = sorted(upcoming, key=lambda r: r["pricePerKwh"])[:3]
+    payload = {"enabled": True, "currency": "GBP", "rates": upcoming, "cheapest": cheapest}
+    _tariff_cache.update(value=payload, at=now)
+    return JSONResponse(payload)
 
 
 @app.get("/api/sessions")
