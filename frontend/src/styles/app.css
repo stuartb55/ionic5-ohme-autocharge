@@ -332,6 +332,56 @@ body {
   color: var(--text-muted);
 }
 
+.battery-caption .today-target {
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+/* --- per-day targets editor --- */
+.day-targets {
+  margin-top: var(--space-2);
+  font-size: 0.82rem;
+}
+.day-targets summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.day-targets-grid {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: var(--space-1) var(--space-3);
+  justify-content: center;
+  margin: var(--space-2) 0;
+}
+.day-target {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+}
+.day-target select {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 2px 4px;
+  font-size: 0.8rem;
+}
+.day-targets .save {
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  border: 1px solid var(--brand);
+  background: var(--brand);
+  color: #fff;
+}
+.day-targets .save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .charge-controls {
   display: flex;
   flex-wrap: wrap;

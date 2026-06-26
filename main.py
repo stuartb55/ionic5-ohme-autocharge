@@ -37,6 +37,10 @@ def load_persisted_settings() -> None:
     if ready_by is not None:
         store.set_ready_by(ready_by)
         logger.info("Loaded persisted ready-by time: %s", ready_by)
+    day_targets = settings.load_day_targets()
+    if day_targets:
+        store.set_day_targets(day_targets)
+        logger.info("Loaded persisted per-weekday targets: %s", day_targets)
 
 
 async def handle_plugin_event(client) -> bool:
@@ -59,7 +63,8 @@ async def handle_plugin_event(client) -> bool:
     store.record_vehicle_state(vehicle)
     soc = vehicle.soc
 
-    target = store.charge_target
+    # effective_target applies today's per-weekday override (if any), else the base.
+    target = store.effective_target
 
     if soc >= target:
         logger.info(

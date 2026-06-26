@@ -57,6 +57,15 @@ export function Dashboard() {
     [refetchStatus],
   );
 
+  // Persist the per-weekday target overrides, then refetch status.
+  const handleSetDayTargets = useCallback(
+    async (map: Record<number, number>) => {
+      await api.setDayTargets(map);
+      refetchStatus();
+    },
+    [refetchStatus],
+  );
+
   // Manual refresh: ask the backend to pull a fresh live reading from Ohme,
   // then refetch every section. Even if the force-refresh fails we still
   // refetch so the button does something (shows whatever the backend has).
@@ -135,6 +144,7 @@ export function Dashboard() {
             status={status.data}
             onSetTarget={handleSetTarget}
             onSetReadyBy={handleSetReadyBy}
+            onSetDayTargets={handleSetDayTargets}
             onChargeChanged={refetchStatus}
           />
         ) : (

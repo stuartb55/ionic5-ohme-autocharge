@@ -41,6 +41,11 @@ export interface StatusResponse {
     targetMax: number;
     /** Ready-by departure time as "HH:MM", or null when charging ASAP/smart. */
     readyBy: string | null;
+    /**
+     * Per-weekday target overrides keyed by weekday ("0"=Mon … "6"=Sun). Empty
+     * when none set. charger.targetPercent reflects today's effective target.
+     */
+    dayTargets: Record<string, number>;
   };
   updatedAt: string | null;
   ready: boolean;
@@ -71,6 +76,13 @@ export interface TargetUpdateResponse {
 export interface ReadyByUpdateResponse {
   /** The new ready-by time ("HH:MM"), or null when cleared. */
   readyBy: string | null;
+  persisted: boolean;
+  applied: boolean;
+}
+
+export interface DayTargetsUpdateResponse {
+  /** The new per-weekday overrides keyed by weekday string. */
+  dayTargets: Record<string, number>;
   persisted: boolean;
   applied: boolean;
 }
