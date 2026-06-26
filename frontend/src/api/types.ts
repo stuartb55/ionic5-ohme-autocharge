@@ -159,6 +159,23 @@ export interface SessionsResponse {
   sessions: ChargeSessionEntry[];
 }
 
+export interface TariffRate {
+  from: string;
+  to: string | null;
+  /** Unit rate in the major currency unit (£/kWh). */
+  pricePerKwh: number;
+}
+
+export interface TariffResponse {
+  /** False when the Agile tariff feature is unconfigured — hide the card. */
+  enabled: boolean;
+  currency?: string | null;
+  /** Upcoming half-hourly rates, oldest first. */
+  rates: TariffRate[];
+  /** The cheapest upcoming slots (price ascending). */
+  cheapest: TariffRate[];
+}
+
 export interface DailyStat {
   date: string | null;
   energyKwh: number;

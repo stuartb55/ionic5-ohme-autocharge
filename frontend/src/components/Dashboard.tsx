@@ -8,6 +8,7 @@ import { ScheduleSection } from './ScheduleSection';
 import { SessionsSection } from './SessionsSection';
 import { StatisticsSection } from './StatisticsSection';
 import { StatusSection } from './StatusSection';
+import { TariffSection } from './TariffSection';
 import { ThemeToggle } from './ThemeToggle';
 import { VehiclePicker } from './VehiclePicker';
 import type { VehiclesResponse } from '../api/types';
@@ -17,6 +18,7 @@ const SCHEDULE_INTERVAL = 30_000;
 const STATS_INTERVAL = 300_000;
 // Sessions only change on plug-in events, so a slow poll is plenty.
 const SESSIONS_INTERVAL = 300_000;
+const TARIFF_INTERVAL = 1_800_000; // 30 min
 
 function SectionSkeleton({ height }: { height: number }) {
   return <div className="card"><div className="skeleton" style={{ height }} /></div>;
@@ -71,6 +73,8 @@ export function Dashboard() {
   const stats = usePolling(statsFetcher, STATS_INTERVAL, [days]);
   const sessionsFetcher = useCallback((signal: AbortSignal) => api.getSessions(8, signal), []);
   const sessions = usePolling(sessionsFetcher, SESSIONS_INTERVAL);
+  // Agile rates change at most once a day; a slow poll is plenty.
+  const tariff = usePolling(api.getTariff, TARIFF_INTERVAL);
 
   // refetch() from usePolling is stable, so these are safe to capture.
   const { refetch: refetchStatus } = status;
@@ -225,6 +229,8 @@ export function Dashboard() {
         )}
         {/* No skeleton: the card may legitimately never appear (history disabled). */}
         {sessions.data && <SessionsSection data={sessions.data} />}
+        {/* Agile tariff card — only shown when the feature is configured. */}
+        {tariff.data?.enabled && <TariffSection data={tariff.data} />}
       </div>
 
       <footer className="app-footer">

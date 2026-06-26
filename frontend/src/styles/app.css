@@ -711,6 +711,52 @@ body {
   justify-content: flex-end;
   margin-bottom: var(--space-3);
 }
+
+/* --- Agile tariff card --- */
+.tariff-now {
+  text-align: right;
+}
+.tariff-now .label {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.tariff-now .price {
+  font-size: 1.4rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.tariff-subhead {
+  margin: var(--space-3) 0 var(--space-2);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.tariff-cheapest {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.tariff-cheapest li {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-variant-numeric: tabular-nums;
+}
+.tariff-cheapest .price {
+  font-weight: 600;
+  color: var(--success, #16a34a);
+}
+.tariff-empty {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
 .vehicle-picker {
   display: inline-flex;
   align-items: center;

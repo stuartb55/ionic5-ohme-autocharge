@@ -7,6 +7,7 @@ import type {
   StatisticsResponse,
   StatusResponse,
   TargetUpdateResponse,
+  TariffResponse,
   VehicleUpdateResponse,
   VehiclesResponse,
 } from './types';
@@ -78,6 +79,7 @@ export const api = {
     getJson<StatisticsResponse>(`/api/statistics?days=${days}`, signal),
   getSessions: (limit = 8, signal?: AbortSignal) =>
     getJson<SessionsResponse>(`/api/sessions?limit=${limit}`, signal),
+  getTariff: (signal?: AbortSignal) => getJson<TariffResponse>('/api/tariff', signal),
   getVersion: (signal?: AbortSignal) => getJson<VersionResponse>('/api/version', signal),
   getVehicles: (signal?: AbortSignal) => getJson<VehiclesResponse>('/api/vehicles', signal),
   // Select which Hyundai vehicle to read (null = first).
