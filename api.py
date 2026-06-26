@@ -139,6 +139,9 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
             if store.last_soc is not None
             else ((client.battery or None) if connected else None)
         ),
+        # Driving range is only meaningful while plugged in (it's the reading
+        # captured at the last plug-in); once unplugged it goes stale like the SOC.
+        range_miles=store.last_range_miles if connected else None,
         charger_status=status_value,
         connected=connected,
         charger_online=bool(client.available),
@@ -465,10 +468,12 @@ async def _reapply_target_if_connected(target: int) -> bool:
     # The SOC recorded at plug-in goes stale as the session charges, and the
     # top-up sent to Ohme is computed from it — so re-read the real SOC first.
     # Target changes are rare (someone clicking save), so the extra Bluelink
-    # round-trip is fine; fall back to the plug-in reading if it fails.
+    # round-trip is fine; fall back to the plug-in reading if it fails. The full
+    # vehicle read also refreshes the displayed range/odometer.
     try:
-        soc = await asyncio.to_thread(bluelink.get_battery_percentage)
-        store.record_soc(soc)
+        vehicle = await asyncio.to_thread(bluelink.get_vehicle_state)
+        store.record_vehicle_state(vehicle)
+        soc = vehicle.soc
     except Exception:  # noqa: BLE001
         logger.warning(
             "Could not refresh SOC from Bluelink — using the plug-in reading",
@@ -529,6 +534,7 @@ async def get_status() -> JSONResponse:
         "vehicle": {
             "name": store.status.vehicle_name,
             "batteryPercent": store.status.battery_percent,
+            "rangeMiles": store.status.range_miles,
         },
         "charger": {
             "status": store.status.charger_status,

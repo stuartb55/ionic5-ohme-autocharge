@@ -6,7 +6,7 @@ import type {
 } from '../api/types';
 
 export const statusFixture: StatusResponse = {
-  vehicle: { name: 'Hyundai IONIQ 5', batteryPercent: 62 },
+  vehicle: { name: 'Hyundai IONIQ 5', batteryPercent: 62, rangeMiles: 180 },
   charger: {
     status: 'charging',
     connected: true,
@@ -46,6 +46,7 @@ export const sessionsFixture: SessionsResponse = {
       targetPercent: 80,
       topupPercent: 26,
       action: 'configured',
+      odometerMiles: 12450,
     },
     {
       id: 2,
@@ -55,6 +56,7 @@ export const sessionsFixture: SessionsResponse = {
       targetPercent: 80,
       topupPercent: 0,
       action: 'skipped_at_target',
+      odometerMiles: 12380,
     },
   ],
 };

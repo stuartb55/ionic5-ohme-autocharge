@@ -1,6 +1,6 @@
 import type { StatusResponse } from '../api/types';
 import { useNow } from '../hooks/useNow';
-import { formatFinishTime, formatKwh, formatPower } from '../utils/format';
+import { formatFinishTime, formatKwh, formatMiles, formatPower } from '../utils/format';
 import { BatteryRing } from './BatteryRing';
 import { ChargeControls } from './ChargeControls';
 import { ConnectionBadge } from './ConnectionBadge';
@@ -55,7 +55,12 @@ export function StatusSection({
         <div className="battery-wrap">
           <BatteryRing percent={vehicle.batteryPercent} target={target} />
           <div className="battery-caption">
-            <div className="vehicle">{vehicle.name ?? 'Vehicle'}</div>
+            <div className="vehicle">
+              {vehicle.name ?? 'Vehicle'}
+              {vehicle.rangeMiles != null && (
+                <span className="range"> · {formatMiles(vehicle.rangeMiles)}</span>
+              )}
+            </div>
             {showFinish && (
               <div className="finish-eta">
                 Ready by ~{formatFinishTime(charger.projectedFinish as string)}

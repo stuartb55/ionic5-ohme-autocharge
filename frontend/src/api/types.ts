@@ -13,6 +13,8 @@ export interface StatusResponse {
   vehicle: {
     name: string | null;
     batteryPercent: number | null;
+    /** Estimated driving range in miles at the last plug-in, or null. */
+    rangeMiles: number | null;
   };
   charger: {
     status: ChargerStatus;
@@ -88,6 +90,8 @@ export interface ChargeSessionEntry {
   topupPercent: number | null;
   /** "configured" or "skipped_at_target". */
   action: string | null;
+  /** Odometer (miles) at plug-in, or null when not reported. */
+  odometerMiles: number | null;
 }
 
 export interface SessionsResponse {

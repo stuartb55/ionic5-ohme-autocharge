@@ -13,8 +13,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 import api
+import bluelink
 import settings
 from state import StatusSnapshot, store
+
+
+def _vstate(soc, *, range_miles=150, odometer_miles=10000):
+    """Build a Bluelink VehicleState for patching bluelink.get_vehicle_state."""
+    return bluelink.VehicleState(soc=soc, range_miles=range_miles, odometer_miles=odometer_miles)
 
 
 @pytest.fixture
@@ -29,6 +35,8 @@ def reset_state():
     store.client = None
     store.ready = False
     store.last_soc = None
+    store.last_range_miles = None
+    store.last_odometer_miles = None
     store.charge_target_override = None
     store.last_poll_error = None
     store.consecutive_poll_failures = 0
@@ -496,7 +504,7 @@ def test_set_target_reapplies_to_ohme_with_fresh_soc(client):
     store.status = StatusSnapshot(connected=True)
     store.ready = True
 
-    with patch("bluelink.get_battery_percentage", return_value=68), \
+    with patch("bluelink.get_vehicle_state", return_value=_vstate(68, range_miles=205)), \
          patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
         body = client.put("/api/settings/target", json={"targetPercent": 90}).json()
 
@@ -504,6 +512,7 @@ def test_set_target_reapplies_to_ohme_with_fresh_soc(client):
     # The top-up must be computed from the fresh reading, not the plug-in one.
     mock_set_target.assert_awaited_once_with(mock_client, current_soc=68, target_percent=90)
     assert store.last_soc == 68  # the dashboard now shows the fresh SOC too
+    assert store.last_range_miles == 205  # ...and the refreshed range
 
 
 def test_set_target_falls_back_to_plugin_soc_when_bluelink_fails(client):
@@ -513,7 +522,7 @@ def test_set_target_falls_back_to_plugin_soc_when_bluelink_fails(client):
     store.status = StatusSnapshot(connected=True)
     store.ready = True
 
-    with patch("bluelink.get_battery_percentage", side_effect=RuntimeError("Bluelink down")), \
+    with patch("bluelink.get_vehicle_state", side_effect=RuntimeError("Bluelink down")), \
          patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
         body = client.put("/api/settings/target", json={"targetPercent": 90}).json()
 
@@ -527,7 +536,7 @@ def test_set_target_does_not_reapply_when_fresh_soc_at_target(client):
     store.status = StatusSnapshot(connected=True)
     store.ready = True
 
-    with patch("bluelink.get_battery_percentage", return_value=85), \
+    with patch("bluelink.get_vehicle_state", return_value=_vstate(85)), \
          patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
         body = client.put("/api/settings/target", json={"targetPercent": 85}).json()
 
@@ -540,7 +549,7 @@ def test_set_target_does_not_reapply_when_disconnected(client):
     store.last_soc = 50
     store.status = StatusSnapshot(connected=False)
 
-    with patch("bluelink.get_battery_percentage") as mock_soc, \
+    with patch("bluelink.get_vehicle_state") as mock_soc, \
          patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
         body = client.put("/api/settings/target", json={"targetPercent": 90}).json()
 
@@ -600,6 +609,13 @@ def test_build_snapshot_reports_unknown_soc_when_unplugged():
     store.last_soc = None
     snap = api.build_snapshot(_charging_client(), connected=False)
     assert snap.battery_percent is None
+
+
+def test_build_snapshot_includes_range_when_connected():
+    store.last_range_miles = 180
+    assert api.build_snapshot(_charging_client(), connected=True).range_miles == 180
+    # Range is the plug-in reading, so it goes stale (None) once unplugged.
+    assert api.build_snapshot(_charging_client(), connected=False).range_miles is None
 
 
 def test_build_snapshot_projects_finish_from_last_slot_end():

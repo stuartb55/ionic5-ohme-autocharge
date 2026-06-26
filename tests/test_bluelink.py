@@ -9,9 +9,13 @@ def _mock_manager(vehicles: dict):
     return vm
 
 
-def _mock_vehicle(soc):
+def _mock_vehicle(soc, *, ev_range=None, ev_range_unit=None, odometer=None, odometer_unit=None):
     v = MagicMock()
     v.ev_battery_percentage = soc
+    v.ev_driving_range = ev_range
+    v.ev_driving_range_unit = ev_range_unit
+    v.odometer = odometer
+    v.odometer_unit = odometer_unit
     return v
 
 
@@ -41,6 +45,33 @@ def test_raises_runtime_error_when_soc_is_none():
     with patch("bluelink._get_manager", return_value=vm):
         with pytest.raises(RuntimeError, match="battery percentage"):
             bluelink.get_battery_percentage()
+
+
+def test_vehicle_state_converts_km_to_miles():
+    vm = _mock_manager(
+        {"vin1": _mock_vehicle(62, ev_range=300, ev_range_unit="km", odometer=20000, odometer_unit="km")}
+    )
+    with patch("bluelink._get_manager", return_value=vm):
+        state = bluelink.get_vehicle_state()
+    assert state.soc == 62
+    assert state.range_miles == 186  # 300 km -> 186 mi
+    assert state.odometer_miles == 12427  # 20000 km -> 12427 mi
+
+
+def test_vehicle_state_passes_through_miles():
+    vm = _mock_manager({"vin1": _mock_vehicle(50, ev_range=180, ev_range_unit="mi")})
+    with patch("bluelink._get_manager", return_value=vm):
+        state = bluelink.get_vehicle_state()
+    assert state.range_miles == 180
+
+
+def test_vehicle_state_range_none_on_unknown_unit():
+    # Missing/unrecognised unit must not be guessed at — report None.
+    vm = _mock_manager({"vin1": _mock_vehicle(50, ev_range=300, ev_range_unit=None)})
+    with patch("bluelink._get_manager", return_value=vm):
+        state = bluelink.get_vehicle_state()
+    assert state.range_miles is None
+    assert state.odometer_miles is None
 
 
 def test_singleton_manager_created_once():

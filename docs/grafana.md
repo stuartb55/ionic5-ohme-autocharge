@@ -93,10 +93,24 @@ ORDER BY stat_date;
 Recent charge sessions (table):
 
 ```sql
-SELECT plugged_in_at, vehicle_name, soc_percent, target_percent, topup_percent, action
+SELECT plugged_in_at, vehicle_name, soc_percent, target_percent, topup_percent, action, odometer_miles
 FROM charge_sessions
 ORDER BY plugged_in_at DESC
 LIMIT 50;
+```
+
+Driving efficiency (miles per kWh) over the selected range — distance covered
+between the first and last plug-in, divided by the energy charged in that
+window (stat panel). Needs a couple of plug-ins with odometer data to be
+meaningful:
+
+```sql
+SELECT
+  (MAX(odometer_miles) - MIN(odometer_miles))::float
+    / NULLIF((SELECT SUM(energy_kwh) FROM daily_stats WHERE $__timeFilter(stat_date)), 0)
+    AS miles_per_kwh
+FROM charge_sessions
+WHERE $__timeFilter(plugged_in_at) AND odometer_miles IS NOT NULL;
 ```
 
 Latest charge schedule (table):

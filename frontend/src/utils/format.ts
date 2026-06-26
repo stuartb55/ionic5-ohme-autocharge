@@ -24,6 +24,12 @@ export function formatKwh(kwh: number): string {
   return `${kwh.toFixed(kwh >= 100 ? 0 : 1)} kWh`;
 }
 
+/** Whole-mile distance, e.g. 180 -> "180 mi". Null/negative renders empty. */
+export function formatMiles(miles: number | null | undefined): string {
+  if (miles == null || miles < 0) return '';
+  return `${Math.round(miles)} mi`;
+}
+
 const NBSP = ' ';
 
 export function formatMoney(amount: number, currency: string | null): string {
