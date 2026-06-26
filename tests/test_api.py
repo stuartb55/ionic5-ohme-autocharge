@@ -43,6 +43,8 @@ def reset_state():
     store.ready_by = None
     store.day_targets = {}
     store.vehicle_id_override = None
+    store.avg_price_per_kwh = None
+    store.price_currency = None
     store.last_poll_error = None
     store.consecutive_poll_failures = 0
     store.plugin_failure_notified = False
@@ -1016,6 +1018,57 @@ def test_build_snapshot_includes_range_when_connected():
     assert api.build_snapshot(_charging_client(), connected=True).range_miles == 180
     # Range is the plug-in reading, so it goes stale (None) once unplugged.
     assert api.build_snapshot(_charging_client(), connected=False).range_miles is None
+
+
+def _slot(energy, end=None):
+    s = MagicMock()
+    s.energy = energy
+    s.end = end
+    s.to_dict = lambda: {"energy": energy}
+    return s
+
+
+def test_cache_avg_price_sets_and_ignores_zero():
+    api._cache_avg_price({"currency": "GBP", "totals": {"averageKwhPrice": 0.0728}})
+    assert store.avg_price_per_kwh == 0.0728
+    assert store.price_currency == "GBP"
+    # A zero/absent price must not overwrite a known one.
+    api._cache_avg_price({"currency": "GBP", "totals": {"averageKwhPrice": 0}})
+    assert store.avg_price_per_kwh == 0.0728
+
+
+def test_build_snapshot_projects_session_cost():
+    import datetime as dt
+
+    client = _charging_client()
+    client.slots = [
+        _slot(10.0, dt.datetime(2026, 6, 13, 4, 0, tzinfo=dt.timezone.utc)),
+        _slot(8.0, dt.datetime(2026, 6, 13, 6, 0, tzinfo=dt.timezone.utc)),
+    ]
+    store.avg_price_per_kwh = 0.10
+    store.price_currency = "GBP"
+    snap = api.build_snapshot(client, connected=True)
+    assert snap.planned_energy_kwh == 18.0
+    assert snap.projected_cost == 1.8  # 18 kWh * £0.10
+    assert snap.projected_cost_currency == "GBP"
+
+
+def test_build_snapshot_no_cost_without_price():
+    client = _charging_client()
+    client.slots = [_slot(10.0)]
+    store.avg_price_per_kwh = None
+    snap = api.build_snapshot(client, connected=True)
+    assert snap.planned_energy_kwh == 10.0  # energy still reported
+    assert snap.projected_cost is None  # but no estimate without a price
+
+
+def test_build_snapshot_no_cost_when_disconnected():
+    client = _charging_client()
+    client.slots = [_slot(10.0)]
+    store.avg_price_per_kwh = 0.10
+    snap = api.build_snapshot(client, connected=False)
+    assert snap.projected_cost is None
+    assert snap.planned_energy_kwh == 0.0
 
 
 def test_build_snapshot_projects_finish_from_last_slot_end():

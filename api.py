@@ -128,6 +128,18 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
     except Exception:  # pragma: no cover - defensive: malformed session
         status_value = "unknown"
 
+    slots = client.slots
+    # Total energy the charger will draw this session — the sum of all allocated
+    # slots is grid-side (watts × hours), so it already includes charging losses.
+    # Multiplied by the recent average £/kWh for a session cost estimate.
+    planned_energy_kwh = round(sum(s.energy for s in slots), 2) if connected else 0.0
+    price = store.avg_price_per_kwh
+    projected_cost = (
+        round(price * planned_energy_kwh, 2)
+        if connected and price and planned_energy_kwh > 0
+        else None
+    )
+
     return StatusSnapshot(
         vehicle_name=client.current_vehicle,
         # Prefer the real Bluelink SOC captured at plug-in; Ohme's own `battery`
@@ -156,13 +168,16 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
         # absolute target, so never use it.
         target_percent=store.effective_target,
         session_energy_wh=float(client.energy or 0),
-        slots=[s.to_dict() for s in client.slots],
+        planned_energy_kwh=planned_energy_kwh,
+        projected_cost=projected_cost,
+        projected_cost_currency=store.price_currency if projected_cost is not None else None,
+        slots=[s.to_dict() for s in slots],
         next_slot_start=_iso(client.next_slot_start),
         next_slot_end=_iso(client.next_slot_end),
         # The charge is done when the last allocated slot ends. Slots may be
         # out of order, so take the max rather than the final list entry.
         projected_finish=(
-            _iso(max((s.end for s in client.slots), default=None)) if connected else None
+            _iso(max((s.end for s in slots), default=None)) if connected else None
         ),
         updated_at=now,
     )
@@ -724,6 +739,11 @@ async def get_status() -> JSONResponse:
             "sessionEnergyKwh": round(store.status.session_energy_wh / 1000, 2),
             # When the charge is projected to finish (end of the last slot).
             "projectedFinish": store.status.projected_finish,
+            # Estimated total energy + cost for the session (null cost until a
+            # price is known). Currency mirrors the statistics endpoint.
+            "plannedEnergyKwh": store.status.planned_energy_kwh,
+            "projectedCost": store.status.projected_cost,
+            "projectedCostCurrency": store.status.projected_cost_currency,
         },
         "config": {
             "chargeTarget": store.charge_target,
@@ -790,7 +810,17 @@ async def _persist_daily_stats(client: Any, days: int = 90) -> None:
         logger.warning("Could not fetch charge summary for daily-stats persist", exc_info=True)
         return
     parsed = parse_summary({k: v for k, v in summary.items() if k != "granularity"}, days)
+    _cache_avg_price(parsed)
     await db.record_daily_stats(parsed["daily"], parsed["currency"])
+
+
+def _cache_avg_price(parsed: dict[str, Any]) -> None:
+    """Remember the average £/kWh (and currency) so build_snapshot can estimate
+    the current session's cost without making its own upstream call."""
+    price = parsed["totals"].get("averageKwhPrice")
+    if price and price > 0:
+        store.avg_price_per_kwh = price
+        store.price_currency = parsed["currency"]
 
 
 def _now_local() -> datetime.datetime:
@@ -890,6 +920,7 @@ async def get_statistics(days: int = Query(default=7, ge=1, le=90)) -> JSONRespo
 
     # async_get_charge_summary returns granularity as an enum; drop it before serialising.
     parsed = parse_summary({k: v for k, v in summary.items() if k != "granularity"}, days)
+    _cache_avg_price(parsed)
     # Driving efficiency from the odometer history (null when unavailable).
     parsed["efficiency"] = await _compute_efficiency(days, parsed["totals"]["energyKwh"])
     _summary_cache.update(key=cache_key, value=parsed, at=now)
