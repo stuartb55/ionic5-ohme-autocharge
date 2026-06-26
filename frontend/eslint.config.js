@@ -14,6 +14,12 @@ export default [
     languageOptions: { globals: { ...globals.node } },
   },
   {
+    // The service worker runs in the ServiceWorkerGlobalScope.
+    files: ['public/sw.js'],
+    languageOptions: { globals: { ...globals.browser, ...globals.serviceworker } },
+    rules: { 'no-useless-assignment': 'off' },
+  },
+  {
     files: ['**/*.{ts,tsx}'],
     languageOptions: {
       parser: tsparser,
