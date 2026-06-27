@@ -46,19 +46,6 @@ NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")
 NTFY_URL = os.getenv("NTFY_URL", "https://ntfy.sh")
 NTFY_TOKEN = os.getenv("NTFY_TOKEN", "")
 
-# Web push notifications (optional). Enabled when both VAPID keys are set.
-# Generate a keypair once and set:
-#   VAPID_PUBLIC_KEY  — application server key (URL-safe base64) for the browser
-#   VAPID_PRIVATE_KEY — the matching private key (URL-safe base64 / PEM)
-#   VAPID_SUBJECT     — a contact, e.g. "mailto:you@example.com"
-VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY", "")
-VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "")
-VAPID_SUBJECT = os.getenv("VAPID_SUBJECT", "mailto:autocharge@example.com")
-
-# Where browser push subscriptions are persisted (JSON). Defaults alongside the
-# settings file so the bundled /app/data volume keeps them across restarts.
-PUSH_SUBSCRIPTIONS_PATH = os.getenv("PUSH_SUBSCRIPTIONS_PATH", "/app/data/push_subscriptions.json")
-
 # Weekly charging-summary digest via ntfy. Sent once a week on this weekday
 # (0=Mon … 6=Sun) at this local hour. -1 (or any value outside 0–6) disables it;
 # it also requires NTFY_TOPIC. Default: Monday 08:00.

@@ -35,10 +35,9 @@ import bluelink
 import config
 import db
 import main
-import notify
+import ntfy
 import octopus
 import ohme_client
-import push
 import settings
 from state import StatusSnapshot, store
 
@@ -257,7 +256,7 @@ async def _maybe_notify_finished(prev_status: str, snap: StatusSnapshot) -> None
         return
     name = snap.vehicle_name or "EV"
     kwh = snap.session_energy_wh / 1000
-    await notify.send(f"{name} charging finished — {kwh:.1f} kWh added this session")
+    await ntfy.send(f"{name} charging finished — {kwh:.1f} kWh added this session")
 
 
 # Signature of the last telemetry row written, to skip identical idle repeats.
@@ -348,7 +347,7 @@ async def poll_loop() -> None:
                 async with store.client_lock:
                     store.update(build_snapshot(client, connected=now_connected))
                 if recovered:
-                    await notify.send("Autocharge reconnected to Ohme — live data restored")
+                    await ntfy.send("Autocharge reconnected to Ohme — live data restored")
                 await _maybe_notify_finished(prev_status, store.status)
 
                 # Append a telemetry point for Grafana (best-effort, no-op when
@@ -379,7 +378,7 @@ async def poll_loop() -> None:
                 # threshold; ntfy.send swallows its own errors, so this can
                 # never make the poll failure worse.
                 if store.consecutive_poll_failures == POLL_FAILURE_ALERT_AFTER:
-                    await notify.send(
+                    await ntfy.send(
                         f"Autocharge can't reach Ohme — {POLL_FAILURE_ALERT_AFTER} polls "
                         "have failed; plug-in detection and dashboard data are stale.",
                         title="Autocharge problem",
@@ -577,18 +576,6 @@ class VehicleUpdate(BaseModel):
     vehicleId: Optional[str] = None
 
 
-class PushSubscribe(BaseModel):
-    """A browser PushSubscription (endpoint + keys; extra fields kept)."""
-
-    model_config = {"extra": "allow"}
-    endpoint: str
-    keys: dict[str, str]
-
-
-class PushUnsubscribe(BaseModel):
-    endpoint: str
-
-
 async def _reapply_target_if_connected() -> bool:
     """Push the current effective target/ready-by to Ohme if the car is plugged in.
 
@@ -633,28 +620,6 @@ async def _reapply_target_if_connected() -> bool:
 async def version() -> JSONResponse:
     """Build version (git SHA), or 'dev' when unset (local run)."""
     return JSONResponse({"version": config.APP_VERSION or "dev"})
-
-
-@app.get("/api/push/config")
-async def push_config() -> JSONResponse:
-    """Whether web push is available, and the VAPID key the browser subscribes with."""
-    return JSONResponse({"enabled": push.is_enabled(), "publicKey": push.public_key()})
-
-
-@app.post("/api/push/subscribe")
-async def push_subscribe(subscription: PushSubscribe) -> JSONResponse:
-    """Register a browser push subscription."""
-    if not push.is_enabled():
-        raise HTTPException(status_code=503, detail="Web push is not configured")
-    ok = push.add_subscription(subscription.model_dump())
-    return JSONResponse({"ok": ok})
-
-
-@app.post("/api/push/unsubscribe")
-async def push_unsubscribe(body: PushUnsubscribe) -> JSONResponse:
-    """Remove a browser push subscription by endpoint."""
-    ok = push.remove_subscription(body.endpoint)
-    return JSONResponse({"ok": ok})
 
 
 @app.get("/api/health")
@@ -961,7 +926,7 @@ async def _maybe_send_weekly_digest(client: Any) -> None:
     parsed = parse_summary({k: v for k, v in summary.items() if k != "granularity"}, 7)
     # Mark sent before awaiting ntfy so a slow/failed send can't double-fire.
     store.last_digest_date = today
-    await notify.send(_format_digest(parsed), title="Weekly charging summary")
+    await ntfy.send(_format_digest(parsed), title="Weekly charging summary")
     logger.info("Sent weekly charging digest")
 
 
