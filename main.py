@@ -13,7 +13,7 @@ import sys
 
 import bluelink
 import ohme_client
-import notify
+import ntfy
 import config
 import db
 import settings
@@ -111,7 +111,7 @@ async def handle_plugin_event(client) -> bool:
         schedule = ", ".join(str(s) for s in client.slots)
         if schedule:
             msg += f". Charge schedule: {schedule}"
-        await notify.send(msg)
+        await ntfy.send(msg)
         if db.is_enabled():
             session_id = await db.record_session(
                 vehicle_name=client.current_vehicle,
@@ -148,7 +148,7 @@ async def _notify_plugin_failure(message: str) -> None:
     if store.plugin_failure_notified:
         return
     store.plugin_failure_notified = True
-    await notify.send(message, title="Autocharge problem", priority="high")
+    await ntfy.send(message, title="Autocharge problem", priority="high")
 
 
 class PlugInDetector:

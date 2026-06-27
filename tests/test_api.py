@@ -578,46 +578,6 @@ async def test_live_soc_swallows_bluelink_error_keeps_reading(monkeypatch):
     assert store.last_soc == 60  # prior reading preserved
 
 
-# --- web push -------------------------------------------------------------------
-
-
-def test_push_config_reports_enabled_and_key(client):
-    with patch("push.is_enabled", return_value=True), patch("push.public_key", return_value="PUBKEY"):
-        body = client.get("/api/push/config").json()
-    assert body == {"enabled": True, "publicKey": "PUBKEY"}
-
-
-def test_push_subscribe_stores_subscription(client):
-    sub = {"endpoint": "https://e/1", "keys": {"p256dh": "k", "auth": "a"}}
-    with patch("push.is_enabled", return_value=True), \
-         patch("push.add_subscription", return_value=True) as mock_add:
-        resp = client.post("/api/push/subscribe", json=sub)
-    assert resp.status_code == 200 and resp.json() == {"ok": True}
-    assert mock_add.call_args[0][0]["endpoint"] == "https://e/1"
-
-
-def test_push_subscribe_503_when_disabled(client):
-    sub = {"endpoint": "https://e/1", "keys": {"p256dh": "k", "auth": "a"}}
-    with patch("push.is_enabled", return_value=False):
-        assert client.post("/api/push/subscribe", json=sub).status_code == 503
-
-
-def test_push_unsubscribe_removes(client):
-    with patch("push.remove_subscription", return_value=True) as mock_rm:
-        resp = client.post("/api/push/unsubscribe", json={"endpoint": "https://e/1"})
-    assert resp.json() == {"ok": True}
-    mock_rm.assert_called_once_with("https://e/1")
-
-
-async def test_notify_fans_out_to_ntfy_and_push():
-    import notify
-    with patch("ntfy.send", new=AsyncMock()) as mock_ntfy, \
-         patch("push.send", new=AsyncMock()) as mock_push:
-        await notify.send("hello", title="T", priority="high")
-    mock_ntfy.assert_awaited_once_with("hello", title="T", priority="high")
-    mock_push.assert_awaited_once_with("hello", title="T", priority="high")
-
-
 # --- tariff (Octopus Agile) -----------------------------------------------------
 
 
