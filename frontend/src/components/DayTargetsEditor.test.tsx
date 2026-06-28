@@ -29,4 +29,16 @@ describe('DayTargetsEditor', () => {
     render(<DayTargetsEditor value={{}} base={80} min={10} max={100} onSave={vi.fn()} />);
     expect(screen.queryByRole('button', { name: /save per-day/i })).not.toBeInTheDocument();
   });
+
+  it('signals active overrides with a count badge on the summary', () => {
+    render(
+      <DayTargetsEditor value={{ '0': 65, '4': 100 }} base={80} min={10} max={100} onSave={vi.fn()} />,
+    );
+    expect(screen.getByText(/2 overrides/i)).toBeInTheDocument();
+  });
+
+  it('has no override badge when none are set', () => {
+    render(<DayTargetsEditor value={{}} base={80} min={10} max={100} onSave={vi.fn()} />);
+    expect(screen.queryByText(/override/i)).not.toBeInTheDocument();
+  });
 });

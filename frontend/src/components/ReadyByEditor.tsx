@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSaveAction } from '../hooks/useSaveAction';
 
 interface Props {
   /** Current ready-by time ("HH:MM") from the server, or null when unset. */
@@ -19,8 +20,7 @@ interface Props {
  */
 export function ReadyByEditor({ value, clearable = true, onSave }: Props) {
   const [draft, setDraft] = useState(value ?? '');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(false);
+  const { saving, error, saved, run, reset } = useSaveAction();
 
   // Keep the draft synced to the server value while the user isn't editing.
   const [prevValue, setPrevValue] = useState(value);
@@ -31,19 +31,12 @@ export function ReadyByEditor({ value, clearable = true, onSave }: Props) {
   }
 
   const current = value ?? '';
-  const dirty = draft !== current;
+  // Guard on `edited` so a successful save hides the Save button and reveals the
+  // "Saved ✓" confirmation immediately, before the next poll refreshes `value`.
+  const dirty = edited && draft !== current;
 
-  const run = async (next: string | null) => {
-    setSaving(true);
-    setError(false);
-    try {
-      await onSave(next);
-      setEdited(false);
-    } catch {
-      setError(true);
-    } finally {
-      setSaving(false);
-    }
+  const run_ = async (next: string | null) => {
+    if (await run(() => onSave(next))) setEdited(false);
   };
 
   return (
@@ -56,7 +49,7 @@ export function ReadyByEditor({ value, clearable = true, onSave }: Props) {
           disabled={saving}
           onChange={(e) => {
             setEdited(true);
-            setError(false);
+            reset();
             setDraft(e.target.value);
           }}
           aria-label="Ready-by time"
@@ -64,7 +57,7 @@ export function ReadyByEditor({ value, clearable = true, onSave }: Props) {
       </label>
       <div className="ready-by-actions">
         {dirty && draft !== '' && (
-          <button type="button" className="save" onClick={() => run(draft)} disabled={saving}>
+          <button type="button" className="save" onClick={() => run_(draft)} disabled={saving}>
             {saving ? 'Saving…' : 'Save'}
           </button>
         )}
@@ -74,14 +67,24 @@ export function ReadyByEditor({ value, clearable = true, onSave }: Props) {
             className="cancel"
             onClick={() => {
               setDraft('');
-              void run(null);
+              void run_(null);
             }}
             disabled={saving}
           >
             Clear
           </button>
         )}
+        {saved && !dirty && (
+          <span className="save-confirm" role="status">
+            Saved ✓
+          </span>
+        )}
       </div>
+      {/* Clarify where a pre-filled time came from: Ohme's own rule vs the user's
+          override (only the latter has a Clear button). */}
+      {value != null && !dirty && (
+        <p className="field-hint">{clearable ? 'Your override' : 'From Ohme’s schedule'}</p>
+      )}
       {error && (
         <div className="target-error" role="alert">
           Couldn’t update ready-by time. Try again.

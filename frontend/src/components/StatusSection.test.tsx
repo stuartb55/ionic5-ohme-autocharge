@@ -25,9 +25,9 @@ describe('StatusSection projected finish', () => {
 
   it('shows when the charge is projected to finish', () => {
     render(<StatusSection status={statusFixture} />);
-    // A time is rendered after "Ready by ~"; the exact value depends on the
+    // A time is rendered after "Finishes ~"; the exact value depends on the
     // viewer's timezone, so don't pin it.
-    expect(screen.getByText(/ready by ~/i)).toHaveTextContent(/\d{1,2}:\d{2}/);
+    expect(screen.getByText(/finishes ~/i)).toHaveTextContent(/\d{1,2}:\d{2}/);
   });
 
   it('hides the projection once the finish time has passed', () => {

@@ -31,6 +31,13 @@ export function BatteryRing({ percent, target, size = 220 }: Props) {
   const clampedTarget = target != null ? Math.min(100, Math.max(0, target)) : null;
   const targetAngle = clampedTarget != null ? (clampedTarget / 100) * 360 - 90 : null;
   const markerRad = targetAngle != null ? (targetAngle * Math.PI) / 180 : 0;
+  const markerCos = Math.cos(markerRad);
+  const markerSin = Math.sin(markerRad);
+  // A short radial tick straddling the ring stroke, so the target reads as a
+  // deliberate marker (a small dot was nearly invisible, and vanished under the
+  // fill arc when SOC was near target).
+  const tickInner = r - stroke / 2 - 2;
+  const tickOuter = r + stroke / 2 + 2;
 
   return (
     <svg
@@ -56,11 +63,14 @@ export function BatteryRing({ percent, target, size = 220 }: Props) {
         />
       )}
       {targetAngle != null && (
-        <circle
-          cx={cx + r * Math.cos(markerRad)}
-          cy={cy + r * Math.sin(markerRad)}
-          r={4}
-          fill="var(--text)"
+        <line
+          x1={cx + tickInner * markerCos}
+          y1={cy + tickInner * markerSin}
+          x2={cx + tickOuter * markerCos}
+          y2={cy + tickOuter * markerSin}
+          stroke="var(--warning)"
+          strokeWidth={3}
+          strokeLinecap="round"
           aria-hidden="true"
         />
       )}

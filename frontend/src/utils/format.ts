@@ -78,6 +78,21 @@ export function formatDateShort(iso: string | null): string {
   return new Date(iso).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
 }
 
+/**
+ * Short distance from now to a future time: "in 2h" / "in 35m" / "now". Lets a
+ * glanceable badge ("Next slot 01:00 · in 2h") avoid mental arithmetic. Empty
+ * for an unparseable timestamp.
+ */
+export function formatUntil(iso: string, now: Date = new Date()): string {
+  const diffMs = new Date(iso).getTime() - now.getTime();
+  if (!Number.isFinite(diffMs)) return '';
+  const mins = Math.round(diffMs / 60000);
+  if (mins <= 0) return 'now';
+  if (mins < 60) return `in ${mins}m`;
+  const hours = Math.round(mins / 60);
+  return `in ${hours}h`;
+}
+
 /** "12s ago" / "3m ago" relative time, for the "last updated" footer. */
 export function relativeTime(from: Date | null, now: Date = new Date()): string {
   if (!from) return 'never';

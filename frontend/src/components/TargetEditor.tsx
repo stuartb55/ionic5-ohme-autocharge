@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSaveAction } from '../hooks/useSaveAction';
 
 interface Props {
   /** The current target from the server. */
@@ -14,13 +15,20 @@ const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(mi
 
 /**
  * Inline stepper for the charge target. Edits are local until saved, so a
- * background poll refreshing `value` can't clobber an in-progress edit.
+ * background poll refreshing `value` can't clobber an in-progress edit. The
+ * value is tappable to type an exact percent (faster than stepping ±5% across
+ * the whole range on a phone).
  */
 export function TargetEditor({ value, min = 10, max = 100, step = 5, onSave }: Props) {
   const [draft, setDraft] = useState(value);
   const [edited, setEdited] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(false);
+  const [typing, setTyping] = useState(false);
+  // A free-text mirror of the input while typing. Clamping the number on every
+  // keystroke would fight the user (e.g. typing "5" then "55" would snap to the
+  // min in between); instead the string is shown verbatim and the clamped
+  // number is derived from it.
+  const [typed, setTyped] = useState('');
+  const { saving, error, saved, run, reset } = useSaveAction();
 
   // Keep the draft in sync with the server value, but only while the user has no
   // pending edit — otherwise a poll would overwrite what they're changing.
@@ -33,29 +41,27 @@ export function TargetEditor({ value, min = 10, max = 100, step = 5, onSave }: P
   }
 
   const change = (delta: number) => {
-    setError(false);
+    reset();
     setEdited(true);
     setDraft((d) => clamp(d + delta, min, max));
   };
 
-  const dirty = draft !== value;
+  // Guard on `edited` so that after a successful save (which clears `edited`)
+  // the action buttons hide and the "Saved ✓" confirmation shows immediately,
+  // even before the next poll refreshes `value` to the new target.
+  const dirty = edited && draft !== value;
 
   const save = async () => {
-    setSaving(true);
-    setError(false);
-    try {
-      await onSave(draft);
+    if (await run(() => onSave(draft))) {
       setEdited(false);
-    } catch {
-      setError(true);
-    } finally {
-      setSaving(false);
+      setTyping(false);
     }
   };
 
   const cancel = () => {
     setEdited(false);
-    setError(false);
+    setTyping(false);
+    reset();
     setDraft(value);
   };
 
@@ -71,9 +77,43 @@ export function TargetEditor({ value, min = 10, max = 100, step = 5, onSave }: P
         >
           −
         </button>
-        <span className="target-value" aria-live="polite">
-          Target {draft}%
-        </span>
+        {typing ? (
+          <input
+            type="number"
+            className="target-input"
+            min={min}
+            max={max}
+            step={step}
+            value={typed}
+            autoFocus
+            disabled={saving}
+            aria-label="Charge target percent"
+            onChange={(e) => {
+              reset();
+              setEdited(true);
+              const raw = e.target.value;
+              setTyped(raw);
+              const n = Number(raw);
+              if (raw !== '' && !Number.isNaN(n)) setDraft(clamp(n, min, max));
+            }}
+            onBlur={() => setTyping(false)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') setTyping(false);
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            className="target-value"
+            onClick={() => {
+              setTyped(String(draft));
+              setTyping(true);
+            }}
+            aria-label={`Charge target ${draft}%, tap to type an exact value`}
+          >
+            Target {draft}%
+          </button>
+        )}
         <button
           type="button"
           className="step"
@@ -94,6 +134,12 @@ export function TargetEditor({ value, min = 10, max = 100, step = 5, onSave }: P
             Cancel
           </button>
         </div>
+      )}
+
+      {saved && !dirty && (
+        <span className="save-confirm" role="status">
+          Saved ✓
+        </span>
       )}
 
       {error && (
