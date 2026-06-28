@@ -166,12 +166,29 @@ class PlugInDetector:
         self.session_handled = False
 
     def prime(self, status) -> None:
-        """Seed the initial connection state from a startup snapshot so a restart
-        mid-charge keeps reconfiguring Ohme on the next poll rather than waiting
-        for a fresh plug-in transition."""
+        """Seed the initial connection state from a startup snapshot.
+
+        A single snapshot can't distinguish a restart *during* a session we
+        already handled from a car that was plugged in while we were down, so we
+        consult the persisted ``sessionActive`` marker:
+
+        * connected + ``sessionActive`` True → the session was already configured
+          and recorded before the restart. Treat it as handled so we don't
+          re-record a duplicate ``charge_sessions`` row or re-send a notification.
+          Ohme keeps its charge rule server-side, so nothing needs reconfiguring.
+        * connected + not ``sessionActive`` → the car was plugged in while the
+          container was down; the session was never configured. Leave it
+          unhandled so the next poll configures, records and notifies once.
+        """
         self.was_connected = ohme_client.is_connected(status)
-        if self.was_connected:
-            logger.info("Car already connected on startup — will reconfigure Ohme on next poll")
+        if not self.was_connected:
+            return
+        if settings.load_session_active():
+            self.session_handled = True
+            logger.info("Car already connected on startup — session already handled before restart")
+        else:
+            self.session_handled = False
+            logger.info("Car connected on startup with no handled session — will configure on next poll")
 
     async def update(self, client, status) -> bool:
         """Advance the state machine for one poll. Calls
@@ -188,10 +205,16 @@ class PlugInDetector:
 
         if now_connected and not self.session_handled:
             self.session_handled = await handle_plugin_event(client)
+            # Persist once the session is configured/recorded so a restart
+            # mid-session doesn't re-record a duplicate row or re-notify.
+            if self.session_handled:
+                settings.save_session_active(True)
 
         if not now_connected and self.was_connected:
             logger.info("Car unplugged (status=%s). Waiting for next session.", status)
             self.session_handled = False
+            # Clear the persisted marker so the next plug-in is handled afresh.
+            settings.save_session_active(False)
             # The plug-in SOC is meaningless once the car drives away.
             store.clear_soc()
 
@@ -224,7 +247,8 @@ async def run_loop() -> None:
         logger.warning("Could not fetch device info on startup", exc_info=True)
 
     # Snapshot real initial state so a container restart mid-charge doesn't
-    # reconfigure Ohme and interrupt an active session.
+    # re-record or re-notify an already-handled session (prime() consults the
+    # persisted sessionActive marker to decide).
     detector = PlugInDetector()
     try:
         initial_status = await ohme_client.get_charger_status(client)
