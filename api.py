@@ -220,26 +220,39 @@ _ACTIVE_STATUSES = frozenset({"charging", "plugged_in", "paused"})
 
 
 async def _maybe_refresh_live_soc(status: Any) -> None:
-    """Re-read the SOC from Bluelink mid-charge so the battery ring climbs.
+    """Re-read the SOC from Bluelink so the battery ring shows the real value.
 
-    No-op unless the charger is actively charging and the last reading is older
-    than ``LIVE_SOC_INTERVAL`` (0 disables it). The plug-in read and this share
-    ``store.last_soc_at``, so the first refresh lands one interval after plug-in.
+    Fires in two situations:
+
+    * **Seed** — the car is connected but we hold no real SOC. This is the
+      restart-mid-session case: ``prime()`` treats an already-handled session as
+      handled and never re-runs ``handle_plugin_event`` (which is what captures
+      the SOC), yet ``store.last_soc`` is in-memory only and was lost on restart.
+      Without a re-read the ring falls back to Ohme's unreliable ``battery``
+      estimate (e.g. a bogus 9%). Seed it once, regardless of charging state or
+      ``LIVE_SOC_INTERVAL`` — this is correctness, not the climb feature.
+    * **Climb** — actively charging and the held reading is older than
+      ``LIVE_SOC_INTERVAL`` (0 disables): keep the ring climbing through the
+      session. The plug-in read and this share ``store.last_soc_at``, so the
+      first climb lands one interval after plug-in.
+
     Reads Hyundai's cached state, so it never wakes the car. Display-only — it
     does not reconfigure the Ohme target (that was set at plug-in).
     """
-    if config.LIVE_SOC_INTERVAL <= 0 or not ohme_client.is_charging(status):
-        return
-    last = store.last_soc_at
-    if last is not None and time.monotonic() - last < config.LIVE_SOC_INTERVAL:
-        return
+    need_seed = ohme_client.is_connected(status) and store.last_soc is None
+    if not need_seed:
+        if config.LIVE_SOC_INTERVAL <= 0 or not ohme_client.is_charging(status):
+            return
+        last = store.last_soc_at
+        if last is not None and time.monotonic() - last < config.LIVE_SOC_INTERVAL:
+            return
     try:
         vehicle = await asyncio.to_thread(bluelink.get_vehicle_state, store.selected_vehicle_id)
     except Exception:  # noqa: BLE001 - a failed refresh just leaves the prior reading
         logger.warning("Live SOC refresh from Bluelink failed — keeping last reading", exc_info=True)
         return
     store.record_vehicle_state(vehicle)
-    logger.info("Live SOC refreshed mid-charge: %s%%", vehicle.soc)
+    logger.info("Live SOC refreshed: %s%%", vehicle.soc)
 
 
 async def _maybe_notify_finished(prev_status: str, snap: StatusSnapshot) -> None:

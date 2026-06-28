@@ -557,10 +557,41 @@ async def test_live_soc_disabled_when_interval_zero(monkeypatch):
     from ohme import ChargerStatus
 
     monkeypatch.setattr(config, "LIVE_SOC_INTERVAL", 0)
+    store.last_soc = 60  # already have a reading -> only the climb path applies
     store.last_soc_at = None
 
     with patch("bluelink.get_vehicle_state") as mock_get:
         await api._maybe_refresh_live_soc(ChargerStatus.CHARGING)
+
+    mock_get.assert_not_called()
+
+
+async def test_live_soc_seeds_when_connected_without_reading(monkeypatch):
+    """Restart-mid-session recovery: connected but no held SOC -> fetch once,
+    even when not actively charging, so the ring shows the real value instead
+    of Ohme's unreliable battery estimate."""
+    from ohme import ChargerStatus
+
+    monkeypatch.setattr(config, "LIVE_SOC_INTERVAL", 1800)
+    store.last_soc = None  # lost on restart; prime() won't re-fetch it
+
+    with patch("bluelink.get_vehicle_state", return_value=_vstate(54)) as mock_get:
+        await api._maybe_refresh_live_soc(ChargerStatus.PLUGGED_IN)
+
+    mock_get.assert_called_once()
+    assert store.last_soc == 54
+
+
+async def test_live_soc_no_seed_when_disconnected(monkeypatch):
+    """Disconnected with no reading must not fetch — there's nothing plugged in
+    to show, and the ring correctly reports unknown."""
+    from ohme import ChargerStatus
+
+    monkeypatch.setattr(config, "LIVE_SOC_INTERVAL", 1800)
+    store.last_soc = None
+
+    with patch("bluelink.get_vehicle_state") as mock_get:
+        await api._maybe_refresh_live_soc(ChargerStatus.UNPLUGGED)
 
     mock_get.assert_not_called()
 
