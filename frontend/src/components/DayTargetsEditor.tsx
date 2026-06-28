@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSaveAction } from '../hooks/useSaveAction';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -26,8 +27,7 @@ export function DayTargetsEditor({ value, base, min, max, step = 5, onSave }: Pr
   const [draft, setDraft] = useState<string[]>(() => toDraft(value));
   const [prev, setPrev] = useState(value);
   const [edited, setEdited] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(false);
+  const { saving, error, saved, run, reset } = useSaveAction();
 
   // Resync the draft to the server value while the user isn't mid-edit.
   if (value !== prev) {
@@ -35,12 +35,16 @@ export function DayTargetsEditor({ value, base, min, max, step = 5, onSave }: Pr
     if (!edited) setDraft(toDraft(value));
   }
 
+  // Signal in the collapsed summary that overrides are configured, so a
+  // forgotten Monday=65% isn't invisible behind a closed <details>.
+  const overrideCount = Object.keys(value).length;
+
   const options: number[] = [];
   for (let p = max; p >= min; p -= step) options.push(p);
 
   const change = (i: number, v: string) => {
     setEdited(true);
-    setError(false);
+    reset();
     setDraft((d) => d.map((x, j) => (j === i ? v : x)));
   };
 
@@ -49,21 +53,19 @@ export function DayTargetsEditor({ value, base, min, max, step = 5, onSave }: Pr
     draft.forEach((s, i) => {
       if (s !== '') map[i] = Number(s);
     });
-    setSaving(true);
-    setError(false);
-    try {
-      await onSave(map);
-      setEdited(false);
-    } catch {
-      setError(true);
-    } finally {
-      setSaving(false);
-    }
+    if (await run(() => onSave(map))) setEdited(false);
   };
 
   return (
     <details className="day-targets">
-      <summary>Per-day targets</summary>
+      <summary>
+        Per-day targets
+        {overrideCount > 0 && (
+          <span className="badge day-targets-count">
+            {overrideCount} {overrideCount === 1 ? 'override' : 'overrides'}
+          </span>
+        )}
+      </summary>
       <div className="day-chips">
         {DAYS.map((day, i) => (
           <div key={day} className={`day-chip${draft[i] ? ' day-chip--override' : ''}`}>
@@ -88,6 +90,11 @@ export function DayTargetsEditor({ value, base, min, max, step = 5, onSave }: Pr
         <button type="button" className="save" onClick={save} disabled={saving}>
           {saving ? 'Saving…' : 'Save per-day'}
         </button>
+      )}
+      {saved && !edited && (
+        <span className="save-confirm" role="status">
+          Saved ✓
+        </span>
       )}
       {error && (
         <div className="target-error" role="alert">

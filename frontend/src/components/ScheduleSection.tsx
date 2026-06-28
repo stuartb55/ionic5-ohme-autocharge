@@ -1,9 +1,12 @@
 import type { ScheduleResponse } from '../api/types';
-import { formatKwh, formatPower, formatTime } from '../utils/format';
+import { useNow } from '../hooks/useNow';
+import { formatKwh, formatPower, formatTime, formatUntil } from '../utils/format';
 import { ScheduleTimeline } from './ScheduleTimeline';
 
 export function ScheduleSection({ schedule }: { schedule: ScheduleResponse }) {
   const hasSlots = schedule.slots.length > 0;
+  // Tick each minute so the "in 2h" countdown on the next slot stays current.
+  const now = useNow(60_000);
 
   return (
     <section className="card" aria-labelledby="schedule-heading">
@@ -16,6 +19,7 @@ export function ScheduleSection({ schedule }: { schedule: ScheduleResponse }) {
           <span className="badge plugged_in">
             <span className="pip" aria-hidden="true" />
             Next slot {formatTime(schedule.nextSlotStart)}
+            <span className="badge-rel"> · {formatUntil(schedule.nextSlotStart, new Date(now))}</span>
           </span>
         )}
       </header>

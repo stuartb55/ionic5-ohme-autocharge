@@ -41,4 +41,23 @@ describe('TargetEditor', () => {
     await userEvent.click(screen.getByRole('button', { name: /save/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/couldn’t update target/i);
   });
+
+  it('confirms a successful save', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<TargetEditor value={80} onSave={onSave} />);
+    await userEvent.click(screen.getByRole('button', { name: /increase target/i }));
+    await userEvent.click(screen.getByRole('button', { name: /save 85%/i }));
+    expect(await screen.findByText(/saved/i)).toBeInTheDocument();
+  });
+
+  it('lets the user type an exact target', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<TargetEditor value={80} onSave={onSave} />);
+    await userEvent.click(screen.getByRole('button', { name: /tap to type/i }));
+    const input = screen.getByLabelText(/charge target percent/i);
+    await userEvent.clear(input);
+    await userEvent.type(input, '55');
+    await userEvent.click(screen.getByRole('button', { name: /save 55%/i }));
+    expect(onSave).toHaveBeenCalledWith(55);
+  });
 });

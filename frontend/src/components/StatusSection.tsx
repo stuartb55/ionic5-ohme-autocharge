@@ -99,7 +99,7 @@ export function StatusSection({
             )}
             {showFinish && (
               <div className="finish-eta">
-                Ready by ~{formatFinishTime(charger.projectedFinish as string, new Date(now))}
+                Finishes ~{formatFinishTime(charger.projectedFinish as string, new Date(now))}
               </div>
             )}
             {/* Static target display when no settings panel will render */}
@@ -128,6 +128,10 @@ export function StatusSection({
           <Tile label="Charger" value={charger.model ?? '—'} unit={charger.online ? '· online' : '· offline'} />
         </div>
       </div>
+
+      {/* Live session actions sit above the (future-facing) settings panel so
+          Pause/Boost are reachable without scrolling past the settings on mobile. */}
+      {onChargeChanged && <ChargeControls status={status} onChanged={onChargeChanged} />}
 
       {/* Zone B — Charge settings */}
       {hasSettings && (
@@ -170,8 +174,6 @@ export function StatusSection({
           </div>
         </div>
       )}
-
-      {onChargeChanged && <ChargeControls status={status} onChanged={onChargeChanged} />}
     </section>
   );
 }
