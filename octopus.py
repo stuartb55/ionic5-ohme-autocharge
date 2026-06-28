@@ -57,15 +57,20 @@ async def fetch_rates() -> Optional[list[dict]]:
         logger.warning("Failed to fetch Octopus Agile rates", exc_info=True)
         return None
 
-    rates: list[dict] = []
+    # Octopus occasionally returns the same half-hour twice (e.g. a late price
+    # correction). Keep one row per start time so a duplicated slot can't show
+    # up as two identical entries in the dashboard's cheapest-upcoming list.
+    by_from: dict[str, dict] = {}
     for row in data.get("results") or []:
         valid_from = row.get("valid_from")
         price = row.get("value_inc_vat")  # pence per kWh, inc VAT
         if valid_from and price is not None:
             # Convert pence → pounds so the whole app works in £/kWh.
-            rates.append(
-                {"from": valid_from, "to": row.get("valid_to"), "pricePerKwh": round(float(price) / 100, 4)}
-            )
+            by_from[valid_from] = {
+                "from": valid_from,
+                "to": row.get("valid_to"),
+                "pricePerKwh": round(float(price) / 100, 4),
+            }
     # The API returns newest-first; present oldest-first (chronological).
-    rates.sort(key=lambda r: r["from"])
+    rates = sorted(by_from.values(), key=lambda r: r["from"])
     return rates
