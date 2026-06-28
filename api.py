@@ -25,7 +25,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
@@ -446,6 +446,28 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "Cache-Control", "no-store, no-cache, must-revalidate"
         )
         return response
+
+
+async def require_csrf_header(
+    x_requested_with: Optional[str] = Header(default=None),
+) -> None:
+    """CSRF guard for state-changing requests that carry no JSON body.
+
+    ``POST /api/charge/pause`` … ``/resume`` … ``/refresh`` take no body, so a
+    browser treats them as CORS "simple requests" and performs no preflight —
+    any web page the user visits could ``fetch()`` them against the LAN IP and
+    the side effect would execute (CORS only blocks *reading* the response).
+    Requiring a custom header closes this: a browser cannot attach one to a
+    cross-origin simple request without triggering a preflight, which the CORS
+    policy then gates. The JSON-body PUT endpoints are already preflighted by
+    their non-simple content type, so they don't need this. The SPA sends the
+    header on every request (see frontend ``api/client.ts``).
+    """
+    if not x_requested_with:
+        raise HTTPException(
+            status_code=403,
+            detail="Missing X-Requested-With header (CSRF protection)",
+        )
 
 
 app = FastAPI(
@@ -1060,13 +1082,13 @@ async def _charge_action(name: str, action: Any) -> JSONResponse:
     )
 
 
-@app.post("/api/charge/pause")
+@app.post("/api/charge/pause", dependencies=[Depends(require_csrf_header)])
 async def pause_charge() -> JSONResponse:
     """Pause the active charge session."""
     return await _charge_action("pause charging", lambda c: c.async_pause_charge())
 
 
-@app.post("/api/charge/resume")
+@app.post("/api/charge/resume", dependencies=[Depends(require_csrf_header)])
 async def resume_charge() -> JSONResponse:
     """Resume a paused charge session."""
     return await _charge_action("resume charging", lambda c: c.async_resume_charge())
@@ -1083,7 +1105,7 @@ async def set_max_charge(update: MaxChargeUpdate) -> JSONResponse:
     return await _charge_action(action, lambda c: c.async_max_charge(update.enabled))
 
 
-@app.post("/api/refresh")
+@app.post("/api/refresh", dependencies=[Depends(require_csrf_header)])
 async def refresh() -> JSONResponse:
     """Force an immediate live re-read from Ohme and rebuild the cached snapshot.
 

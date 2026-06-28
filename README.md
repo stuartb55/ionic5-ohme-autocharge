@@ -38,6 +38,15 @@ When the car is plugged in, the app reads the real battery state-of-charge from 
 - Hyundai Bluelink account (European region)
 - Ohme account (the email/password used in the Ohme app)
 
+## Security model
+
+The API has no user authentication — it assumes the **trusted LAN** it runs on. The
+state-changing endpoints that take no request body (`/api/charge/pause`, `/api/charge/resume`,
+`/api/refresh`) require an `X-Requested-With` header so another site the browser visits can't
+forge them as cross-origin "simple requests" against the LAN IP (CSRF); the dashboard sends it
+automatically. Don't expose the backend port directly to the internet — front it with a reverse
+proxy and authentication if you need remote access.
+
 ## Setup
 
 **1. Clone the repository**

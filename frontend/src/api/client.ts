@@ -16,6 +16,12 @@ import type {
 // in dev Vite's proxy does the same. Override with VITE_API_BASE if needed.
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';
 
+// Sent on every request. The backend's CSRF guard requires it on the
+// body-less POST endpoints (pause/resume/refresh): a browser can't attach a
+// custom header to a cross-origin "simple request" without a CORS preflight,
+// so this stops another site from forging those actions against the LAN IP.
+const REQUESTED_WITH = { 'X-Requested-With': 'autocharge-ui' } as const;
+
 export class ApiError extends Error {
   status: number;
   constructor(message: string, status: number) {
@@ -28,7 +34,7 @@ export class ApiError extends Error {
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     signal,
-    headers: { Accept: 'application/json' },
+    headers: { Accept: 'application/json', ...REQUESTED_WITH },
   });
   if (!res.ok) {
     throw new ApiError(`Request to ${path} failed`, res.status);
@@ -40,7 +46,7 @@ async function putJson<T>(path: string, body: unknown, signal?: AbortSignal): Pr
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'PUT',
     signal,
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...REQUESTED_WITH },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -53,7 +59,7 @@ async function postJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
     signal,
-    headers: { Accept: 'application/json' },
+    headers: { Accept: 'application/json', ...REQUESTED_WITH },
   });
   if (!res.ok) {
     throw new ApiError(`Request to ${path} failed`, res.status);

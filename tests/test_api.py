@@ -26,7 +26,10 @@ def _vstate(soc, *, range_miles=150, odometer_miles=10000):
 
 @pytest.fixture
 def client():
-    with TestClient(api.app) as c:
+    # The SPA sends X-Requested-With on every request; mirror that here so the
+    # CSRF guard on the simple-request POST endpoints is satisfied by default.
+    # Tests that assert the guard fires send their own request without it.
+    with TestClient(api.app, headers={"X-Requested-With": "test"}) as c:
         yield c
 
 
@@ -802,6 +805,17 @@ async def test_weekly_digest_disabled_without_ntfy(monkeypatch):
 
 
 # --- charge controls -------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/api/charge/pause", "/api/charge/resume", "/api/refresh"],
+)
+def test_simple_post_endpoints_require_csrf_header(path):
+    # Without X-Requested-With these are forged-able as CORS "simple requests".
+    # The guard runs as a dependency, so it rejects before any Ohme work.
+    with TestClient(api.app) as bare:
+        assert bare.post(path).status_code == 403
 
 
 @pytest.mark.parametrize(
