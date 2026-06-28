@@ -23,7 +23,7 @@ describe('Dashboard integration', () => {
     // Section 3: statistics
     expect(await screen.findByText('Saved vs standard tariff')).toBeInTheDocument();
     expect(screen.getByText('42.0 kWh')).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: /daily energyKwh bar chart/i })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /daily energy bar chart/i })).toBeInTheDocument();
   });
 
   it('refetches statistics when the time range changes', async () => {
@@ -105,7 +105,7 @@ describe('Dashboard integration', () => {
 
   it('switches the daily chart to the Cost metric', async () => {
     render(<Dashboard />);
-    await screen.findByRole('img', { name: /daily energyKwh bar chart/i });
+    await screen.findByRole('img', { name: /daily energy bar chart/i });
 
     await userEvent.click(screen.getByRole('button', { name: 'Cost' }));
 

@@ -82,7 +82,8 @@ export function StatusSection({
               <div className="vehicle-meta">
                 {vehicle.isLocked != null && (
                   <span className={vehicle.isLocked ? 'locked' : 'unlocked'}>
-                    {vehicle.isLocked ? '🔒 Locked' : '🔓 Unlocked'}
+                    <span aria-hidden="true">{vehicle.isLocked ? '🔒' : '🔓'}</span>{' '}
+                    {vehicle.isLocked ? 'Locked' : 'Unlocked'}
                   </span>
                 )}
                 {vehicle.location && (
@@ -98,7 +99,7 @@ export function StatusSection({
             )}
             {showFinish && (
               <div className="finish-eta">
-                Ready by ~{formatFinishTime(charger.projectedFinish as string)}
+                Ready by ~{formatFinishTime(charger.projectedFinish as string, new Date(now))}
               </div>
             )}
             {/* Static target display when no settings panel will render */}

@@ -16,9 +16,9 @@ export function ScheduleTimeline({ slots }: { slots: ChargeSlot[] }) {
         {/* idle track */}
         <rect x={0} y={TRACK_Y} width={W} height={TRACK_H} rx={8} fill="var(--charge-track)" />
         {/* active charging segments */}
-        {timeline.segments.map((seg, i) => (
+        {timeline.segments.map((seg) => (
           <rect
-            key={i}
+            key={seg.slot.start}
             x={seg.startFrac * W}
             y={TRACK_Y}
             width={Math.max(2, seg.widthFrac * W)}

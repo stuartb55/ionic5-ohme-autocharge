@@ -20,6 +20,15 @@ body {
   line-height: 1.5;
 }
 
+/* Consistent, high-contrast keyboard focus ring across the custom-styled
+ * controls (refresh button, theme toggle, steppers, ghost buttons, links).
+ * Only shown for keyboard/AT users via :focus-visible, not on mouse click. */
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
 .app {
   max-width: var(--maxw);
   margin: 0 auto;
@@ -69,13 +78,13 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 44px;
+  height: 44px;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: var(--surface-2);
   color: var(--text-muted);
-  font-size: 1rem;
+  font-size: 1.15rem;
   line-height: 1;
   cursor: pointer;
 }
@@ -96,8 +105,8 @@ body {
   padding: 2px;
 }
 .theme-option {
-  width: 26px;
-  height: 24px;
+  min-width: 36px;
+  height: 36px;
   border: none;
   background: transparent;
   border-radius: 999px;
@@ -702,12 +711,15 @@ body {
   gap: 2px;
 }
 .chart-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
   border: 0;
   background: transparent;
   color: var(--text-muted);
   font: inherit;
   font-size: 0.8rem;
-  padding: 5px 12px;
+  padding: 8px 14px;
   border-radius: 999px;
   cursor: pointer;
 }
@@ -716,6 +728,19 @@ body {
   color: var(--text);
   box-shadow: var(--shadow-sm);
   font-weight: 600;
+}
+.chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.chart-title {
+  font-size: 0.92rem;
+  font-weight: 650;
+  margin: 0;
+  letter-spacing: -0.01em;
 }
 
 /* --- states --- */

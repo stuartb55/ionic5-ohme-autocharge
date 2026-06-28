@@ -1,4 +1,5 @@
 import type { TariffResponse } from '../api/types';
+import { useNow } from '../hooks/useNow';
 import { formatFinishTime, formatPricePerKwh } from '../utils/format';
 
 /**
@@ -8,6 +9,9 @@ import { formatFinishTime, formatPricePerKwh } from '../utils/format';
 export function TariffSection({ data }: { data: TariffResponse }) {
   const current = data.rates[0];
   const currency = data.currency ?? 'GBP';
+  // Tick hourly so the "today vs Sat" date label on cheapest slots stays
+  // correct over a day boundary without an impure Date.now() in render.
+  const now = useNow(3_600_000);
 
   return (
     <section className="card tariff-card" aria-labelledby="tariff-heading">
@@ -30,7 +34,7 @@ export function TariffSection({ data }: { data: TariffResponse }) {
           <ul className="tariff-cheapest">
             {data.cheapest.map((rate) => (
               <li key={rate.from}>
-                <span className="time">{formatFinishTime(rate.from)}</span>
+                <span className="time">{formatFinishTime(rate.from, new Date(now))}</span>
                 <span className="price">{formatPricePerKwh(rate.pricePerKwh, currency)}</span>
               </li>
             ))}

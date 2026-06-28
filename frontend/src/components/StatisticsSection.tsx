@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { StatisticsResponse } from '../api/types';
 import { formatDateShort, formatKwh, formatMoney, formatPricePerKwh } from '../utils/format';
 import { deriveInsights, downloadDailyCsv, percentChange, type ChartMetric } from '../utils/statistics';
@@ -88,7 +88,7 @@ function Insight({ label, value, sub }: { label: string; value: string; sub?: Re
 export function StatisticsSection({ stats, days, onDaysChange }: Props) {
   const [metric, setMetric] = useState<ChartMetric>('energyKwh');
   const { totals, currency } = stats;
-  const insights = deriveInsights(stats);
+  const insights = useMemo(() => deriveInsights(stats), [stats]);
   const prev = stats.comparison?.previous;
 
   return (
@@ -173,8 +173,8 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
         />
       </div>
 
-      <header style={{ marginBottom: 'var(--space-4)' }}>
-        <h2 style={{ fontSize: '0.92rem' }}>{CHART_TITLE[metric]}</h2>
+      <header className="chart-header">
+        <h3 className="chart-title">{CHART_TITLE[metric]}</h3>
         <div className="chart-toolbar" role="group" aria-label="Chart metric">
           {CHART_METRICS.map(({ key, label }) => (
             <button
@@ -189,7 +189,12 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
         </div>
       </header>
 
-      <EnergyBarChart daily={stats.daily} metric={metric} currency={currency} />
+      <EnergyBarChart
+        daily={stats.daily}
+        metric={metric}
+        currency={currency}
+        title={CHART_TITLE[metric]}
+      />
     </section>
   );
 }

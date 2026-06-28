@@ -8,7 +8,9 @@
   --border: #e6e9f0;
   --text: #0f172a;
   --text-muted: #64748b;
-  --text-subtle: #94a3b8;
+  /* Darkened to meet WCAG AA (~4.6:1 on white) — used on the smallest text in
+   * the app (insight/axis labels), which must stay legible on a phone outdoors. */
+  --text-subtle: #6b7280;
 
   --brand: #2563eb;
   --brand-strong: #1d4ed8;
@@ -49,7 +51,8 @@
     --border: #1e293b;
     --text: #e8edf6;
     --text-muted: #94a3b8;
-    --text-subtle: #64748b;
+    /* Lightened to meet WCAG AA (~4.6:1 on the dark surface) for the smallest text. */
+    --text-subtle: #8b9bb4;
 
     --brand: #3b82f6;
     --brand-strong: #60a5fa;

@@ -24,11 +24,27 @@ const REQUESTED_WITH = { 'X-Requested-With': 'autocharge-ui' } as const;
 
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  /** Backend-provided detail (FastAPI's `{ detail }`), when present. */
+  detail?: string;
+  constructor(message: string, status: number, detail?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.detail = detail;
   }
+}
+
+// Best-effort read of a FastAPI error body so callers can surface the backend's
+// own message (e.g. "target out of bounds") rather than a blanket failure.
+async function errorFor(res: Response, path: string): Promise<ApiError> {
+  let detail: string | undefined;
+  try {
+    const body = (await res.json()) as { detail?: unknown };
+    if (typeof body?.detail === 'string') detail = body.detail;
+  } catch {
+    /* non-JSON or empty body — fall back to the generic message */
+  }
+  return new ApiError(detail ?? `Request to ${path} failed`, res.status, detail);
 }
 
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
@@ -37,7 +53,7 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
     headers: { Accept: 'application/json', ...REQUESTED_WITH },
   });
   if (!res.ok) {
-    throw new ApiError(`Request to ${path} failed`, res.status);
+    throw await errorFor(res, path);
   }
   return (await res.json()) as T;
 }
@@ -50,7 +66,7 @@ async function putJson<T>(path: string, body: unknown, signal?: AbortSignal): Pr
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    throw new ApiError(`Request to ${path} failed`, res.status);
+    throw await errorFor(res, path);
   }
   return (await res.json()) as T;
 }
@@ -62,7 +78,7 @@ async function postJson<T>(path: string, signal?: AbortSignal): Promise<T> {
     headers: { Accept: 'application/json', ...REQUESTED_WITH },
   });
   if (!res.ok) {
-    throw new ApiError(`Request to ${path} failed`, res.status);
+    throw await errorFor(res, path);
   }
   return (await res.json()) as T;
 }

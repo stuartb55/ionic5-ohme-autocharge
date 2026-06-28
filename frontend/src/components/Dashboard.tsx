@@ -24,6 +24,55 @@ function SectionSkeleton({ height }: { height: number }) {
   return <div className="card"><div className="skeleton" style={{ height }} /></div>;
 }
 
+/**
+ * Header freshness chip + manual-refresh button. Owns its own ticking clock so
+ * the 5s "Updated Xs ago" / freshness tick re-renders only this chip, not the
+ * whole dashboard (the charts, sessions and tariff don't consume `now`).
+ */
+function HeaderMeta({
+  lastPolled,
+  pollMs,
+  lastFetchedMs,
+  onRefresh,
+}: {
+  lastPolled: Date | null;
+  pollMs: number;
+  lastFetchedMs: number | undefined;
+  onRefresh: () => void;
+}) {
+  const now = useNow(5_000);
+  // Record when refresh was requested (and the fetch timestamp then) and derive
+  // whether we're still spinning: it clears once a newer status result arrives
+  // (lastFetchedMs advances) or a safety timeout elapses.
+  const [refreshReq, setRefreshReq] = useState<{ at: number; since?: number } | null>(null);
+  const handleClick = useCallback(() => {
+    setRefreshReq({ at: Date.now(), since: lastFetchedMs });
+    onRefresh();
+  }, [lastFetchedMs, onRefresh]);
+
+  const refreshing =
+    refreshReq != null && lastFetchedMs === refreshReq.since && now - refreshReq.at < 5_000;
+  const fresh = lastPolled != null && now - lastPolled.getTime() < pollMs * 2;
+
+  return (
+    <div className="app-meta">
+      <span className={`live-dot ${fresh ? '' : 'stale'}`} aria-hidden="true" />
+      <span>{refreshing ? 'Refreshing…' : `Updated ${relativeTime(lastPolled, new Date(now))}`}</span>
+      <button
+        type="button"
+        className={`refresh-btn ${refreshing ? 'spinning' : ''}`}
+        onClick={handleClick}
+        disabled={refreshing}
+        aria-label="Refresh now"
+        title="Refresh now"
+      >
+        <span aria-hidden="true">⟳</span>
+      </button>
+      <ThemeToggle />
+    </div>
+  );
+}
+
 function SectionError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div className="card section-error" role="alert">
@@ -37,9 +86,6 @@ function SectionError({ message, onRetry }: { message: string; onRetry: () => vo
 
 export function Dashboard() {
   const [days, setDays] = useState(7);
-  // A ticking clock so the "updated Xs ago" label and the freshness dot stay
-  // live without reading the impure Date.now() during render.
-  const now = useNow(5_000);
 
   // Build version for the footer — fetched once; it doesn't change at runtime.
   const [version, setVersion] = useState<string | null>(null);
@@ -48,7 +94,9 @@ export function Dashboard() {
     api
       .getVersion(controller.signal)
       .then((r) => setVersion(r.version))
-      .catch(() => undefined);
+      .catch((err) => {
+        if (!controller.signal.aborted) console.debug('version fetch failed', err);
+      });
     return () => controller.abort();
   }, []);
 
@@ -59,7 +107,9 @@ export function Dashboard() {
     api
       .getVehicles(signal)
       .then(setVehicles)
-      .catch(() => undefined);
+      .catch((err) => {
+        if (!signal?.aborted) console.debug('vehicle list fetch failed', err);
+      });
   }, []);
   useEffect(() => {
     const controller = new AbortController();
@@ -121,16 +171,10 @@ export function Dashboard() {
 
   // Manual refresh: ask the backend to pull a fresh live reading from Ohme,
   // then refetch every section. Even if the force-refresh fails we still
-  // refetch so the button does something (shows whatever the backend has).
+  // refetch so the button does something (shows whatever the backend has). The
+  // spinner state lives in HeaderMeta (which owns the ticking clock).
   const lastFetchedMs = status.lastUpdated?.getTime();
-  // Rather than toggling a flag and clearing it from an effect when new data
-  // lands, record when the refresh was requested (and the fetch timestamp at
-  // that moment) and *derive* whether we're still spinning: the spinner clears
-  // automatically once a newer status result arrives (lastFetchedMs advances)
-  // or a safety timeout elapses.
-  const [refreshReq, setRefreshReq] = useState<{ at: number; since?: number } | null>(null);
   const handleRefresh = useCallback(() => {
-    setRefreshReq({ at: Date.now(), since: lastFetchedMs });
     void api
       .refresh()
       .catch(() => undefined)
@@ -140,10 +184,7 @@ export function Dashboard() {
         refetchStats();
         refetchSessions();
       });
-  }, [lastFetchedMs, refetchStatus, refetchSchedule, refetchStats, refetchSessions]);
-
-  const refreshing =
-    refreshReq != null && lastFetchedMs === refreshReq.since && now - refreshReq.at < 5_000;
+  }, [refetchStatus, refetchSchedule, refetchStats, refetchSessions]);
 
   const offline = status.error && !status.data;
   // Show how long ago the *backend* last polled Ohme (updatedAt), not when the
@@ -151,7 +192,6 @@ export function Dashboard() {
   // pollIntervalSeconds, so judge freshness against that cadence (with slack).
   const lastPolled = status.data?.updatedAt ? new Date(status.data.updatedAt) : null;
   const pollMs = (status.data?.config.pollIntervalSeconds ?? 180) * 1_000;
-  const fresh = lastPolled != null && now - lastPolled.getTime() < pollMs * 2;
 
   return (
     <div className="app">
@@ -160,21 +200,12 @@ export function Dashboard() {
           <h1>Autocharge</h1>
           <div className="subtitle">EV charging scheduler · IONIQ&nbsp;5 + Ohme</div>
         </div>
-        <div className="app-meta">
-          <span className={`live-dot ${fresh ? '' : 'stale'}`} aria-hidden="true" />
-          <span>Updated {relativeTime(lastPolled, new Date(now))}</span>
-          <button
-            type="button"
-            className={`refresh-btn ${refreshing ? 'spinning' : ''}`}
-            onClick={handleRefresh}
-            disabled={refreshing}
-            aria-label="Refresh now"
-            title="Refresh now"
-          >
-            <span aria-hidden="true">⟳</span>
-          </button>
-          <ThemeToggle />
-        </div>
+        <HeaderMeta
+          lastPolled={lastPolled}
+          pollMs={pollMs}
+          lastFetchedMs={lastFetchedMs}
+          onRefresh={handleRefresh}
+        />
       </header>
 
       {offline && (
