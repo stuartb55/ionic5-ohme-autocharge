@@ -29,7 +29,15 @@ function ceilToHour(ms: number): number {
  * between active segments are the paused / off-peak periods.
  */
 export function buildTimeline(slots: ChargeSlot[], maxTicks = 7): Timeline | null {
-  if (!slots.length) return null;
+  // Drop slots with an unparseable start/end so a single bad timestamp can't
+  // turn the whole window into NaN and render a broken/empty SVG.
+  const valid = slots.filter((s) => {
+    const start = new Date(s.start).getTime();
+    const end = new Date(s.end).getTime();
+    return Number.isFinite(start) && Number.isFinite(end);
+  });
+  if (!valid.length) return null;
+  slots = valid;
 
   const starts = slots.map((s) => new Date(s.start).getTime());
   const ends = slots.map((s) => new Date(s.end).getTime());

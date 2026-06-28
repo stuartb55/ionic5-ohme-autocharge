@@ -6,6 +6,8 @@ interface Props {
   daily: DailyStat[];
   metric: ChartMetric;
   currency: string | null;
+  /** Human-readable chart title, used for the accessible name. */
+  title: string;
 }
 
 const METRIC_COLOR: Record<ChartMetric, string> = {
@@ -19,7 +21,7 @@ const H = 200;
 const PAD_BOTTOM = 24;
 const PAD_TOP = 8;
 
-export function EnergyBarChart({ daily, metric, currency }: Props) {
+export function EnergyBarChart({ daily, metric, currency, title }: Props) {
   if (!daily.length) {
     return <p className="empty">No charging history in this period yet.</p>;
   }
@@ -45,7 +47,7 @@ export function EnergyBarChart({ daily, metric, currency }: Props) {
 
   return (
     <div className="barchart">
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Daily ${metric} bar chart`}>
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${title} bar chart`}>
         {daily.map((d, i) => {
           const v = d[metric] ?? 0;
           const h = (v / max) * chartH;
@@ -54,7 +56,7 @@ export function EnergyBarChart({ daily, metric, currency }: Props) {
           // Dim every bar except the peak, so the best day stands out.
           const isPeak = v > 0 && v === peak;
           return (
-            <g key={i}>
+            <g key={d.date ?? i}>
               <rect
                 x={x}
                 y={y}

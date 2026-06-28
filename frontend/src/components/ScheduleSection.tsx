@@ -24,8 +24,8 @@ export function ScheduleSection({ schedule }: { schedule: ScheduleResponse }) {
         <>
           <ScheduleTimeline slots={schedule.slots} />
           <div className="slot-list">
-            {schedule.slots.map((slot, i) => (
-              <div className="slot-row" key={i}>
+            {schedule.slots.map((slot) => (
+              <div className="slot-row" key={slot.start}>
                 <span className="time">
                   {formatTime(slot.start)} – {formatTime(slot.end)}
                 </span>

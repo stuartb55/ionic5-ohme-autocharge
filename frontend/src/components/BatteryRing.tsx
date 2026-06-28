@@ -38,7 +38,7 @@ export function BatteryRing({ percent, target, size = 220 }: Props) {
       height={size}
       viewBox={`0 0 ${size} ${size}`}
       role="img"
-      aria-label={known ? `State of charge ${value}%` : 'State of charge unavailable'}
+      aria-label={known ? `State of charge ${Math.round(value)}%` : 'State of charge unavailable'}
     >
       <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--charge-track)" strokeWidth={stroke} />
       {known && (
