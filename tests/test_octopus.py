@@ -55,6 +55,24 @@ async def test_fetch_rates_parses_and_sorts(monkeypatch):
     assert rates[1]["pricePerKwh"] == 0.245
 
 
+async def test_fetch_rates_deduplicates_by_start_time(monkeypatch):
+    _enable(monkeypatch)
+    # Octopus occasionally returns the same half-hour twice (a price
+    # correction). Only one row per start time should survive, so it can't
+    # render as two identical "cheapest upcoming" slots in the dashboard.
+    payload = {
+        "results": [
+            {"valid_from": "2026-06-26T23:30:00Z", "valid_to": "2026-06-27T00:00:00Z", "value_inc_vat": 6.9},
+            {"valid_from": "2026-06-26T23:30:00Z", "valid_to": "2026-06-27T00:00:00Z", "value_inc_vat": 6.9},
+        ]
+    }
+    with patch("aiohttp.ClientSession", return_value=_make_mock_session(payload)):
+        rates = await octopus.fetch_rates()
+
+    assert len(rates) == 1
+    assert rates[0]["from"] == "2026-06-26T23:30:00Z"
+
+
 async def test_fetch_rates_uses_correct_url(monkeypatch):
     _enable(monkeypatch)
     session = _make_mock_session({"results": []})
