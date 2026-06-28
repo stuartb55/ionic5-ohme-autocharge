@@ -73,6 +73,23 @@ async def test_fetch_rates_deduplicates_by_start_time(monkeypatch):
     assert rates[0]["from"] == "2026-06-26T23:30:00Z"
 
 
+async def test_fetch_rates_skips_malformed_rows(monkeypatch):
+    _enable(monkeypatch)
+    # A non-numeric price must not propagate out of fetch_rates (it would 500
+    # the /api/tariff endpoint); the bad row is dropped and good rows survive.
+    payload = {
+        "results": [
+            {"valid_from": "2026-06-26T17:00:00Z", "valid_to": "2026-06-26T17:30:00Z", "value_inc_vat": "n/a"},
+            {"valid_from": "2026-06-26T18:00:00Z", "valid_to": "2026-06-26T18:30:00Z", "value_inc_vat": 24.5},
+        ]
+    }
+    with patch("aiohttp.ClientSession", return_value=_make_mock_session(payload)):
+        rates = await octopus.fetch_rates()
+
+    assert [r["from"] for r in rates] == ["2026-06-26T18:00:00Z"]
+    assert rates[0]["pricePerKwh"] == 0.245
+
+
 async def test_fetch_rates_uses_correct_url(monkeypatch):
     _enable(monkeypatch)
     session = _make_mock_session({"results": []})

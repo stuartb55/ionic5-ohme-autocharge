@@ -104,17 +104,24 @@ async def handle_plugin_event(client) -> bool:
             await ohme_client.set_target(
                 client, current_soc=soc, target_percent=target, target_time=store.ready_by_tuple
             )
-        vehicle_name = client.current_vehicle or "EV"
+            # Capture everything we report on (notification text + DB snapshot)
+            # while still holding the lock, so a concurrent charge-summary read
+            # on the shared client can't rebuild client.slots between the
+            # set_target write and these reads.
+            vehicle_name = client.current_vehicle or "EV"
+            slots = list(client.slots)
+            next_slot_start = client.next_slot_start
+            next_slot_end = client.next_slot_end
         msg = f"{vehicle_name} plugged in at {soc}% → {target}%"
         if store.ready_by:
             msg += f" (ready by {store.ready_by})"
-        schedule = ", ".join(str(s) for s in client.slots)
+        schedule = ", ".join(str(s) for s in slots)
         if schedule:
             msg += f". Charge schedule: {schedule}"
         await ntfy.send(msg)
         if db.is_enabled():
             session_id = await db.record_session(
-                vehicle_name=client.current_vehicle,
+                vehicle_name=vehicle_name,
                 soc_percent=soc,
                 target_percent=target,
                 topup_percent=target - soc,
@@ -124,9 +131,9 @@ async def handle_plugin_event(client) -> bool:
             )
             await db.record_schedule(
                 session_id=session_id,
-                slots=[s.to_dict() for s in client.slots],
-                next_slot_start=client.next_slot_start,
-                next_slot_end=client.next_slot_end,
+                slots=[s.to_dict() for s in slots],
+                next_slot_start=next_slot_start,
+                next_slot_end=next_slot_end,
             )
         store.plugin_failure_notified = False
         return True

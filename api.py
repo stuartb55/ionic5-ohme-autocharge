@@ -174,7 +174,7 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
         charger_model=(client.device_info or {}).get("model"),
         power_watts=float(power.watts or 0),
         power_amps=float(power.amps or 0),
-        power_volts=power.volts,
+        power_volts=int(power.volts) if power.volts is not None else None,
         # The target in effect right now: today's per-weekday override if set,
         # else the base (runtime override or env default). NB: client.target_soc
         # holds the *top-up* amount (target − SOC) we send to Ohme, not the

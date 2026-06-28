@@ -53,24 +53,27 @@ async def fetch_rates() -> Optional[list[dict]]:
                     logger.warning("Octopus API returned HTTP %s", resp.status)
                     return None
                 data = await resp.json()
+
+        # Octopus occasionally returns the same half-hour twice (e.g. a late
+        # price correction). Keep one row per start time so a duplicated slot
+        # can't show up as two identical entries in the dashboard's
+        # cheapest-upcoming list. Kept inside the try so a malformed/non-numeric
+        # row degrades to None like every other failure rather than 500ing.
+        by_from: dict[str, dict] = {}
+        for row in data.get("results") or []:
+            valid_from = row.get("valid_from")
+            price = row.get("value_inc_vat")  # pence per kWh, inc VAT
+            if valid_from and isinstance(price, (int, float)):
+                # Convert pence → pounds so the whole app works in £/kWh.
+                by_from[valid_from] = {
+                    "from": valid_from,
+                    "to": row.get("valid_to"),
+                    "pricePerKwh": round(float(price) / 100, 4),
+                }
     except Exception:
         logger.warning("Failed to fetch Octopus Agile rates", exc_info=True)
         return None
 
-    # Octopus occasionally returns the same half-hour twice (e.g. a late price
-    # correction). Keep one row per start time so a duplicated slot can't show
-    # up as two identical entries in the dashboard's cheapest-upcoming list.
-    by_from: dict[str, dict] = {}
-    for row in data.get("results") or []:
-        valid_from = row.get("valid_from")
-        price = row.get("value_inc_vat")  # pence per kWh, inc VAT
-        if valid_from and price is not None:
-            # Convert pence → pounds so the whole app works in £/kWh.
-            by_from[valid_from] = {
-                "from": valid_from,
-                "to": row.get("valid_to"),
-                "pricePerKwh": round(float(price) / 100, 4),
-            }
     # The API returns newest-first; present oldest-first (chronological).
     rates = sorted(by_from.values(), key=lambda r: r["from"])
     return rates
