@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import bluelink
 import config
+import settings
 from main import handle_plugin_event, run_loop, run_once
 from state import store
 
@@ -22,10 +23,13 @@ def _mock_ohme_client(slots=None):
 
 @pytest.fixture(autouse=True)
 def _reset_session_state():
-    """Plug-in handling mutates the shared store; keep tests independent."""
+    """Plug-in handling mutates the shared store and the persisted session
+    marker; keep tests independent."""
     store.clear_soc()
+    settings.save_session_active(False)
     yield
     store.clear_soc()
+    settings.save_session_active(False)
 
 
 async def test_returns_false_when_bluelink_fails():
@@ -199,9 +203,34 @@ def _make_loop_client():
     return client
 
 
-async def test_reconfigures_on_restart_when_already_connected(monkeypatch):
-    """Container restart mid-charge should always reconfigure Ohme on the first poll."""
+async def test_restart_mid_handled_session_does_not_re_handle(monkeypatch):
+    """A container restart while the car is mid-charge must NOT re-record or
+    re-notify: the session was already handled before the restart (persisted
+    sessionActive=True), so handle_plugin_event is never called."""
     monkeypatch.setattr(config, "CHARGE_TARGET", 80)
+    settings.save_session_active(True)  # session was handled before the restart
+    client = _make_loop_client()
+
+    from ohme import ChargerStatus
+
+    with patch("ohme_client.make_client", new=AsyncMock(return_value=client)), \
+         patch("ohme_client.get_charger_status", new=AsyncMock(return_value=ChargerStatus.CHARGING)), \
+         patch("main.handle_plugin_event", new=AsyncMock(return_value=True)) as mock_handle, \
+         patch("asyncio.sleep", side_effect=asyncio.CancelledError()):
+        try:
+            await run_loop()
+        except asyncio.CancelledError:
+            pass
+
+    mock_handle.assert_not_called()
+
+
+async def test_connected_on_startup_without_prior_session_is_handled(monkeypatch):
+    """When the car was plugged in while the container was down (no persisted
+    sessionActive), the session was never configured — so it must be handled on
+    the first poll."""
+    monkeypatch.setattr(config, "CHARGE_TARGET", 80)
+    settings.save_session_active(False)  # nothing handled before startup
     client = _make_loop_client()
 
     from ohme import ChargerStatus
@@ -218,6 +247,8 @@ async def test_reconfigures_on_restart_when_already_connected(monkeypatch):
     mock_handle.assert_called_once()
     # Vehicle name must be available before the first plug-in event is recorded.
     client.async_update_device_info.assert_awaited_once()
+    # A handled session is persisted so a later restart won't re-record it.
+    assert settings.load_session_active() is True
 
 
 # --- run_once exit code ---
@@ -259,3 +290,19 @@ async def test_unplug_clears_recorded_soc(monkeypatch):
             pass
 
     assert store.last_soc is None
+    # Unplug must also clear the persisted session marker so the next plug-in
+    # (after a restart) is handled afresh.
+    assert settings.load_session_active() is False
+
+
+# --- persisted session marker ---
+
+
+def test_session_active_round_trip():
+    """save/load round-trips, and an unset marker reads as False (not handled)."""
+    settings.save_session_active(False)
+    assert settings.load_session_active() is False
+    assert settings.save_session_active(True) is True
+    assert settings.load_session_active() is True
+    settings.save_session_active(False)
+    assert settings.load_session_active() is False

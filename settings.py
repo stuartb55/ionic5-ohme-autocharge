@@ -159,3 +159,21 @@ def save_vehicle_id(value: str | None) -> bool:
     else:
         data.pop("vehicleId", None)
     return _save(data)
+
+
+def load_session_active() -> bool:
+    """Return whether the currently-connected plug-in session was already handled.
+
+    Persisted across restarts so :meth:`main.PlugInDetector.prime` can tell a
+    restart mid-handled-session (don't re-record/re-notify) from a car that was
+    plugged in while we were down (must still be configured). Defaults to False
+    when unset or unreadable.
+    """
+    return _load().get("sessionActive") is True
+
+
+def save_session_active(value: bool) -> bool:
+    """Persist whether the active plug-in session has been handled. Best-effort."""
+    data = _load()
+    data["sessionActive"] = bool(value)
+    return _save(data)
