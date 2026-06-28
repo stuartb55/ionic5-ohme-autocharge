@@ -16,8 +16,8 @@ interface Props {
 
 /**
  * Optional per-weekday charge targets, tucked in a <details> so they don't
- * clutter the status card. Each day picks a percent or "Base" (no override).
- * Edits are local until saved.
+ * clutter the status card. Seven day chips lay out as a 7-across row on
+ * desktop and wrap to 4-across on narrow screens. Edits are local until saved.
  */
 export function DayTargetsEditor({ value, base, min, max, step = 5, onSave }: Props) {
   const toDraft = (v: Record<string, number>) =>
@@ -64,10 +64,10 @@ export function DayTargetsEditor({ value, base, min, max, step = 5, onSave }: Pr
   return (
     <details className="day-targets">
       <summary>Per-day targets</summary>
-      <div className="day-targets-grid">
+      <div className="day-chips">
         {DAYS.map((day, i) => (
-          <label key={day} className="day-target">
-            <span>{day}</span>
+          <div key={day} className={`day-chip${draft[i] ? ' day-chip--override' : ''}`}>
+            <span className="day-chip-name">{day}</span>
             <select
               value={draft[i]}
               disabled={saving}
@@ -81,7 +81,7 @@ export function DayTargetsEditor({ value, base, min, max, step = 5, onSave }: Pr
                 </option>
               ))}
             </select>
-          </label>
+          </div>
         ))}
       </div>
       {edited && (
@@ -91,7 +91,7 @@ export function DayTargetsEditor({ value, base, min, max, step = 5, onSave }: Pr
       )}
       {error && (
         <div className="target-error" role="alert">
-          Couldn’t update per-day targets. Try again.
+          Couldn't update per-day targets. Try again.
         </div>
       )}
     </details>
