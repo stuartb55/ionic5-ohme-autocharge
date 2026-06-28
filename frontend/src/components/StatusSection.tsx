@@ -52,6 +52,8 @@ export function StatusSection({
     charger.projectedFinish != null &&
     new Date(charger.projectedFinish).getTime() > now;
 
+  const hasSettings = onSetTarget || onSetReadyBy || onSetDayTargets;
+
   return (
     <section className="card" aria-labelledby="status-heading">
       <header>
@@ -62,6 +64,7 @@ export function StatusSection({
         <ConnectionBadge status={charger.status} />
       </header>
 
+      {/* Zone A — Live telemetry (read-only) */}
       <div className="status-grid">
         <div className="battery-wrap">
           <BatteryRing percent={vehicle.batteryPercent} target={target} />
@@ -98,34 +101,10 @@ export function StatusSection({
                 Ready by ~{formatFinishTime(charger.projectedFinish as string)}
               </div>
             )}
-            {onSetTarget ? (
-              <TargetEditor
-                value={baseTarget}
-                min={status.config.targetMin}
-                max={status.config.targetMax}
-                onSave={onSetTarget}
-              />
-            ) : (
-              <div className="target">Target {baseTarget}%</div>
-            )}
-            {target !== baseTarget && (
+            {/* Static target display when no settings panel will render */}
+            {!onSetTarget && <div className="target">Target {baseTarget}%</div>}
+            {!onSetTarget && target !== baseTarget && (
               <div className="today-target">Today: {target}%</div>
-            )}
-            {onSetReadyBy && (
-              <ReadyByEditor
-                value={status.config.readyBy}
-                clearable={status.config.readyByIsManual}
-                onSave={onSetReadyBy}
-              />
-            )}
-            {onSetDayTargets && (
-              <DayTargetsEditor
-                value={status.config.dayTargets}
-                base={baseTarget}
-                min={status.config.targetMin}
-                max={status.config.targetMax}
-                onSave={onSetDayTargets}
-              />
             )}
           </div>
         </div>
@@ -148,6 +127,48 @@ export function StatusSection({
           <Tile label="Charger" value={charger.model ?? '—'} unit={charger.online ? '· online' : '· offline'} />
         </div>
       </div>
+
+      {/* Zone B — Charge settings */}
+      {hasSettings && (
+        <div className="charge-settings">
+          <p className="eyebrow">Charge settings</p>
+          <div className="settings-rows">
+            {onSetTarget && (
+              <div className="settings-row">
+                <TargetEditor
+                  value={baseTarget}
+                  min={status.config.targetMin}
+                  max={status.config.targetMax}
+                  onSave={onSetTarget}
+                />
+                {target !== baseTarget && (
+                  <div className="today-target">Today: {target}%</div>
+                )}
+              </div>
+            )}
+            {onSetReadyBy && (
+              <div className="settings-row">
+                <ReadyByEditor
+                  value={status.config.readyBy}
+                  clearable={status.config.readyByIsManual}
+                  onSave={onSetReadyBy}
+                />
+              </div>
+            )}
+            {onSetDayTargets && (
+              <div className="settings-row settings-row--full">
+                <DayTargetsEditor
+                  value={status.config.dayTargets}
+                  base={baseTarget}
+                  min={status.config.targetMin}
+                  max={status.config.targetMax}
+                  onSave={onSetDayTargets}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {onChargeChanged && <ChargeControls status={status} onChanged={onChargeChanged} />}
     </section>
