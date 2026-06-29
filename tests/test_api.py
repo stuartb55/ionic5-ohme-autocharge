@@ -52,6 +52,7 @@ def reset_state():
     store.vehicle_id_override = None
     store.avg_price_per_kwh = None
     store.price_currency = None
+    store.agile_rates = None
     store.last_poll_error = None
     store.consecutive_poll_failures = 0
     store.plugin_failure_notified = False
@@ -1246,6 +1247,34 @@ def test_build_snapshot_projects_session_cost():
     assert snap.planned_energy_kwh == 18.0
     assert snap.projected_cost == 1.8  # 18 kWh * £0.10
     assert snap.projected_cost_currency == "GBP"
+    assert snap.projected_cost_method == "average"  # no Agile rates cached
+
+
+def test_build_snapshot_prices_slots_against_agile_rates():
+    import datetime as dt
+
+    base = dt.datetime(2026, 6, 13, 2, 0, tzinfo=dt.timezone.utc)
+
+    def slot(energy, start_h, end_h):
+        s = MagicMock()
+        s.energy = energy
+        s.start = base.replace(hour=start_h)
+        s.end = base.replace(hour=end_h)
+        s.to_dict = lambda: {"energy": energy}
+        return s
+
+    client = _charging_client()
+    # Two 1h slots, each priced against its own half-of-the-window Agile rate.
+    client.slots = [slot(10.0, 2, 3), slot(10.0, 3, 4)]
+    store.agile_rates = [
+        {"from": base.replace(hour=2).isoformat(), "to": base.replace(hour=3).isoformat(), "pricePerKwh": 0.05},
+        {"from": base.replace(hour=3).isoformat(), "to": base.replace(hour=4).isoformat(), "pricePerKwh": 0.25},
+    ]
+    store.avg_price_per_kwh = 0.10  # would give £2.00 — Agile must win
+    snap = api.build_snapshot(client, connected=True)
+    assert snap.projected_cost == 3.0  # 10*0.05 + 10*0.25
+    assert snap.projected_cost_method == "agile"
+    assert snap.projected_cost_currency == "GBP"
 
 
 def test_build_snapshot_no_cost_without_price():
@@ -1271,6 +1300,7 @@ def test_build_snapshot_projects_finish_from_last_slot_end():
 
     client = _charging_client()
     early, late = MagicMock(), MagicMock()
+    early.energy = late.energy = 5.0
     early.end = dt.datetime(2026, 6, 13, 4, 30, tzinfo=dt.timezone.utc)
     late.end = dt.datetime(2026, 6, 13, 6, 30, tzinfo=dt.timezone.utc)
     early.to_dict.return_value = {}

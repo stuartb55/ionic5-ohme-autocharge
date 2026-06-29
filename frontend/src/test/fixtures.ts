@@ -27,6 +27,7 @@ export const statusFixture: StatusResponse = {
     plannedEnergyKwh: 18,
     projectedCost: 1.31,
     projectedCostCurrency: 'GBP',
+    projectedCostMethod: 'average',
   },
   config: {
     chargeTarget: 80,

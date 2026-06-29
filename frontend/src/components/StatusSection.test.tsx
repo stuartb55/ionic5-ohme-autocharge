@@ -62,6 +62,12 @@ describe('StatusSection projected cost', () => {
     render(<StatusSection status={withCharger({ projectedCost: null })} />);
     expect(screen.queryByText('Est. cost')).not.toBeInTheDocument();
   });
+
+  it('flags an Agile-priced cost', () => {
+    render(<StatusSection status={withCharger({ projectedCost: 0.92, projectedCostMethod: 'agile' })} />);
+    expect(screen.getByText('Est. cost · Agile')).toBeInTheDocument();
+    expect(screen.queryByText('Est. cost')).not.toBeInTheDocument();
+  });
 });
 
 describe('StatusSection driving range', () => {

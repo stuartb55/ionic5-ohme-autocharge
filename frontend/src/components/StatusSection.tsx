@@ -120,7 +120,7 @@ export function StatusSection({
           <Tile label="Added this session" value={formatKwh(charger.sessionEnergyKwh)} />
           {charger.projectedCost != null && (
             <Tile
-              label="Est. cost"
+              label={charger.projectedCostMethod === 'agile' ? 'Est. cost · Agile' : 'Est. cost'}
               value={formatMoney(charger.projectedCost, charger.projectedCostCurrency)}
               unit={`· ${formatKwh(charger.plannedEnergyKwh)}`}
             />
