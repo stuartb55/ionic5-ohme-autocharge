@@ -200,6 +200,40 @@ async def get_recent_sessions(limit: int) -> Optional[list[dict[str, Any]]]:
         return None
 
 
+async def get_soh_history(limit: int) -> Optional[list[dict[str, Any]]]:
+    """Battery state-of-health readings over time, oldest first, for the trend.
+
+    Captured once per plug-in, SoH moves very slowly, so consecutive identical
+    readings are collapsed to one point per *change* — the series stays compact
+    and the trend line is meaningful rather than a long flat run. Returns None
+    when persistence is disabled or the read fails (mirrors get_recent_sessions
+    so the API can hide the card).
+    """
+    if _pool is None:
+        return None
+    try:
+        async with _pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT plugged_in_at, soh_percent FROM charge_sessions "
+                "WHERE soh_percent IS NOT NULL "
+                "ORDER BY plugged_in_at DESC LIMIT %s",
+                (limit,),
+            )
+            rows = await cur.fetchall()
+    except Exception:
+        logger.warning("Failed to read SoH history from Postgres", exc_info=True)
+        return None
+    # rows come newest-first; walk oldest-first and keep only the points where
+    # the value changed (plus the very first reading).
+    history: list[dict[str, Any]] = []
+    prev: Optional[int] = None
+    for ts, soh in reversed(rows):
+        if soh != prev:
+            history.append({"date": ts.isoformat() if ts else None, "sohPercent": soh})
+            prev = soh
+    return history
+
+
 async def get_miles_driven(since: datetime.datetime) -> Optional[int]:
     """Miles driven since ``since``, from the odometer span across charge sessions.
 

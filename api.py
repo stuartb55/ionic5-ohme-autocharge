@@ -882,6 +882,20 @@ async def get_sessions(limit: int = Query(default=10, ge=1, le=50)) -> JSONRespo
     return JSONResponse({"enabled": True, "sessions": sessions})
 
 
+@app.get("/api/soh-history")
+async def get_soh_history(limit: int = Query(default=90, ge=1, le=365)) -> JSONResponse:
+    """Battery state-of-health readings over time (one point per change).
+
+    ``enabled`` is false when persistence is off (or unreadable) — the dashboard
+    hides the trend card, falling back to the single current value shown on the
+    status ring.
+    """
+    history = await db.get_soh_history(limit)
+    if history is None:
+        return JSONResponse({"enabled": False, "history": []})
+    return JSONResponse({"enabled": True, "history": history})
+
+
 async def _persist_daily_stats(client: Any, days: int = 90) -> None:
     """Fetch Ohme's charge summary and upsert its per-day totals into Postgres.
 

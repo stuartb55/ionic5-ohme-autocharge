@@ -6,6 +6,7 @@ import { relativeTime } from '../utils/format';
 import { Banner } from './Banner';
 import { ScheduleSection } from './ScheduleSection';
 import { SessionsSection } from './SessionsSection';
+import { SohTrendSection } from './SohTrendSection';
 import { StatisticsSection } from './StatisticsSection';
 import { StatusSection } from './StatusSection';
 import { TariffSection } from './TariffSection';
@@ -19,6 +20,8 @@ const STATS_INTERVAL = 300_000;
 // Sessions only change on plug-in events, so a slow poll is plenty.
 const SESSIONS_INTERVAL = 300_000;
 const TARIFF_INTERVAL = 1_800_000; // 30 min
+// SoH only moves a fraction of a percent over months — refresh rarely.
+const SOH_INTERVAL = 1_800_000; // 30 min
 
 function SectionSkeleton({ height }: { height: number }) {
   return <div className="card"><div className="skeleton" style={{ height }} /></div>;
@@ -125,6 +128,8 @@ export function Dashboard() {
   const sessions = usePolling(sessionsFetcher, SESSIONS_INTERVAL);
   // Agile rates change at most once a day; a slow poll is plenty.
   const tariff = usePolling(api.getTariff, TARIFF_INTERVAL);
+  const sohFetcher = useCallback((signal: AbortSignal) => api.getSohHistory(90, signal), []);
+  const soh = usePolling(sohFetcher, SOH_INTERVAL);
 
   // refetch() from usePolling is stable, so these are safe to capture.
   const { refetch: refetchStatus } = status;
@@ -260,6 +265,8 @@ export function Dashboard() {
         )}
         {/* No skeleton: the card may legitimately never appear (history disabled). */}
         {sessions.data && <SessionsSection data={sessions.data} />}
+        {/* Battery health trend — only when persistence has readings to plot. */}
+        {soh.data?.enabled && <SohTrendSection data={soh.data} />}
         {/* Agile tariff card — only shown when the feature is configured. */}
         {tariff.data?.enabled && <TariffSection data={tariff.data} />}
       </div>

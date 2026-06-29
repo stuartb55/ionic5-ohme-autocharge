@@ -996,3 +996,34 @@ body {
   .stat-cards, .tiles, .insights { grid-template-columns: 1fr 1fr; }
   .day-chips { grid-template-columns: repeat(4, 1fr); }
 }
+
+/* --- battery health trend --- */
+.soh-summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.soh-current {
+  font-size: 1.6rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.soh-delta {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.soh-spark svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.soh-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: var(--text-subtle);
+  margin-top: 2px;
+}

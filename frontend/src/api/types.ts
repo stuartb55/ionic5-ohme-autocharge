@@ -159,6 +159,20 @@ export interface SessionsResponse {
   sessions: ChargeSessionEntry[];
 }
 
+export interface SohPoint {
+  /** Plug-in timestamp (ISO) of the reading, or null. */
+  date: string | null;
+  /** Battery state of health (%). */
+  sohPercent: number;
+}
+
+export interface SohHistoryResponse {
+  /** False when Postgres history persistence is disabled — hide the card. */
+  enabled: boolean;
+  /** One point per change in SoH, oldest first. */
+  history: SohPoint[];
+}
+
 export interface TariffRate {
   from: string;
   to: string | null;

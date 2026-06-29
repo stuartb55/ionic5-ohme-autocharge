@@ -441,6 +441,26 @@ def test_sessions_validates_limit(client):
     assert client.get("/api/sessions?limit=100").status_code == 422
 
 
+def test_soh_history_disabled_when_persistence_off(client):
+    with patch("db.get_soh_history", new=AsyncMock(return_value=None)):
+        body = client.get("/api/soh-history").json()
+    assert body == {"enabled": False, "history": []}
+
+
+def test_soh_history_returns_points_and_passes_limit(client):
+    history = [{"date": "2026-01-01T00:00:00+00:00", "sohPercent": 100}]
+    with patch("db.get_soh_history", new=AsyncMock(return_value=history)) as mock_get:
+        body = client.get("/api/soh-history?limit=30").json()
+
+    assert body == {"enabled": True, "history": history}
+    mock_get.assert_awaited_once_with(30)
+
+
+def test_soh_history_validates_limit(client):
+    assert client.get("/api/soh-history?limit=0").status_code == 422
+    assert client.get("/api/soh-history?limit=400").status_code == 422
+
+
 # --- notifications ---------------------------------------------------------------
 
 

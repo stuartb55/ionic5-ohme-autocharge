@@ -19,6 +19,8 @@ export const handlers = [
   }),
   http.get('*/api/schedule', () => HttpResponse.json(scheduleFixture)),
   http.get('*/api/sessions', () => HttpResponse.json(sessionsFixture)),
+  // SoH history off by default, so the trend card stays hidden in tests.
+  http.get('*/api/soh-history', () => HttpResponse.json({ enabled: false, history: [] })),
   // Tariff feature off by default, so the card stays hidden in tests.
   http.get('*/api/tariff', () => HttpResponse.json({ enabled: false, rates: [], cheapest: [] })),
   http.get('*/api/statistics', ({ request }) => {
