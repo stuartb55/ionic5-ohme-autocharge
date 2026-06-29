@@ -170,6 +170,45 @@ async def test_get_recent_sessions_maps_rows(fake_pool):
     ]
 
 
+async def test_get_soh_history_collapses_unchanged_readings(fake_pool):
+    import datetime as dt
+
+    conn, cursor = fake_pool
+    # Rows come newest-first from SQL; oldest-first the SoH goes 100, 100, 99, 99, 97.
+    # Consecutive duplicates collapse to one point per change.
+    cursor.rows = [
+        (dt.datetime(2026, 6, 1, tzinfo=dt.timezone.utc), 97),
+        (dt.datetime(2026, 5, 1, tzinfo=dt.timezone.utc), 99),
+        (dt.datetime(2026, 4, 1, tzinfo=dt.timezone.utc), 99),
+        (dt.datetime(2026, 2, 1, tzinfo=dt.timezone.utc), 100),
+        (dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc), 100),
+    ]
+
+    history = await db.get_soh_history(90)
+
+    sql, params = conn.executed[0]
+    assert "soh_percent IS NOT NULL" in sql
+    assert params == (90,)
+    assert history == [
+        {"date": "2026-01-01T00:00:00+00:00", "sohPercent": 100},
+        {"date": "2026-04-01T00:00:00+00:00", "sohPercent": 99},
+        {"date": "2026-06-01T00:00:00+00:00", "sohPercent": 97},
+    ]
+
+
+async def test_get_soh_history_none_when_disabled():
+    db._pool = None
+    assert await db.get_soh_history(90) is None
+
+
+async def test_get_soh_history_none_on_error():
+    db._pool = _BoomPool()
+    try:
+        assert await db.get_soh_history(90) is None
+    finally:
+        db._pool = None
+
+
 async def test_get_recent_sessions_none_when_disabled():
     db._pool = None
     assert await db.get_recent_sessions(10) is None

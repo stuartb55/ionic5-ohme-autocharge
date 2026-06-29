@@ -4,6 +4,7 @@ import type {
   ReadyByUpdateResponse,
   ScheduleResponse,
   SessionsResponse,
+  SohHistoryResponse,
   StatisticsResponse,
   StatusResponse,
   TargetUpdateResponse,
@@ -102,6 +103,8 @@ export const api = {
     getJson<StatisticsResponse>(`/api/statistics?days=${days}`, signal),
   getSessions: (limit = 8, signal?: AbortSignal) =>
     getJson<SessionsResponse>(`/api/sessions?limit=${limit}`, signal),
+  getSohHistory: (limit = 90, signal?: AbortSignal) =>
+    getJson<SohHistoryResponse>(`/api/soh-history?limit=${limit}`, signal),
   getTariff: (signal?: AbortSignal) => getJson<TariffResponse>('/api/tariff', signal),
   getVersion: (signal?: AbortSignal) => getJson<VersionResponse>('/api/version', signal),
   getVehicles: (signal?: AbortSignal) => getJson<VehiclesResponse>('/api/vehicles', signal),

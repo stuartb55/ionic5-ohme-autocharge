@@ -21,6 +21,7 @@ When the car is plugged in, the app reads the real battery state-of-charge from 
 - **Notifications** — optional [ntfy](https://ntfy.sh) alerts (plug-in, charge finished, problems) plus a weekly summary digest.
 - **Octopus Agile** *(optional)* — upcoming half-hourly prices and the cheapest slots.
 - **History & Grafana** *(optional)* — per-session and telemetry data persisted to Postgres.
+- **Battery health trend** *(needs Postgres)* — a state-of-health sparkline on the dashboard showing degradation over time, not just the current figure.
 - **Installable PWA** — add to your phone/desktop home screen; works offline (app shell cached).
 
 ## How it works
@@ -174,6 +175,7 @@ npm run build    # type-check + production build to dist/
 | `GET /api/schedule` | Allocated charge slots + next slot times |
 | `GET /api/statistics?days=N` | Energy, savings, cost, CO₂, efficiency, daily series + previous-period comparison (N = 1–90) |
 | `GET /api/sessions?limit=N` | Recent plug-in sessions from Postgres (N = 1–50; `enabled: false` when persistence is off) |
+| `GET /api/soh-history?limit=N` | Battery state-of-health readings over time, one point per change (N = 1–365; `enabled: false` when persistence is off) |
 | `GET /api/tariff` | Upcoming Octopus Agile rates + cheapest slots (`enabled: false` when unconfigured) |
 | `GET /api/vehicles` | Vehicles on the Hyundai account, with the selected one flagged |
 | `POST /api/refresh` | Force a live re-read from Ohme (rate-limited) |
