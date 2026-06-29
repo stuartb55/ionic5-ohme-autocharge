@@ -140,14 +140,26 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
     slots = client.slots
     # Total energy the charger will draw this session — the sum of all allocated
     # slots is grid-side (watts × hours), so it already includes charging losses.
-    # Multiplied by the recent average £/kWh for a session cost estimate.
     planned_energy_kwh = round(sum(s.energy for s in slots), 2) if connected else 0.0
-    price = store.avg_price_per_kwh
-    projected_cost = (
-        round(price * planned_energy_kwh, 2)
-        if connected and price and planned_energy_kwh > 0
-        else None
-    )
+    # Prefer an Agile-accurate cost: price each slot against the half-hourly rate
+    # it falls in (so an overnight charge through cheap slots isn't valued at a
+    # flat average). Falls back to the recent average £/kWh when Agile rates are
+    # unavailable or don't fully cover the schedule.
+    projected_cost = None
+    projected_cost_method = None
+    projected_cost_currency = None
+    if connected and planned_energy_kwh > 0:
+        agile_cost = octopus.cost_for_slots(slots, store.agile_rates)
+        if agile_cost is not None:
+            projected_cost = agile_cost
+            projected_cost_method = "agile"
+            projected_cost_currency = "GBP"  # Octopus Agile is GBP-only
+        else:
+            price = store.avg_price_per_kwh
+            if price:
+                projected_cost = round(price * planned_energy_kwh, 2)
+                projected_cost_method = "average"
+                projected_cost_currency = store.price_currency
 
     return StatusSnapshot(
         vehicle_name=client.current_vehicle,
@@ -183,7 +195,8 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
         session_energy_wh=float(client.energy or 0),
         planned_energy_kwh=planned_energy_kwh,
         projected_cost=projected_cost,
-        projected_cost_currency=store.price_currency if projected_cost is not None else None,
+        projected_cost_currency=projected_cost_currency,
+        projected_cost_method=projected_cost_method,
         slots=[s.to_dict() for s in slots],
         next_slot_start=_iso(client.next_slot_start),
         next_slot_end=_iso(client.next_slot_end),
@@ -801,6 +814,8 @@ async def get_status() -> JSONResponse:
             "plannedEnergyKwh": store.status.planned_energy_kwh,
             "projectedCost": store.status.projected_cost,
             "projectedCostCurrency": store.status.projected_cost_currency,
+            # "agile" (per-slot Agile pricing) or "average" (flat recent £/kWh).
+            "projectedCostMethod": store.status.projected_cost_method,
         },
         "config": {
             "chargeTarget": store.charge_target,
@@ -862,6 +877,9 @@ async def get_tariff() -> JSONResponse:
         if _tariff_cache["value"] is not None:
             return JSONResponse(_tariff_cache["value"])
         return JSONResponse({"enabled": True, "currency": "GBP", "rates": [], "cheapest": []})
+    # Cache the full rate list so the synchronous build_snapshot can price the
+    # session's slots against the real per-slot rate (Agile-accurate cost).
+    store.agile_rates = rates
     upcoming = rates[:24]  # next ~12 hours
     cheapest = sorted(upcoming, key=lambda r: r["pricePerKwh"])[:3]
     payload = {"enabled": True, "currency": "GBP", "rates": upcoming, "cheapest": cheapest}

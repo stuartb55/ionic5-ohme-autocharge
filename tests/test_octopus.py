@@ -110,3 +110,62 @@ async def test_fetch_rates_swallows_connection_error(monkeypatch):
     _enable(monkeypatch)
     with patch("aiohttp.ClientSession", side_effect=Exception("boom")):
         assert await octopus.fetch_rates() is None  # must not raise
+
+
+# --- cost_for_slots ---------------------------------------------------------
+
+import datetime as _dt
+from dataclasses import dataclass
+
+
+@dataclass
+class _Slot:
+    """Minimal stand-in for ohme.utils.ChargeSlot (start/end/energy)."""
+
+    start: _dt.datetime
+    end: _dt.datetime
+    energy: float
+
+
+def _rate(from_h: int, to_h: int, price: float) -> dict:
+    base = _dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc)
+    return {
+        "from": base.replace(hour=from_h).isoformat(),
+        "to": base.replace(hour=to_h).isoformat(),
+        "pricePerKwh": price,
+    }
+
+
+def _slot(from_h: int, to_h: int, energy: float) -> _Slot:
+    base = _dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc)
+    return _Slot(base.replace(hour=from_h), base.replace(hour=to_h), energy)
+
+
+def test_cost_for_slots_none_without_rates_or_slots():
+    assert octopus.cost_for_slots([], [_rate(0, 1, 0.10)]) is None
+    assert octopus.cost_for_slots([_slot(0, 1, 5)], None) is None
+
+
+def test_cost_for_slots_single_rate():
+    # 10 kWh entirely inside a 0.20 £/kWh window → £2.00
+    rates = [_rate(0, 4, 0.20)]
+    assert octopus.cost_for_slots([_slot(0, 2, 10)], rates) == 2.0
+
+
+def test_cost_for_slots_spans_multiple_rates():
+    # A 2h slot of 10 kWh split across two 1h windows priced 0.10 and 0.30.
+    # Energy is uniform over time, so 5 kWh in each → 0.5 + 1.5 = £2.00.
+    rates = [_rate(0, 1, 0.10), _rate(1, 2, 0.30)]
+    assert octopus.cost_for_slots([_slot(0, 2, 10)], rates) == 2.0
+
+
+def test_cost_for_slots_returns_none_when_not_fully_covered():
+    # Slot runs 0-2h but rates only cover 0-1h → can't price the tail.
+    rates = [_rate(0, 1, 0.10)]
+    assert octopus.cost_for_slots([_slot(0, 2, 10)], rates) is None
+
+
+def test_cost_for_slots_handles_z_suffix_and_zero_length():
+    rates = [{"from": "2026-01-01T00:00:00Z", "to": "2026-01-01T01:00:00Z", "pricePerKwh": 0.25}]
+    slots = [_slot(0, 1, 8), _slot(0, 0, 0)]  # zero-length slot ignored
+    assert octopus.cost_for_slots(slots, rates) == 2.0

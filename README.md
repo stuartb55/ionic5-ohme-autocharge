@@ -19,7 +19,7 @@ When the car is plugged in, the app reads the real battery state-of-charge from 
 - **Live SOC while charging** — the ring climbs through the session (re-reads Bluelink on a slow cadence; never wakes the car).
 - **Multi-vehicle** — pick which car on the Hyundai account to track.
 - **Notifications** — optional [ntfy](https://ntfy.sh) alerts (plug-in, charge finished, problems) plus a weekly summary digest.
-- **Octopus Agile** *(optional)* — upcoming half-hourly prices and the cheapest slots.
+- **Octopus Agile** *(optional)* — upcoming half-hourly prices and the cheapest slots, plus an Agile-accurate session cost (each charge slot priced against the rate it falls in, not a flat average).
 - **History & Grafana** *(optional)* — per-session and telemetry data persisted to Postgres.
 - **Battery health trend** *(needs Postgres)* — a state-of-health sparkline on the dashboard showing degradation over time, not just the current figure.
 - **Installable PWA** — add to your phone/desktop home screen; works offline (app shell cached).

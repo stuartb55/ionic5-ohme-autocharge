@@ -40,10 +40,12 @@ export interface StatusResponse {
     projectedFinish: string | null;
     /** Total grid energy (kWh) the session is planned to draw. */
     plannedEnergyKwh: number;
-    /** Estimated session cost (planned energy × recent avg price), or null. */
+    /** Estimated session cost, or null when no price is known. */
     projectedCost: number | null;
     /** Currency for projectedCost. */
     projectedCostCurrency: string | null;
+    /** How projectedCost was derived: 'agile' (per-slot Agile rates) or 'average'. */
+    projectedCostMethod: 'agile' | 'average' | null;
   };
   config: {
     chargeTarget: number;
