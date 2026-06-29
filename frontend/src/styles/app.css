@@ -200,6 +200,24 @@ body {
   align-items: center;
   gap: var(--space-3);
 }
+/* SVG ring text/arc: static fills+weights live here; only the size-derived
+ * font-size stays inline on the element. */
+.battery-value {
+  fill: var(--text);
+  font-weight: 750;
+}
+.battery-unit {
+  fill: var(--text-muted);
+  font-weight: 600;
+}
+.battery-arc {
+  transition: stroke-dasharray 0.6s ease, stroke 0.4s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .battery-arc {
+    transition: none;
+  }
+}
 .battery-caption {
   text-align: center;
 }
@@ -670,6 +688,18 @@ body {
   border-radius: var(--radius-sm);
   font-size: 0.9rem;
 }
+.session-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 0 var(--space-4);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-subtle);
+  font-weight: 600;
+}
 .session-row .time { font-weight: 600; font-variant-numeric: tabular-nums; }
 .session-row .detail { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .session-row .session-action {
@@ -708,6 +738,9 @@ body {
 .stat-card.highlight .value { color: var(--success); }
 
 /* derived insights row */
+.insights-eyebrow {
+  margin: var(--space-5) 0 var(--space-2);
+}
 .insights {
   display: grid;
   grid-template-columns: repeat(5, 1fr);

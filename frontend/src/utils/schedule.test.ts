@@ -22,16 +22,16 @@ describe('buildTimeline', () => {
     const tl = buildTimeline(slots)!;
     expect(tl.segments).toHaveLength(2);
     // First slot starts at the window start.
-    expect(tl.segments[0].startFrac).toBeCloseTo(0, 5);
+    expect(tl.segments[0]!.startFrac).toBeCloseTo(0, 5);
     // 2h of a 4h window = half width.
-    expect(tl.segments[0].widthFrac).toBeCloseTo(0.5, 5);
+    expect(tl.segments[0]!.widthFrac).toBeCloseTo(0.5, 5);
     // Second slot starts 3h into the 4h window.
-    expect(tl.segments[1].startFrac).toBeCloseTo(0.75, 5);
+    expect(tl.segments[1]!.startFrac).toBeCloseTo(0.75, 5);
   });
 
   it('emits hour ticks within the window', () => {
     const tl = buildTimeline(slots)!;
     expect(tl.hourTicks.length).toBeGreaterThan(0);
-    expect(tl.hourTicks[0].frac).toBeCloseTo(0, 5);
+    expect(tl.hourTicks[0]!.frac).toBeCloseTo(0, 5);
   });
 });

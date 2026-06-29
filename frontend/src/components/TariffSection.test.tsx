@@ -1,7 +1,11 @@
 import { render, screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TariffResponse } from '../api/types';
 import { TariffSection } from './TariffSection';
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 const data: TariffResponse = {
   enabled: true,
@@ -22,6 +26,16 @@ describe('TariffSection', () => {
     // Cheapest list.
     expect(screen.getByText('Cheapest upcoming')).toBeInTheDocument();
     expect(screen.getByText('8.0p')).toBeInTheDocument();
+  });
+
+  it('shows the slot in effect now, not just the first in the list', () => {
+    // "Now" is inside the second slot's window (17:30–18:00), so the header
+    // must show 8.0p — proving it selects by time rather than rates[0].
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-26T17:45:00Z'));
+    render(<TariffSection data={data} />);
+    const now = screen.getByText('Now').closest('.tariff-now') as HTMLElement;
+    expect(within(now).getByText('8.0p')).toBeInTheDocument();
   });
 
   it('handles an empty rate list', () => {

@@ -59,7 +59,7 @@ export function BatteryRing({ percent, target, size = 220 }: Props) {
           strokeLinecap="round"
           strokeDasharray={`${dash} ${circumference}`}
           transform={`rotate(-90 ${cx} ${cy})`}
-          style={{ transition: 'stroke-dasharray 0.6s ease, stroke 0.4s ease' }}
+          className="battery-arc"
         />
       )}
       {targetAngle != null && (
@@ -75,12 +75,12 @@ export function BatteryRing({ percent, target, size = 220 }: Props) {
         />
       )}
       <text x={cx} y={cy - 2} textAnchor="middle" dominantBaseline="central"
-        style={{ fontSize: size * 0.26, fontWeight: 750, fill: 'var(--text)' }}>
+        className="battery-value" style={{ fontSize: size * 0.26 }}>
         {known ? `${Math.round(value)}` : '–'}
       </text>
       {known && (
         <text x={cx} y={cy + size * 0.16} textAnchor="middle"
-          style={{ fontSize: size * 0.07, fill: 'var(--text-muted)', fontWeight: 600 }}>
+          className="battery-unit" style={{ fontSize: size * 0.07 }}>
           % CHARGE
         </text>
       )}
