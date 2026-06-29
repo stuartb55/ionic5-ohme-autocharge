@@ -26,6 +26,11 @@ export function SessionsSection({ data }: { data: SessionsResponse }) {
         <p className="empty">No plug-in sessions recorded yet.</p>
       ) : (
         <div className="session-list">
+          <div className="session-head" aria-hidden="true">
+            <span className="time">When</span>
+            <span className="detail">Battery → target</span>
+            <span className="session-action">Result</span>
+          </div>
           {data.sessions.map((s) => (
             <div className="session-row" key={s.id}>
               <span className="time">

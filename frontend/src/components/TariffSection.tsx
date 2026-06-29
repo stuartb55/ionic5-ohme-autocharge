@@ -7,11 +7,20 @@ import { formatFinishTime, formatPricePerKwh } from '../utils/format';
  * upcoming slots, so you can see when to charge. Rendered only when on.
  */
 export function TariffSection({ data }: { data: TariffResponse }) {
-  const current = data.rates[0];
   const currency = data.currency ?? 'GBP';
-  // Tick hourly so the "today vs Sat" date label on cheapest slots stays
-  // correct over a day boundary without an impure Date.now() in render.
-  const now = useNow(3_600_000);
+  // Tick each minute so "Now" rolls to the next half-hour slot, and the
+  // "today vs Sat" date label on cheapest slots stays correct over a day
+  // boundary, without an impure Date.now() in render.
+  const now = useNow(60_000);
+  // The in-effect slot is the one whose window contains `now` — don't assume
+  // rates[0] is current (the list may start with a not-yet-current slot). Fall
+  // back to the first upcoming slot if none currently applies.
+  const current =
+    data.rates.find((r) => {
+      const from = new Date(r.from).getTime();
+      const to = r.to ? new Date(r.to).getTime() : Infinity;
+      return from <= now && now < to;
+    }) ?? data.rates[0];
 
   return (
     <section className="card tariff-card" aria-labelledby="tariff-heading">

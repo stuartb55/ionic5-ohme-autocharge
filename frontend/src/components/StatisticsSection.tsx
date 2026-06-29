@@ -142,6 +142,7 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
         <StatCard label="CO₂ saved vs petrol" value={`${totals.carbonSavedKgVsGasCar} kg`} />
       </div>
 
+      <p className="eyebrow insights-eyebrow">Breakdowns</p>
       <div className="insights" aria-label="Derived insights">
         <Insight
           label="Charging days"
