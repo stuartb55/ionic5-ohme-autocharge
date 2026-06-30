@@ -492,6 +492,33 @@ def test_sessions_export_rejects_bad_format(client):
     assert client.get("/api/sessions/export?format=xml").status_code == 422
 
 
+def test_session_telemetry_disabled_when_persistence_off(client):
+    with patch("db.is_enabled", return_value=False):
+        body = client.get("/api/sessions/1/telemetry").json()
+    assert body == {"enabled": False, "points": []}
+
+
+def test_session_telemetry_404_for_unknown_session(client):
+    with (
+        patch("db.is_enabled", return_value=True),
+        patch("db.get_session_telemetry", new=AsyncMock(return_value=None)),
+    ):
+        res = client.get("/api/sessions/999/telemetry")
+    assert res.status_code == 404
+
+
+def test_session_telemetry_returns_points(client):
+    pts = [{"at": "2026-06-01T20:05:00+00:00", "socPercent": 62,
+            "powerWatts": 7400.0, "sessionEnergyKwh": 1.5}]
+    with (
+        patch("db.is_enabled", return_value=True),
+        patch("db.get_session_telemetry", new=AsyncMock(return_value=pts)) as mock_get,
+    ):
+        body = client.get("/api/sessions/7/telemetry").json()
+    assert body == {"enabled": True, "points": pts}
+    mock_get.assert_awaited_once_with(7)
+
+
 def test_soh_history_disabled_when_persistence_off(client):
     with patch("db.get_soh_history", new=AsyncMock(return_value=None)):
         body = client.get("/api/soh-history").json()

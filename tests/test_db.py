@@ -193,6 +193,39 @@ async def test_get_all_sessions_none_when_disabled():
     assert await db.get_all_sessions() is None
 
 
+async def test_get_session_telemetry_maps_points(fake_pool):
+    import datetime as dt
+
+    conn, cursor = fake_pool
+    cursor._row = (dt.datetime(2026, 6, 1, 20, 0, tzinfo=dt.timezone.utc),)  # session start
+    cursor.rows = [
+        (dt.datetime(2026, 6, 1, 20, 5, tzinfo=dt.timezone.utc), 62, 7400.0, 1500.0),
+        (dt.datetime(2026, 6, 1, 20, 35, tzinfo=dt.timezone.utc), 70, 7300.0, 5200.0),
+    ]
+
+    points = await db.get_session_telemetry(7)
+
+    assert "FROM charge_sessions WHERE id = %s" in conn.executed[0][0]
+    assert conn.executed[0][1] == (7,)
+    assert points == [
+        {"at": "2026-06-01T20:05:00+00:00", "socPercent": 62,
+         "powerWatts": 7400.0, "sessionEnergyKwh": 1.5},
+        {"at": "2026-06-01T20:35:00+00:00", "socPercent": 70,
+         "powerWatts": 7300.0, "sessionEnergyKwh": 5.2},
+    ]
+
+
+async def test_get_session_telemetry_none_for_unknown_session(fake_pool):
+    _, cursor = fake_pool
+    cursor._row = None  # session id not found
+    assert await db.get_session_telemetry(999) is None
+
+
+async def test_get_session_telemetry_none_when_disabled():
+    db._pool = None
+    assert await db.get_session_telemetry(1) is None
+
+
 async def test_get_soh_history_collapses_unchanged_readings(fake_pool):
     import datetime as dt
 

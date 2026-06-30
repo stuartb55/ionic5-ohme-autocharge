@@ -161,6 +161,24 @@ export interface SessionsResponse {
   sessions: ChargeSessionEntry[];
 }
 
+export interface SessionTelemetryPoint {
+  /** Poll timestamp (ISO), or null. */
+  at: string | null;
+  /** Battery SOC (%) at that poll, or null. */
+  socPercent: number | null;
+  /** Charge draw (watts) at that poll, or null. */
+  powerWatts: number | null;
+  /** Cumulative session energy (kWh) at that poll, or null. */
+  sessionEnergyKwh: number | null;
+}
+
+export interface SessionTelemetryResponse {
+  /** False when Postgres persistence is disabled. */
+  enabled: boolean;
+  /** Per-poll points, oldest first, spanning the session. */
+  points: SessionTelemetryPoint[];
+}
+
 export interface SohPoint {
   /** Plug-in timestamp (ISO) of the reading, or null. */
   date: string | null;
