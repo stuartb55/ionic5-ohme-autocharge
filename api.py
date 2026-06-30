@@ -308,7 +308,11 @@ async def _maybe_notify_finished(prev_status: str, snap: StatusSnapshot) -> None
         return
     name = snap.vehicle_name or "EV"
     kwh = snap.session_energy_wh / 1000
-    await ntfy.send(f"{name} charging finished — {kwh:.1f} kWh added this session")
+    await ntfy.send(
+        f"{name} added {kwh:.1f} kWh this session.",
+        title="Charging finished",
+        tags="white_check_mark",
+    )
 
 
 # Signature of the last telemetry row written, to skip identical idle repeats.
@@ -399,7 +403,11 @@ async def poll_loop() -> None:
                 async with store.client_lock:
                     store.update(build_snapshot(client, connected=now_connected))
                 if recovered:
-                    await ntfy.send("Autocharge reconnected to Ohme — live data restored")
+                    await ntfy.send(
+                        "Back in touch with Ohme — live data restored.",
+                        title="Autocharge reconnected",
+                        tags="white_check_mark",
+                    )
                 await _maybe_notify_finished(prev_status, store.status)
 
                 # Append a telemetry point for Grafana (best-effort, no-op when
@@ -434,10 +442,11 @@ async def poll_loop() -> None:
                 # never make the poll failure worse.
                 if store.consecutive_poll_failures == POLL_FAILURE_ALERT_AFTER:
                     await ntfy.send(
-                        f"Autocharge can't reach Ohme — {POLL_FAILURE_ALERT_AFTER} polls "
-                        "have failed; plug-in detection and dashboard data are stale.",
-                        title="Autocharge problem",
+                        f"{POLL_FAILURE_ALERT_AFTER} polls in a row have failed. "
+                        "Plug-in detection and dashboard data are stale until it recovers.",
+                        title="Can't reach Ohme",
                         priority="high",
+                        tags="warning",
                     )
 
             # Back off when upstreams are failing; normal cadence when healthy.
@@ -1052,7 +1061,8 @@ def _now_local() -> datetime.datetime:
 
 
 def _format_digest(parsed: dict[str, Any]) -> str:
-    """One-line weekly summary from a parsed charge summary."""
+    """Weekly summary from a parsed charge summary — one fact per line so it
+    reads as a tidy list in the notification rather than a run-on sentence."""
     totals = parsed["totals"]
     currency = parsed["currency"]
     symbol = "£" if currency == "GBP" else ""
@@ -1060,11 +1070,14 @@ def _format_digest(parsed: dict[str, Any]) -> str:
     def money(value: float) -> str:
         return f"{symbol}{value:.2f}" if symbol else f"{value:.2f} {currency or ''}".strip()
 
-    return (
-        f"Last 7 days: {totals['energyKwh']:.1f} kWh charged · "
-        f"cost {money(totals['costTotal'])} · "
-        f"saved {money(totals['savingsVsStandard'])} vs standard · "
-        f"{totals['carbonSavedKgVsGasCar']:.0f} kg CO₂ saved"
+    return "\n".join(
+        [
+            "Last 7 days:",
+            f"• {totals['energyKwh']:.1f} kWh charged",
+            f"• {money(totals['costTotal'])} cost",
+            f"• {money(totals['savingsVsStandard'])} saved vs standard",
+            f"• {totals['carbonSavedKgVsGasCar']:.0f} kg CO₂ saved",
+        ]
     )
 
 
@@ -1095,7 +1108,7 @@ async def _maybe_send_weekly_digest(client: Any) -> None:
     parsed = parse_summary({k: v for k, v in summary.items() if k != "granularity"}, 7)
     # Mark sent before awaiting ntfy so a slow/failed send can't double-fire.
     store.last_digest_date = today
-    await ntfy.send(_format_digest(parsed), title="Weekly charging summary")
+    await ntfy.send(_format_digest(parsed), title="Weekly charging summary", tags="bar_chart")
     logger.info("Sent weekly charging digest")
 
 

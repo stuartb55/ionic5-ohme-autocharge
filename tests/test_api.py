@@ -542,6 +542,8 @@ async def test_notifies_when_charging_finishes():
     msg = mock_notify.call_args[0][0]
     assert "IONIQ 5" in msg
     assert "18.5 kWh" in msg
+    assert mock_notify.call_args.kwargs["title"] == "Charging finished"
+    assert mock_notify.call_args.kwargs["tags"] == "white_check_mark"
 
 
 async def test_notifies_when_short_topup_finishes_from_plugged_in():
@@ -838,6 +840,9 @@ def test_format_digest_gbp():
     assert "£5.25" in msg
     assert "£8.40" in msg
     assert "12 kg" in msg
+    # One fact per line (header + four bullets) for readability.
+    assert msg.startswith("Last 7 days:")
+    assert len(msg.splitlines()) == 5
 
 
 async def test_weekly_digest_sends_on_schedule(monkeypatch):
@@ -851,6 +856,7 @@ async def test_weekly_digest_sends_on_schedule(monkeypatch):
 
     mock_notify.assert_awaited_once()
     assert mock_notify.call_args.kwargs["title"] == "Weekly charging summary"
+    assert mock_notify.call_args.kwargs["tags"] == "bar_chart"
     assert store.last_digest_date == _MONDAY_8AM.date()  # guards re-send
 
 
