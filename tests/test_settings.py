@@ -1,0 +1,184 @@
+"""Tests for the JSON-file-backed runtime settings.
+
+Each test points ``settings.SETTINGS_PATH`` at a fresh ``tmp_path`` file so the
+read-modify-write helpers operate on a throwaway file with no cross-test bleed.
+"""
+
+import glob
+import json
+
+import pytest
+
+import settings
+
+
+@pytest.fixture
+def settings_path(tmp_path, monkeypatch):
+    path = tmp_path / "settings.json"
+    monkeypatch.setattr(settings, "SETTINGS_PATH", str(path))
+    return path
+
+
+def _write_raw(path, data) -> None:
+    """Write an arbitrary JSON payload directly, bypassing the setters."""
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+# --- parse_hhmm ------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("00:00", (0, 0)),
+        ("07:30", (7, 30)),
+        ("23:59", (23, 59)),
+        ("7:30", None),     # hour must be zero-padded
+        ("24:00", None),    # hour out of range
+        ("12:60", None),    # minute out of range
+        ("0630", None),     # missing colon
+        ("nonsense", None),
+        ("", None),
+        (None, None),
+        (730, None),        # not a string
+    ],
+)
+def test_parse_hhmm(value, expected):
+    assert settings.parse_hhmm(value) == expected
+
+
+# --- charge target ---------------------------------------------------------
+
+def test_target_round_trip(settings_path):
+    assert settings.save_target(75) is True
+    assert settings.load_target() == 75
+
+
+def test_load_target_none_when_unset(settings_path):
+    assert settings.load_target() is None
+
+
+def test_load_target_rejects_out_of_range(settings_path):
+    # save coerces to int but load enforces the TARGET_MIN..TARGET_MAX bounds.
+    settings.save_target(5)     # below TARGET_MIN (10)
+    assert settings.load_target() is None
+    settings.save_target(150)   # above TARGET_MAX (100)
+    assert settings.load_target() is None
+
+
+def test_load_target_none_on_non_numeric(settings_path):
+    _write_raw(settings_path, {"chargeTarget": "abc"})
+    assert settings.load_target() is None
+
+
+# --- ready-by --------------------------------------------------------------
+
+def test_ready_by_set_and_clear(settings_path):
+    settings.save_ready_by("07:15")
+    assert settings.load_ready_by() == "07:15"
+    settings.save_ready_by(None)
+    assert settings.load_ready_by() is None
+
+
+def test_load_ready_by_ignores_invalid_persisted_value(settings_path):
+    _write_raw(settings_path, {"readyBy": "99:99"})
+    assert settings.load_ready_by() is None
+
+
+# --- per-weekday targets ---------------------------------------------------
+
+def test_day_targets_round_trip(settings_path):
+    settings.save_day_targets({0: 90, 6: 70})
+    assert settings.load_day_targets() == {0: 90, 6: 70}
+
+
+def test_day_targets_filters_malformed_and_out_of_range(settings_path):
+    _write_raw(
+        settings_path,
+        {"dayTargets": {"0": 90, "7": 50, "2": 5, "x": 80, "3": "bad"}},
+    )
+    # day 7 is out of 0..6; day 2's 5% is below TARGET_MIN; "x" and "bad" don't
+    # parse as ints — only the valid {0: 90} survives.
+    assert settings.load_day_targets() == {0: 90}
+
+
+def test_save_empty_day_targets_clears_key(settings_path):
+    settings.save_day_targets({0: 90})
+    settings.save_day_targets({})
+    assert settings.load_day_targets() == {}
+    assert "dayTargets" not in json.loads(settings_path.read_text())
+
+
+# --- vehicle id ------------------------------------------------------------
+
+def test_vehicle_id_set_and_clear(settings_path):
+    settings.save_vehicle_id("vin-123")
+    assert settings.load_vehicle_id() == "vin-123"
+    settings.save_vehicle_id(None)
+    assert settings.load_vehicle_id() is None
+
+
+def test_load_vehicle_id_none_for_empty_or_non_string(settings_path):
+    _write_raw(settings_path, {"vehicleId": ""})
+    assert settings.load_vehicle_id() is None
+    _write_raw(settings_path, {"vehicleId": 123})
+    assert settings.load_vehicle_id() is None
+
+
+# --- session-active marker -------------------------------------------------
+
+def test_session_active_round_trip(settings_path):
+    assert settings.load_session_active() is False  # default when unset
+    settings.save_session_active(True)
+    assert settings.load_session_active() is True
+    settings.save_session_active(False)
+    assert settings.load_session_active() is False
+
+
+# --- preservation & robustness ---------------------------------------------
+
+def test_setters_preserve_other_keys(settings_path):
+    settings.save_target(70)
+    settings.save_ready_by("06:30")
+    settings.save_day_targets({0: 90})
+    settings.save_vehicle_id("v1")
+    settings.save_session_active(True)
+    assert settings.load_target() == 70
+    assert settings.load_ready_by() == "06:30"
+    assert settings.load_day_targets() == {0: 90}
+    assert settings.load_vehicle_id() == "v1"
+    assert settings.load_session_active() is True
+
+
+def test_load_tolerates_corrupt_json(settings_path):
+    settings_path.write_text("{not valid json", encoding="utf-8")
+    assert settings.load_target() is None
+    assert settings.load_day_targets() == {}
+    assert settings.load_session_active() is False
+
+
+def test_load_tolerates_non_dict_top_level(settings_path):
+    _write_raw(settings_path, [1, 2, 3])
+    assert settings.load_target() is None
+    assert settings.load_day_targets() == {}
+
+
+def test_missing_file_returns_defaults(settings_path):
+    # settings_path doesn't exist yet.
+    assert settings.load_target() is None
+    assert settings.load_ready_by() is None
+    assert settings.load_day_targets() == {}
+    assert settings.load_vehicle_id() is None
+    assert settings.load_session_active() is False
+
+
+def test_save_creates_missing_directory(tmp_path, monkeypatch):
+    nested = tmp_path / "sub" / "dir" / "settings.json"
+    monkeypatch.setattr(settings, "SETTINGS_PATH", str(nested))
+    assert settings.save_target(70) is True
+    assert settings.load_target() == 70
+
+
+def test_atomic_save_leaves_no_temp_files(settings_path, tmp_path):
+    settings.save_target(70)
+    # _save writes to a ".settings-*.tmp" then os.replace()s it into place.
+    assert glob.glob(str(tmp_path / ".settings-*")) == []
