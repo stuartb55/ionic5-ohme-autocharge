@@ -12,7 +12,9 @@ def _mock_manager(vehicles: dict):
 
 
 def _mock_vehicle(soc, *, ev_range=None, ev_range_unit=None, odometer=None, odometer_unit=None,
-                  soh=None, is_locked=None, latitude=None, longitude=None):
+                  soh=None, is_locked=None, latitude=None, longitude=None,
+                  aux_battery=None, tyre_warn=None, washer_warn=None, key_warn=None,
+                  open_items=None):
     v = MagicMock()
     v.ev_battery_percentage = soc
     v.ev_driving_range = ev_range
@@ -23,6 +25,19 @@ def _mock_vehicle(soc, *, ev_range=None, ev_range_unit=None, odometer=None, odom
     v.is_locked = is_locked
     v.location_latitude = latitude
     v.location_longitude = longitude
+    # Vehicle health. Defaults below mirror "not reported" so existing tests
+    # (which don't pass these) get None / [] for the health fields.
+    v.car_battery_percentage = aux_battery
+    v.tire_pressure_all_warning_is_on = tyre_warn
+    v.washer_fluid_warning_is_on = washer_warn
+    v.smart_key_battery_warning_is_on = key_warn
+    open_set = set(open_items or [])
+    v.hood_is_open = "Bonnet" in open_set
+    v.trunk_is_open = "Boot" in open_set
+    v.front_left_door_is_open = "Front-left door" in open_set
+    v.front_right_door_is_open = "Front-right door" in open_set
+    v.back_left_door_is_open = "Rear-left door" in open_set
+    v.back_right_door_is_open = "Rear-right door" in open_set
     return v
 
 
@@ -109,6 +124,38 @@ def test_vehicle_state_lock_location_none_when_absent():
         s = bluelink.get_vehicle_state()
     assert s.is_locked is None
     assert s.latitude is None and s.longitude is None
+
+
+def test_vehicle_state_reads_health():
+    vm = _mock_manager({"v": _mock_vehicle(
+        62, aux_battery=85, tyre_warn=True, washer_warn=False, key_warn=True,
+        open_items=["Boot", "Front-left door"],
+    )})
+    with patch("bluelink._get_manager", return_value=vm):
+        s = bluelink.get_vehicle_state()
+    assert s.aux_battery_percent == 85
+    assert s.tyre_pressure_warning is True
+    assert s.washer_fluid_warning is False
+    assert s.key_battery_warning is True
+    assert s.open_items == ["Boot", "Front-left door"]
+
+
+def test_vehicle_state_health_none_when_absent():
+    # Default mock reports no health (aux 0/None, flags non-bool/None, nothing open).
+    vm = _mock_manager({"v": _mock_vehicle(62)})
+    with patch("bluelink._get_manager", return_value=vm):
+        s = bluelink.get_vehicle_state()
+    assert s.aux_battery_percent is None
+    assert s.tyre_pressure_warning is None
+    assert s.open_items == []
+
+
+def test_vehicle_state_open_items_ordered_bonnet_first():
+    vm = _mock_manager({"v": _mock_vehicle(62, open_items=["Front-left door", "Bonnet"])})
+    with patch("bluelink._get_manager", return_value=vm):
+        s = bluelink.get_vehicle_state()
+    # Order follows _OPEN_ITEMS (bonnet, boot, doors…), not the input order.
+    assert s.open_items == ["Bonnet", "Front-left door"]
 
 
 def test_get_vehicle_state_selects_by_id():

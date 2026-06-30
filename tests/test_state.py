@@ -135,6 +135,8 @@ def test_record_and_clear_vehicle_state():
     vstate = SimpleNamespace(
         soc=62, range_miles=180, odometer_miles=12000, soh_percent=98,
         is_locked=True, latitude=51.5, longitude=-0.1,
+        aux_battery_percent=85, tyre_pressure_warning=True,
+        washer_fluid_warning=False, key_battery_warning=None, open_items=["Boot"],
     )
     s.record_vehicle_state(vstate)
     assert s.last_soc == 62
@@ -142,6 +144,9 @@ def test_record_and_clear_vehicle_state():
     assert s.last_odometer_miles == 12000
     assert s.last_soh_percent == 98
     assert s.last_is_locked is True
+    assert s.last_aux_battery_percent == 85
+    assert s.last_tyre_pressure_warning is True
+    assert s.last_open_items == ["Boot"]
     assert s.last_soc_at is not None
 
     s.plugin_failure_notified = True
@@ -149,6 +154,9 @@ def test_record_and_clear_vehicle_state():
     assert s.last_soc is None
     assert s.last_range_miles is None
     assert s.last_soh_percent is None
+    assert s.last_aux_battery_percent is None
+    assert s.last_tyre_pressure_warning is None
+    assert s.last_open_items == []
     assert s.last_soc_at is None
     assert s.plugin_failure_notified is False  # cleared for the next session
 

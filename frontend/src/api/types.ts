@@ -21,6 +21,16 @@ export interface StatusResponse {
     isLocked: boolean | null;
     /** Last-known GPS location, or null when unknown. */
     location: { latitude: number; longitude: number } | null;
+    /** Read-only vehicle health; each field null when the car didn't report it. */
+    health: {
+      /** 12V auxiliary battery charge (%), or null. */
+      auxBatteryPercent: number | null;
+      tyrePressureWarning: boolean | null;
+      washerFluidWarning: boolean | null;
+      keyBatteryWarning: boolean | null;
+      /** Labels of any door/bonnet/boot reported open (empty when all closed). */
+      openItems: string[];
+    };
   };
   charger: {
     status: ChargerStatus;
