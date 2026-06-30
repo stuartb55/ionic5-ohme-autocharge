@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r '.tool_input.file_path // .tool_response.filePath // empty'); case \"$f\" in *.py|*.ts|*.tsx|*.js|*.jsx) [ -f \"$CLAUDE_PROJECT_DIR/graphify-out/graph.json\" ] && touch \"$CLAUDE_PROJECT_DIR/graphify-out/.needs_update\" ;; esac; exit 0"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "async": true,
+            "statusMessage": "Refreshing graphify knowledge graph",
+            "command": "if [ -f \"$CLAUDE_PROJECT_DIR/graphify-out/.needs_update\" ]; then rm -f \"$CLAUDE_PROJECT_DIR/graphify-out/.needs_update\"; (cd \"$CLAUDE_PROJECT_DIR\" && graphify update . >/dev/null 2>&1) || true; fi; exit 0"
+          }
+        ]
+      }
+    ]
+  }
+}
