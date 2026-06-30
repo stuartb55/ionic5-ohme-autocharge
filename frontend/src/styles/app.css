@@ -773,10 +773,17 @@ body {
   color: var(--text-muted);
 }
 
-.stats-actions {
+.stats-actions,
+.session-actions {
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
+}
+/* Anchor-as-button (the session-export links) shouldn't carry link underline. */
+a.ghost-button {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
 }
 .ghost-button {
   border: 1px solid var(--border);

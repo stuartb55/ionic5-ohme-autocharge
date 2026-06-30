@@ -170,6 +170,29 @@ async def test_get_recent_sessions_maps_rows(fake_pool):
     ]
 
 
+async def test_get_all_sessions_orders_chronologically_unbounded(fake_pool):
+    import datetime as dt
+
+    conn, cursor = fake_pool
+    cursor.rows = [
+        (1, dt.datetime(2026, 5, 1, 20, 0, tzinfo=dt.timezone.utc), "IONIQ 5", 40, 80, 40, "configured", 12000, 99),
+    ]
+
+    sessions = await db.get_all_sessions()
+
+    sql, params = conn.executed[0]
+    assert "ORDER BY plugged_in_at ASC" in sql
+    assert "LIMIT" not in sql
+    assert params is None  # no parameters — full unbounded read
+    assert sessions[0]["id"] == 1
+    assert sessions[0]["pluggedInAt"] == "2026-05-01T20:00:00+00:00"
+
+
+async def test_get_all_sessions_none_when_disabled():
+    db._pool = None
+    assert await db.get_all_sessions() is None
+
+
 async def test_get_soh_history_collapses_unchanged_readings(fake_pool):
     import datetime as dt
 
