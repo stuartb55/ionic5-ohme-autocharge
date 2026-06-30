@@ -1,6 +1,8 @@
+import time
 from unittest.mock import MagicMock, patch
 import pytest
 import bluelink
+import config
 
 
 def _mock_manager(vehicles: dict):
@@ -136,3 +138,28 @@ def test_singleton_manager_created_once():
         bluelink.get_battery_percentage()
     MockVM.assert_called_once()
     bluelink._manager = None  # clean up
+
+
+async def test_get_vehicle_state_async_returns_state():
+    vm = _mock_manager({"vin1": _mock_vehicle(62)})
+    with patch("bluelink._get_manager", return_value=vm):
+        state = await bluelink.get_vehicle_state_async()
+    assert state.soc == 62
+
+
+async def test_get_vehicle_state_async_times_out(monkeypatch):
+    """A slow SDK read must not hang the caller — wait_for raises TimeoutError."""
+    monkeypatch.setattr(config, "UPSTREAM_TIMEOUT", 0.05)
+
+    def slow(_vehicle_id):
+        time.sleep(0.3)
+        return bluelink.VehicleState(soc=50)
+
+    monkeypatch.setattr(bluelink, "get_vehicle_state", slow)
+    with pytest.raises(TimeoutError):
+        await bluelink.get_vehicle_state_async()
+
+
+async def test_list_vehicles_async_returns_list(monkeypatch):
+    monkeypatch.setattr(bluelink, "list_vehicles", lambda: [{"id": "a"}])
+    assert await bluelink.list_vehicles_async() == [{"id": "a"}]

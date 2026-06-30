@@ -35,6 +35,14 @@ APP_VERSION = os.getenv("APP_VERSION", "")
 CHARGE_TARGET = int(os.getenv("CHARGE_TARGET", "80"))
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "180"))
 
+# Maximum seconds to wait on a single upstream call (Hyundai Bluelink / Ohme)
+# before giving up and treating it as a failed read. Stops a hung or very slow
+# upstream from stalling the poll loop — and, for Bluelink (a blocking SDK run in
+# a worker thread under a module lock), from holding that lock from the caller's
+# view. On timeout the loop keeps the last-known-good snapshot and retries next
+# interval. Default 30s.
+UPSTREAM_TIMEOUT = int(os.getenv("UPSTREAM_TIMEOUT", "30"))
+
 # How often (seconds) to re-read the live SOC from Bluelink while a charge is
 # actively running, so the dashboard battery ring climbs during the session
 # instead of sitting at the plug-in reading. Reads Hyundai's server-side cached

@@ -38,6 +38,21 @@ async def test_returns_false_when_bluelink_fails():
     assert result is False
 
 
+async def test_returns_false_when_bluelink_times_out(monkeypatch):
+    """A hung Bluelink read is treated as a failed plug-in (skip, retry next poll)."""
+    monkeypatch.setattr(config, "UPSTREAM_TIMEOUT", 0.05)
+
+    def slow(_vehicle_id):
+        import time
+        time.sleep(0.3)
+        return _vstate(50)
+
+    monkeypatch.setattr(bluelink, "get_vehicle_state", slow)
+    with patch("ntfy.send", new=AsyncMock()):
+        result = await handle_plugin_event(_mock_ohme_client())
+    assert result is False
+
+
 async def test_returns_true_when_soc_already_at_target(monkeypatch):
     monkeypatch.setattr(config, "CHARGE_TARGET", 80)
     with patch("bluelink.get_vehicle_state", return_value=_vstate(80)):

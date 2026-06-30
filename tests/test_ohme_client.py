@@ -1,8 +1,10 @@
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, PropertyMock
 
 import pytest
 from ohme import ChargerStatus
 
+import config
 import ohme_client
 
 
@@ -33,6 +35,19 @@ async def test_get_charger_status_calls_get_charge_session():
     client = _mock_client(ChargerStatus.PAUSED)
     await ohme_client.get_charger_status(client)
     client.async_get_charge_session.assert_called_once()
+
+
+async def test_get_charger_status_times_out(monkeypatch):
+    """A hung Ohme refresh must not stall the poll loop — wait_for raises."""
+    monkeypatch.setattr(config, "UPSTREAM_TIMEOUT", 0.05)
+    client = _mock_client()
+
+    async def slow():
+        await asyncio.sleep(0.5)
+
+    client.async_get_charge_session = slow
+    with pytest.raises(TimeoutError):
+        await ohme_client.get_charger_status(client)
 
 
 @pytest.mark.parametrize(

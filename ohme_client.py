@@ -1,5 +1,6 @@
 """Async wrapper around the ohmepy library (PyPI: ohme)."""
 
+import asyncio
 import logging
 from ohme import ChargerStatus, OhmeApiClient
 
@@ -9,8 +10,13 @@ logger = logging.getLogger(__name__)
 
 
 async def get_charger_status(client: OhmeApiClient) -> ChargerStatus:
-    """Refresh the charge session and return the charger's status."""
-    await client.async_get_charge_session()
+    """Refresh the charge session and return the charger's status.
+
+    The network refresh is bounded by ``config.UPSTREAM_TIMEOUT`` so a hung Ohme
+    request can't stall the poll loop — a timeout raises ``TimeoutError``, which
+    the loop handles as a failed poll (keeps the last-known-good snapshot).
+    """
+    await asyncio.wait_for(client.async_get_charge_session(), config.UPSTREAM_TIMEOUT)
     try:
         status = client.status
     except KeyError:

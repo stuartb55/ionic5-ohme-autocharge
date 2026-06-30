@@ -269,7 +269,7 @@ async def _maybe_refresh_live_soc(status: Any) -> None:
         if last is not None and time.monotonic() - last < config.LIVE_SOC_INTERVAL:
             return
     try:
-        vehicle = await asyncio.to_thread(bluelink.get_vehicle_state, store.selected_vehicle_id)
+        vehicle = await bluelink.get_vehicle_state_async(store.selected_vehicle_id)
     except Exception:  # noqa: BLE001 - a failed refresh just leaves the prior reading
         logger.warning("Live SOC refresh from Bluelink failed — keeping last reading", exc_info=True)
         return
@@ -654,7 +654,7 @@ async def _reapply_target_if_connected() -> bool:
     # round-trip is fine; fall back to the plug-in reading if it fails. The full
     # vehicle read also refreshes the displayed range/odometer.
     try:
-        vehicle = await asyncio.to_thread(bluelink.get_vehicle_state, store.selected_vehicle_id)
+        vehicle = await bluelink.get_vehicle_state_async(store.selected_vehicle_id)
         store.record_vehicle_state(vehicle)
         soc = vehicle.soc
     except Exception:  # noqa: BLE001
@@ -771,7 +771,7 @@ async def get_vehicles() -> JSONResponse:
     one). A live Bluelink call, so fetched on demand rather than polled.
     """
     try:
-        vehicles = await asyncio.to_thread(bluelink.list_vehicles)
+        vehicles = await bluelink.list_vehicles_async()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not list vehicles from Bluelink", exc_info=True)
         raise HTTPException(status_code=502, detail="Could not list vehicles from Bluelink") from exc

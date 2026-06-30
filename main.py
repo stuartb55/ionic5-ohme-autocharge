@@ -52,8 +52,9 @@ async def handle_plugin_event(client) -> bool:
     Returns True only when Ohme has been successfully updated (or no update was needed)."""
     logger.info("Plug-in detected — fetching vehicle state from Bluelink...")
     try:
-        # hyundai_kia_connect_api is synchronous; run it in a thread to avoid blocking the loop
-        vehicle = await asyncio.to_thread(bluelink.get_vehicle_state, store.selected_vehicle_id)
+        # hyundai_kia_connect_api is synchronous; run it in a thread (bounded by
+        # UPSTREAM_TIMEOUT) so a hung Bluelink call can't stall the loop.
+        vehicle = await bluelink.get_vehicle_state_async(store.selected_vehicle_id)
     except Exception:
         logger.exception("Failed to fetch SOC from Hyundai Bluelink — will retry next poll")
         await _notify_plugin_failure(
