@@ -442,6 +442,56 @@ def test_sessions_validates_limit(client):
     assert client.get("/api/sessions?limit=100").status_code == 422
 
 
+def test_sessions_export_404_when_persistence_off(client):
+    with patch("db.get_all_sessions", new=AsyncMock(return_value=None)):
+        res = client.get("/api/sessions/export")
+    assert res.status_code == 404
+
+
+def test_sessions_export_csv(client):
+    rows = [
+        {
+            "id": 1,
+            "pluggedInAt": "2026-06-01T21:42:00+00:00",
+            "vehicleName": "IONIQ 5",
+            "socPercent": 62,
+            "targetPercent": 80,
+            "topupPercent": 18,
+            "action": "configured",
+            "odometerMiles": 12000,
+            "sohPercent": 99,
+        }
+    ]
+    with patch("db.get_all_sessions", new=AsyncMock(return_value=rows)) as mock_get:
+        res = client.get("/api/sessions/export?format=csv")
+
+    mock_get.assert_awaited_once_with()
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("text/csv")
+    assert "attachment; filename=" in res.headers["content-disposition"]
+    lines = res.text.strip().splitlines()
+    assert lines[0].split(",") == [
+        "id", "pluggedInAt", "vehicleName", "socPercent", "targetPercent",
+        "topupPercent", "action", "odometerMiles", "sohPercent",
+    ]
+    assert lines[1].startswith("1,2026-06-01T21:42:00+00:00,IONIQ 5,62,80,18,configured")
+
+
+def test_sessions_export_json(client):
+    rows = [{"id": 1, "pluggedInAt": "2026-06-01T21:42:00+00:00", "action": "configured"}]
+    with patch("db.get_all_sessions", new=AsyncMock(return_value=rows)):
+        res = client.get("/api/sessions/export?format=json")
+
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("application/json")
+    assert "attachment; filename=" in res.headers["content-disposition"]
+    assert res.json() == rows
+
+
+def test_sessions_export_rejects_bad_format(client):
+    assert client.get("/api/sessions/export?format=xml").status_code == 422
+
+
 def test_soh_history_disabled_when_persistence_off(client):
     with patch("db.get_soh_history", new=AsyncMock(return_value=None)):
         body = client.get("/api/soh-history").json()

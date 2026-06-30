@@ -136,4 +136,9 @@ export const api = {
     postJson<ChargeActionResponse>('/api/charge/resume', signal),
   setMaxCharge: (enabled: boolean, signal?: AbortSignal) =>
     putJson<ChargeActionResponse>('/api/charge/max-charge', { enabled }, signal),
+  // Full session-history export. The backend returns the file as an attachment
+  // (Content-Disposition), so this is a plain download URL rather than a JSON
+  // fetch — point an <a download> at it.
+  sessionsExportUrl: (format: 'csv' | 'json') =>
+    `${API_BASE}/api/sessions/export?format=${format}`,
 };

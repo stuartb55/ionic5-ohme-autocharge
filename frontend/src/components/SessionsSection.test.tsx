@@ -25,4 +25,19 @@ describe('SessionsSection', () => {
     expect(screen.getByText('85% → 80%')).toBeInTheDocument();
     expect(screen.getByText('Already at target')).toBeInTheDocument();
   });
+
+  it('offers full-history CSV and JSON export links when there are sessions', () => {
+    render(<SessionsSection data={sessionsFixture} />);
+
+    const csv = screen.getByRole('link', { name: /export csv/i });
+    const json = screen.getByRole('link', { name: /json/i });
+    expect(csv).toHaveAttribute('href', expect.stringContaining('/api/sessions/export?format=csv'));
+    expect(csv).toHaveAttribute('download');
+    expect(json).toHaveAttribute('href', expect.stringContaining('format=json'));
+  });
+
+  it('hides the export links when there are no sessions to export', () => {
+    render(<SessionsSection data={{ enabled: true, sessions: [] }} />);
+    expect(screen.queryByRole('link', { name: /export/i })).not.toBeInTheDocument();
+  });
 });

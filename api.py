@@ -17,7 +17,10 @@ Run:  uvicorn api:app --host 0.0.0.0 --port 8000
 from __future__ import annotations
 
 import asyncio
+import csv
 import datetime
+import io
+import json
 import logging
 import os
 import time
@@ -27,7 +30,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, field_validator
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -983,6 +986,50 @@ async def get_sessions(limit: int = Query(default=10, ge=1, le=50)) -> JSONRespo
     if sessions is None:
         return JSONResponse({"enabled": False, "sessions": []})
     return JSONResponse({"enabled": True, "sessions": sessions})
+
+
+# Column order for the export — kept in one place so CSV header and JSON keys
+# stay in lockstep with the dict shape db.get_all_sessions returns.
+_EXPORT_FIELDS = (
+    "id",
+    "pluggedInAt",
+    "vehicleName",
+    "socPercent",
+    "targetPercent",
+    "topupPercent",
+    "action",
+    "odometerMiles",
+    "sohPercent",
+)
+
+
+@app.get("/api/sessions/export")
+async def export_sessions(format: str = Query(default="csv", pattern="^(csv|json)$")) -> Response:
+    """Download the *full* charge-session history as a CSV or JSON file.
+
+    Unlike ``/api/sessions`` (which serves the few most recent for the card),
+    this returns every row, oldest first, as an attachment for spreadsheets or
+    archival. 404s when persistence is disabled — there is nothing to export.
+    """
+    sessions = await db.get_all_sessions()
+    if sessions is None:
+        raise HTTPException(status_code=404, detail="History persistence is disabled")
+
+    stamp = datetime.datetime.now(_STATS_TZ).strftime("%Y%m%d")
+    filename = f"autocharge-sessions-{stamp}.{format}"
+    disposition = {"Content-Disposition": f'attachment; filename="{filename}"'}
+
+    if format == "json":
+        body = json.dumps(sessions, indent=2)
+        return Response(content=body, media_type="application/json", headers=disposition)
+
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=_EXPORT_FIELDS, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(sessions)
+    return Response(
+        content=buffer.getvalue(), media_type="text/csv; charset=utf-8", headers=disposition
+    )
 
 
 @app.get("/api/soh-history")

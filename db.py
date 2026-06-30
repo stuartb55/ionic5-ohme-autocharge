@@ -213,6 +213,43 @@ async def get_recent_sessions(limit: int) -> Optional[list[dict[str, Any]]]:
         return None
 
 
+async def get_all_sessions() -> Optional[list[dict[str, Any]]]:
+    """Return every charge session, oldest first, for a full-history export.
+
+    Same shape as :func:`get_recent_sessions` but unbounded and chronological
+    (the natural order for a spreadsheet/analysis). The table holds one row per
+    plug-in, so even years of history is a few thousand rows. Returns None when
+    persistence is disabled or the read fails, so the API can 404 the export.
+    """
+    if _pool is None:
+        return None
+    try:
+        async with _pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT id, plugged_in_at, vehicle_name, soc_percent, target_percent, "
+                "topup_percent, action, odometer_miles, soh_percent FROM charge_sessions "
+                "ORDER BY plugged_in_at ASC"
+            )
+            rows = await cur.fetchall()
+        return [
+            {
+                "id": row[0],
+                "pluggedInAt": row[1].isoformat() if row[1] else None,
+                "vehicleName": row[2],
+                "socPercent": row[3],
+                "targetPercent": row[4],
+                "topupPercent": row[5],
+                "action": row[6],
+                "odometerMiles": row[7],
+                "sohPercent": row[8],
+            }
+            for row in rows
+        ]
+    except Exception:
+        logger.warning("Failed to read all charge sessions from Postgres", exc_info=True)
+        return None
+
+
 async def get_soh_history(limit: int) -> Optional[list[dict[str, Any]]]:
     """Battery state-of-health readings over time, oldest first, for the trend.
 

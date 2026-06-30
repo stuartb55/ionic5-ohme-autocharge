@@ -1,3 +1,4 @@
+import { api } from '../api/client';
 import type { SessionsResponse } from '../api/types';
 import { formatDateShort, formatTime } from '../utils/format';
 
@@ -20,6 +21,18 @@ export function SessionsSection({ data }: { data: SessionsResponse }) {
           <p className="eyebrow">History</p>
           <h2 id="sessions-heading">Recent sessions</h2>
         </div>
+        {data.sessions.length > 0 && (
+          <div className="session-actions">
+            {/* Full history (not just the rows shown) — the backend serves it as
+                a download. Plain links so the browser handles the file save. */}
+            <a className="ghost-button" href={api.sessionsExportUrl('csv')} download>
+              Export CSV
+            </a>
+            <a className="ghost-button" href={api.sessionsExportUrl('json')} download>
+              JSON
+            </a>
+          </div>
+        )}
       </header>
 
       {data.sessions.length === 0 ? (
