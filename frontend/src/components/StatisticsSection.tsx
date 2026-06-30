@@ -1,7 +1,13 @@
 import type { ReactNode } from 'react';
 import { useMemo, useState } from 'react';
 import type { StatisticsResponse } from '../api/types';
-import { formatDateShort, formatKwh, formatMoney, formatPricePerKwh } from '../utils/format';
+import {
+  formatDateShort,
+  formatKwh,
+  formatMoney,
+  formatPricePerKwh,
+  formatPricePerMile,
+} from '../utils/format';
 import { deriveInsights, downloadDailyCsv, percentChange, type ChartMetric } from '../utils/statistics';
 import { EnergyBarChart } from './EnergyBarChart';
 
@@ -160,6 +166,13 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
             label="Efficiency"
             value={`${insights.milesPerKwh} mi/kWh`}
             sub={`over ${insights.milesDriven} mi`}
+          />
+        )}
+        {insights.costPerMile != null && (
+          <Insight
+            label="Running cost"
+            value={`${formatPricePerMile(insights.costPerMile, currency)} / mi`}
+            sub={insights.milesDriven != null ? `over ${insights.milesDriven} mi` : undefined}
           />
         )}
         <Insight

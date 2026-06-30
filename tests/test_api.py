@@ -356,6 +356,47 @@ def test_statistics_efficiency_null_when_no_odometer_span(client):
     assert body["efficiency"] is None
 
 
+def _summary_client_with_cost(energy_wh=42000, cost_minor="5250"):
+    """An Ohme client whose summary reports total energy and a total cost."""
+    mock_client = MagicMock()
+    mock_client.async_get_charge_summary = AsyncMock(
+        return_value={
+            "granularity": "DAY",
+            "totalStats": {
+                "energyChargedTotalWh": energy_wh,
+                "costStats": {"moneyCostTotal": {"amount": cost_minor, "currencyCode": "GBP"}},
+            },
+            "stats": [],
+        }
+    )
+    return mock_client
+
+
+def test_statistics_includes_running_cost_when_data_available(client):
+    store.client = _summary_client_with_cost(cost_minor="5250")  # £52.50 spent
+    with patch("db.is_enabled", return_value=True), \
+         patch("db.get_miles_driven", new=AsyncMock(return_value=210)):
+        body = client.get("/api/statistics?days=30").json()
+    # £52.50 / 210 miles = £0.25 per mile
+    assert body["runningCost"] == {"costPerMile": 0.25, "milesDriven": 210, "costTotal": 52.5}
+
+
+def test_statistics_running_cost_null_without_miles(client):
+    store.client = _summary_client_with_cost()
+    with patch("db.is_enabled", return_value=True), \
+         patch("db.get_miles_driven", new=AsyncMock(return_value=None)):
+        body = client.get("/api/statistics?days=30").json()
+    assert body["runningCost"] is None
+
+
+def test_statistics_running_cost_null_without_cost(client):
+    store.client = _summary_client()  # no costStats -> costTotal 0
+    with patch("db.is_enabled", return_value=True), \
+         patch("db.get_miles_driven", new=AsyncMock(return_value=210)):
+        body = client.get("/api/statistics?days=30").json()
+    assert body["runningCost"] is None
+
+
 def test_parse_summary_buckets_days_in_account_timezone():
     import datetime as dt
     from zoneinfo import ZoneInfo

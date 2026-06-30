@@ -1249,22 +1249,43 @@ async def _previous_period_totals(client: Any, current_start_ts: int, days: int)
     }
 
 
-async def _compute_efficiency(days: int, energy_kwh: float) -> Optional[dict[str, Any]]:
-    """Driving efficiency (mi/kWh) over the window.
+async def _miles_driven(days: int) -> Optional[int]:
+    """Odometer span (miles) across this window's charge sessions, or None.
 
-    Miles driven (the odometer span across this window's charge sessions)
-    divided by the energy charged. Over a long enough window energy charged ≈
-    energy consumed, so this is a fair real-world figure. None when there isn't
-    enough to compute it: persistence off, no energy, or fewer than two odometer
-    readings to span.
+    None when persistence is off or there aren't two odometer readings to span.
+    Shared by the efficiency and running-cost figures so both rest on one read.
     """
-    if not db.is_enabled() or energy_kwh <= 0:
+    if not db.is_enabled():
         return None
     since = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
     miles = await db.get_miles_driven(since)
-    if not miles or miles <= 0:
+    return miles if miles and miles > 0 else None
+
+
+def _efficiency(miles: Optional[int], energy_kwh: float) -> Optional[dict[str, Any]]:
+    """Driving efficiency (mi/kWh): miles driven / energy charged.
+
+    Over a long enough window energy charged ≈ energy consumed, so this is a fair
+    real-world figure. None when there's no mileage span or no energy.
+    """
+    if miles is None or energy_kwh <= 0:
         return None
     return {"milesDriven": miles, "milesPerKwh": round(miles / energy_kwh, 2)}
+
+
+def _running_cost(miles: Optional[int], cost_total: float) -> Optional[dict[str, Any]]:
+    """Real-world running cost (£/mile): money spent charging / miles driven.
+
+    The honest petrol-comparison figure, in the statistics currency. None when
+    there's no mileage span or nothing was spent in the window.
+    """
+    if miles is None or cost_total <= 0:
+        return None
+    return {
+        "costPerMile": round(cost_total / miles, 3),
+        "milesDriven": miles,
+        "costTotal": round(cost_total, 2),
+    }
 
 
 @app.get("/api/statistics")
@@ -1294,8 +1315,11 @@ async def get_statistics(days: int = Query(default=7, ge=1, le=90)) -> JSONRespo
     # async_get_charge_summary returns granularity as an enum; drop it before serialising.
     parsed = parse_summary({k: v for k, v in summary.items() if k != "granularity"}, days)
     _cache_avg_price(parsed)
-    # Driving efficiency from the odometer history (null when unavailable).
-    parsed["efficiency"] = await _compute_efficiency(days, parsed["totals"]["energyKwh"])
+    # Driving efficiency + real-world running cost from the odometer history (one
+    # mileage read feeds both; each is null when unavailable).
+    miles = await _miles_driven(days)
+    parsed["efficiency"] = _efficiency(miles, parsed["totals"]["energyKwh"])
+    parsed["runningCost"] = _running_cost(miles, parsed["totals"]["costTotal"])
     # Period-over-period comparison: the previous equal-length window (best-effort).
     previous = await _previous_period_totals(client, start_ts, days)
     parsed["comparison"] = {"previous": previous} if previous is not None else None

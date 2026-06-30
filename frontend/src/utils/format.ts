@@ -56,6 +56,17 @@ export function formatPricePerKwh(amount: number, currency: string | null): stri
   return formatMoney(amount, currency);
 }
 
+/**
+ * Per-mile running cost. Like per-kWh prices, a small GBP amount reads better in
+ * pence (e.g. "8.3p" rather than "£0.08"); non-GBP falls back to money.
+ */
+export function formatPricePerMile(amount: number, currency: string | null): string {
+  if (currency === 'GBP') {
+    return `${(amount * 100).toFixed(1)}p`;
+  }
+  return formatMoney(amount, currency);
+}
+
 /** "01:00" from an ISO timestamp, in the viewer's locale time. */
 export function formatTime(iso: string): string {
   const d = new Date(iso);

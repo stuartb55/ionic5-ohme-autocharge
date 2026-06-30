@@ -149,6 +149,8 @@ A React + TypeScript single-page app (in `frontend/`) served by a hardened, non-
 
 1. **Vehicle & charger status** — a state-of-charge ring with target marker; driving range, battery health (SoH), lock status + a "view location" link, and vehicle-health chips (12V battery, tyre/washer/key warnings, anything left open); connection state; live charge rate (kW / A); energy added and an estimated session cost. Controls: **target** stepper, **ready-by** time, **per-day targets** (in a collapsible), **pause/resume**, and **max-charge (boost)**.
 2. **Schedule** — a timeline of the allocated charging slots (active vs paused / off-peak windows) plus a slot-by-slot breakdown.
+3. **Statistics & savings** — energy, money saved vs the standard tariff, average price/kWh, CO₂ saved, measured driving efficiency, real-world running cost (£/mile), and a daily chart over a 7/30/90-day window — with **period-over-period deltas** and CSV export.
+4. **Recent sessions** *(when Postgres is enabled)* — the last plug-ins with SOC, target, top-up and odometer, with a CSV/JSON export of the full history.
 3. **Statistics & savings** — energy, money saved vs the standard tariff, average price/kWh, CO₂ saved, measured driving efficiency, and a daily chart over a 7/30/90-day window — with **period-over-period deltas** and CSV export.
 4. **Recent sessions** *(when Postgres is enabled)* — the last plug-ins with SOC, target, top-up and odometer, with a CSV/JSON export of the full history. Each row expands to show that session's **charge curve** — battery SOC climbing and the charge draw over time, from the per-poll telemetry.
 5. **Agile prices** *(when Octopus is configured)* — the current price and cheapest upcoming slots.
@@ -177,7 +179,7 @@ npm run build    # type-check + production build to dist/
 | `GET /api/version` | Build git SHA (`dev` when unset) |
 | `GET /api/status` | Vehicle SOC, range, SoH, lock/location, health (12V battery, tyre/washer/key warnings, anything left open), connection, charge rate, target, session energy + estimated cost, ready-by, per-day targets |
 | `GET /api/schedule` | Allocated charge slots + next slot times |
-| `GET /api/statistics?days=N` | Energy, savings, cost, CO₂, efficiency, daily series + previous-period comparison (N = 1–90) |
+| `GET /api/statistics?days=N` | Energy, savings, cost, CO₂, efficiency, running cost (£/mile), daily series + previous-period comparison (N = 1–90) |
 | `GET /api/sessions?limit=N` | Recent plug-in sessions from Postgres (N = 1–50; `enabled: false` when persistence is off) |
 | `GET /api/sessions/export?format=csv\|json` | Download the **full** plug-in history as a CSV or JSON attachment (404 when persistence is off) |
 | `GET /api/sessions/{id}/telemetry` | Per-poll charge curve (SOC + power over time) for one session (404 when the id is unknown; `enabled: false` when persistence is off) |

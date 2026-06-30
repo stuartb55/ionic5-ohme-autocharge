@@ -24,6 +24,7 @@ const empty: StatisticsResponse = {
     { date: '2026-05-28', energyKwh: 0, savings: 0, cost: 0 },
   ],
   efficiency: null,
+  runningCost: null,
   comparison: null,
 };
 
@@ -51,6 +52,18 @@ describe('deriveInsights', () => {
     expect(insights.efficiencyIsReal).toBe(false);
     expect(insights.milesPerKwh).toBe(MILES_PER_KWH);
     expect(insights.milesDriven).toBeNull();
+    expect(insights.costPerMile).toBeNull(); // runningCost: null in the fixture
+  });
+
+  it('surfaces running cost (and miles) when present without efficiency', () => {
+    const withCost: StatisticsResponse = {
+      ...statisticsFixture,
+      runningCost: { costPerMile: 0.083, milesDriven: 210, costTotal: 17.4 },
+    };
+    const insights = deriveInsights(withCost);
+    expect(insights.costPerMile).toBe(0.083);
+    // milesDriven falls back to runningCost's when efficiency is null.
+    expect(insights.milesDriven).toBe(210);
   });
 
   it('uses the measured efficiency for the range estimate when present', () => {

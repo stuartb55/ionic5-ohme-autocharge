@@ -274,6 +274,18 @@ export interface StatisticsResponse {
     milesPerKwh: number;
   } | null;
   /**
+   * Real-world running cost over the range, from odometer history + spend. Null
+   * when persistence is off, nothing was spent, or there's no mileage span.
+   */
+  runningCost: {
+    /** Money spent per mile driven, in `currency`. */
+    costPerMile: number;
+    /** Miles driven across the window (odometer span). */
+    milesDriven: number;
+    /** Total spent charging across the window. */
+    costTotal: number;
+  } | null;
+  /**
    * Totals for the previous equal-length period, for a period-over-period
    * comparison. Null when the previous window couldn't be fetched.
    */

@@ -28,6 +28,8 @@ export interface Insights {
   efficiencyIsReal: boolean;
   /** Miles actually driven over the window (odometer span), or null when unknown. */
   milesDriven: number | null;
+  /** Real-world running cost per mile (in the stats currency), or null when unknown. */
+  costPerMile: number | null;
 }
 
 /** Derive higher-level insights from the raw daily/total figures. */
@@ -54,7 +56,8 @@ export function deriveInsights(stats: StatisticsResponse): Insights {
     estimatedMiles: totalEnergy * milesPerKwh,
     milesPerKwh,
     efficiencyIsReal: efficiency != null,
-    milesDriven: efficiency?.milesDriven ?? null,
+    milesDriven: efficiency?.milesDriven ?? stats.runningCost?.milesDriven ?? null,
+    costPerMile: stats.runningCost?.costPerMile ?? null,
   };
 }
 

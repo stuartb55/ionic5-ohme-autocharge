@@ -109,5 +109,6 @@ export const statisticsFixture: StatisticsResponse = {
     { date: '2026-06-02', energyKwh: 11.8, savings: 2.6, cost: 0.95 },
   ],
   efficiency: null,
+  runningCost: null,
   comparison: { previous: { energyKwh: 35, costTotal: 6.1, savingsVsStandard: 7.2 } },
 };
