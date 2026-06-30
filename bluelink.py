@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import threading
 from dataclasses import dataclass
@@ -139,3 +140,24 @@ def get_vehicle_state(vehicle_id: Optional[str] = None) -> VehicleState:
 def get_battery_percentage(vehicle_id: Optional[str] = None) -> int:
     """Return just the current battery SOC % for the selected vehicle."""
     return get_vehicle_state(vehicle_id).soc
+
+
+async def get_vehicle_state_async(vehicle_id: Optional[str] = None) -> VehicleState:
+    """Run the blocking :func:`get_vehicle_state` in a worker thread, bounded by
+    ``config.UPSTREAM_TIMEOUT``.
+
+    Raises ``TimeoutError`` if the SDK call doesn't return in time, so a hung
+    Bluelink request can't stall the poll loop (callers already treat a failed
+    read as skip-and-retry). The timed-out worker thread keeps running until the
+    SDK call eventually returns — ``wait_for`` only frees the async caller — which
+    is acceptable: the module lock is released when that thread finishes and the
+    next read re-acquires it.
+    """
+    return await asyncio.wait_for(
+        asyncio.to_thread(get_vehicle_state, vehicle_id), config.UPSTREAM_TIMEOUT
+    )
+
+
+async def list_vehicles_async() -> list[dict]:
+    """Async wrapper around :func:`list_vehicles`, bounded by ``config.UPSTREAM_TIMEOUT``."""
+    return await asyncio.wait_for(asyncio.to_thread(list_vehicles), config.UPSTREAM_TIMEOUT)
