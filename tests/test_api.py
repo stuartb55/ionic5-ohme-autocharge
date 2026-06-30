@@ -1448,3 +1448,21 @@ def test_quiet_filter_ignores_query_string():
 
 def test_quiet_filter_installed_on_startup(client):
     assert api._quiet_access_filter in logging.getLogger("uvicorn.access").filters
+
+
+def test_next_poll_delay_baseline_when_healthy(monkeypatch):
+    monkeypatch.setattr(config, "POLL_INTERVAL", 180)
+    assert api._next_poll_delay(0) == 180
+    # Defensive: a negative count is also treated as healthy.
+    assert api._next_poll_delay(-1) == 180
+
+
+def test_next_poll_delay_grows_exponentially_then_caps(monkeypatch):
+    monkeypatch.setattr(config, "POLL_INTERVAL", 180)
+    monkeypatch.setattr(config, "MAX_POLL_BACKOFF", 1800)
+    assert api._next_poll_delay(1) == 180   # first failure: still one interval
+    assert api._next_poll_delay(2) == 360   # 180 * 2
+    assert api._next_poll_delay(3) == 720   # 180 * 4
+    assert api._next_poll_delay(4) == 1440  # 180 * 8
+    assert api._next_poll_delay(5) == 1800  # 180 * 16 -> capped
+    assert api._next_poll_delay(50) == 1800  # long outage stays at the cap

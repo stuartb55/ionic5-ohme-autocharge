@@ -118,6 +118,23 @@ POLL_FAILURE_ALERT_AFTER = 5
 _poll_task: Optional[asyncio.Task] = None
 
 
+def _next_poll_delay(consecutive_failures: int) -> float:
+    """Seconds to wait before the next poll.
+
+    Healthy (no failures): the normal POLL_INTERVAL. After a run of failed polls,
+    back off exponentially — POLL_INTERVAL * 2**(failures-1) — capped at
+    MAX_POLL_BACKOFF, so a sustained Ohme/Bluelink outage isn't retried every
+    interval. ``store.update`` zeroes the counter on a good poll, so the cadence
+    snaps back to POLL_INTERVAL on the first success.
+    """
+    if consecutive_failures <= 0:
+        return float(config.POLL_INTERVAL)
+    # Cap the exponent so a long outage doesn't build a needlessly huge int; the
+    # result is clamped to MAX_POLL_BACKOFF anyway.
+    factor = 2 ** min(consecutive_failures - 1, 20)
+    return float(min(config.POLL_INTERVAL * factor, config.MAX_POLL_BACKOFF))
+
+
 def _iso(dt: Optional[datetime.datetime]) -> Optional[str]:
     return dt.isoformat() if dt is not None else None
 
@@ -423,7 +440,8 @@ async def poll_loop() -> None:
                         priority="high",
                     )
 
-            await asyncio.sleep(config.POLL_INTERVAL)
+            # Back off when upstreams are failing; normal cadence when healthy.
+            await asyncio.sleep(_next_poll_delay(store.consecutive_poll_failures))
     finally:
         await client.close()
 

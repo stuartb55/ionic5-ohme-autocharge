@@ -43,6 +43,12 @@ POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "180"))
 # interval. Default 30s.
 UPSTREAM_TIMEOUT = int(os.getenv("UPSTREAM_TIMEOUT", "30"))
 
+# Upper bound (seconds) on the poll loop's back-off when upstreams are failing.
+# After a run of consecutive failed polls the loop waits POLL_INTERVAL * 2**(n-1),
+# capped here, so a sustained Ohme/Bluelink outage isn't hammered every interval;
+# it snaps back to POLL_INTERVAL on the first success. Default 30 min.
+MAX_POLL_BACKOFF = int(os.getenv("MAX_POLL_BACKOFF", str(30 * 60)))
+
 # How often (seconds) to re-read the live SOC from Bluelink while a charge is
 # actively running, so the dashboard battery ring climbs during the session
 # instead of sitting at the plug-in reading. Reads Hyundai's server-side cached
