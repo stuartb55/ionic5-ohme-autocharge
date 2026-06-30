@@ -7,6 +7,7 @@ import { ConnectionBadge } from './ConnectionBadge';
 import { DayTargetsEditor } from './DayTargetsEditor';
 import { ReadyByEditor } from './ReadyByEditor';
 import { TargetEditor } from './TargetEditor';
+import { VehicleHealth } from './VehicleHealth';
 
 function Tile({ label, value, unit }: { label: string; value: string; unit?: string }) {
   return (
@@ -97,6 +98,7 @@ export function StatusSection({
                 )}
               </div>
             )}
+            <VehicleHealth health={vehicle.health} />
             {showFinish && (
               <div className="finish-eta">
                 Finishes ~{formatFinishTime(charger.projectedFinish as string, new Date(now))}

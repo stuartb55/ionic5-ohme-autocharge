@@ -21,6 +21,16 @@ export interface StatusResponse {
     isLocked: boolean | null;
     /** Last-known GPS location, or null when unknown. */
     location: { latitude: number; longitude: number } | null;
+    /** Read-only vehicle health; each field null when the car didn't report it. */
+    health: {
+      /** 12V auxiliary battery charge (%), or null. */
+      auxBatteryPercent: number | null;
+      tyrePressureWarning: boolean | null;
+      washerFluidWarning: boolean | null;
+      keyBatteryWarning: boolean | null;
+      /** Labels of any door/bonnet/boot reported open (empty when all closed). */
+      openItems: string[];
+    };
   };
   charger: {
     status: ChargerStatus;
@@ -159,6 +169,24 @@ export interface SessionsResponse {
   /** False when Postgres history persistence is disabled — hide the card. */
   enabled: boolean;
   sessions: ChargeSessionEntry[];
+}
+
+export interface SessionTelemetryPoint {
+  /** Poll timestamp (ISO), or null. */
+  at: string | null;
+  /** Battery SOC (%) at that poll, or null. */
+  socPercent: number | null;
+  /** Charge draw (watts) at that poll, or null. */
+  powerWatts: number | null;
+  /** Cumulative session energy (kWh) at that poll, or null. */
+  sessionEnergyKwh: number | null;
+}
+
+export interface SessionTelemetryResponse {
+  /** False when Postgres persistence is disabled. */
+  enabled: boolean;
+  /** Per-poll points, oldest first, spanning the session. */
+  points: SessionTelemetryPoint[];
 }
 
 export interface SohPoint {

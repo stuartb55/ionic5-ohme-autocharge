@@ -256,6 +256,27 @@ body {
   font-weight: 600;
   margin-top: 2px;
 }
+.battery-caption .vehicle-health {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.health-chip {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-2, var(--surface));
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.health-chip.warn {
+  background: var(--warning-soft);
+  color: var(--warning);
+  border-color: transparent;
+}
 
 /* --- charge target editor --- */
 .target-editor {
@@ -677,16 +698,79 @@ body {
   display: grid;
   gap: var(--space-2);
 }
+.session-list .session-item {
+  display: grid;
+  gap: var(--space-2);
+}
 .session-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
+  width: 100%;
   padding: var(--space-3) var(--space-4);
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   font-size: 0.9rem;
+  font-family: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.session-row:hover {
+  border-color: var(--text-subtle);
+}
+.session-row.expanded {
+  border-color: var(--brand);
+}
+.session-chevron {
+  color: var(--text-subtle);
+  font-size: 0.7rem;
+}
+/* --- session charge curve --- */
+.session-curve {
+  padding: var(--space-3) var(--space-4) var(--space-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.session-curve.empty {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+.session-curve svg {
+  width: 100%;
+  height: auto;
+}
+.curve-legend {
+  display: flex;
+  gap: var(--space-4);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-bottom: var(--space-2);
+}
+.curve-legend .legend::before {
+  content: '';
+  display: inline-block;
+  width: 12px;
+  height: 0;
+  vertical-align: middle;
+  margin-right: 6px;
+  border-top-width: 2px;
+  border-top-style: solid;
+}
+.curve-legend .legend.soc::before { border-top-color: var(--brand); }
+.curve-legend .legend.power::before {
+  border-top-style: dashed;
+  border-top-color: var(--accent);
+}
+.curve-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--text-subtle);
+  font-variant-numeric: tabular-nums;
 }
 .session-head {
   display: flex;

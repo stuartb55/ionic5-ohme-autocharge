@@ -208,6 +208,13 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
         is_locked=store.last_is_locked if connected else None,
         latitude=store.last_latitude if connected else None,
         longitude=store.last_longitude if connected else None,
+        # Vehicle health, like the other Bluelink extras, is the reading captured
+        # at the last plug-in — only meaningful while still connected.
+        aux_battery_percent=store.last_aux_battery_percent if connected else None,
+        tyre_pressure_warning=store.last_tyre_pressure_warning if connected else None,
+        washer_fluid_warning=store.last_washer_fluid_warning if connected else None,
+        key_battery_warning=store.last_key_battery_warning if connected else None,
+        open_items=list(store.last_open_items) if connected else [],
         charger_status=status_value,
         connected=connected,
         charger_online=bool(client.available),
@@ -318,6 +325,41 @@ async def _maybe_notify_finished(prev_status: str, snap: StatusSnapshot) -> None
     )
 
 
+# Health warnings we alert on — only the SDK's own asserted boolean flags (not
+# the 12V %, which has no vendor threshold to judge against). Edge-triggered, so
+# a warning present at plug-in notifies once and a steady one across polls doesn't.
+_HEALTH_WARNINGS = (
+    ("tyre_pressure_warning", "Tyre pressure low"),
+    ("washer_fluid_warning", "Washer fluid low"),
+    ("key_battery_warning", "Key fob battery low"),
+)
+
+
+async def _maybe_notify_vehicle_health(prev: StatusSnapshot, snap: StatusSnapshot) -> None:
+    """Notify when a vehicle-health warning newly appears (False/None → True).
+
+    Comparing the previous snapshot to the new one makes this edge-triggered:
+    health only changes on a fresh Bluelink read, so a warning that persists
+    across polls won't re-notify, and an unplug (which clears the fields) can't
+    masquerade as a new warning.
+    """
+    raised = [
+        label
+        for attr, label in _HEALTH_WARNINGS
+        if getattr(snap, attr) is True and getattr(prev, attr) is not True
+    ]
+    # Anything newly reported open that wasn't open before.
+    raised.extend(f"{item} open" for item in snap.open_items if item not in prev.open_items)
+    if not raised:
+        return
+    name = snap.vehicle_name or "EV"
+    await ntfy.send(
+        "\n".join(raised),
+        title=f"{name} — vehicle health",
+        tags="warning",
+    )
+
+
 # Signature of the last telemetry row written, to skip identical idle repeats.
 _last_telemetry_sig: Optional[tuple] = None
 
@@ -401,7 +443,8 @@ async def poll_loop() -> None:
                 # SOC on a slow cadence (outside client_lock — Bluelink only).
                 await _maybe_refresh_live_soc(status)
 
-                prev_status = store.status.charger_status
+                prev_snapshot = store.status
+                prev_status = prev_snapshot.charger_status
                 recovered = store.consecutive_poll_failures >= POLL_FAILURE_ALERT_AFTER
                 async with store.client_lock:
                     store.update(build_snapshot(client, connected=now_connected))
@@ -412,6 +455,7 @@ async def poll_loop() -> None:
                         tags="white_check_mark",
                     )
                 await _maybe_notify_finished(prev_status, store.status)
+                await _maybe_notify_vehicle_health(prev_snapshot, store.status)
 
                 # Append a telemetry point for Grafana (best-effort, no-op when
                 # persistence is disabled). Outside the lock: it doesn't touch the
@@ -835,6 +879,15 @@ async def get_status() -> JSONResponse:
                 if store.status.latitude is not None and store.status.longitude is not None
                 else None
             ),
+            # Read-only vehicle health. Each field is null when the car didn't
+            # report it; openItems is the (possibly empty) list of things open.
+            "health": {
+                "auxBatteryPercent": store.status.aux_battery_percent,
+                "tyrePressureWarning": store.status.tyre_pressure_warning,
+                "washerFluidWarning": store.status.washer_fluid_warning,
+                "keyBatteryWarning": store.status.key_battery_warning,
+                "openItems": store.status.open_items,
+            },
         },
         "charger": {
             "status": store.status.charger_status,
@@ -1030,6 +1083,21 @@ async def export_sessions(format: str = Query(default="csv", pattern="^(csv|json
     return Response(
         content=buffer.getvalue(), media_type="text/csv; charset=utf-8", headers=disposition
     )
+
+
+@app.get("/api/sessions/{session_id}/telemetry")
+async def get_session_telemetry(session_id: int) -> JSONResponse:
+    """Per-poll charge curve (SOC + power over time) for one session.
+
+    ``enabled`` is false when persistence is off (the sessions card itself is
+    hidden then, so this is defensive). A 404 means the session id is unknown.
+    """
+    if not db.is_enabled():
+        return JSONResponse({"enabled": False, "points": []})
+    points = await db.get_session_telemetry(session_id)
+    if points is None:
+        raise HTTPException(status_code=404, detail="Unknown session")
+    return JSONResponse({"enabled": True, "points": points})
 
 
 @app.get("/api/soh-history")

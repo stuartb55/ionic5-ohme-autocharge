@@ -46,6 +46,13 @@ class StatusSnapshot:
     is_locked: Optional[bool] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    # Read-only vehicle health from the last reading: 12V battery %, the SDK's
+    # own warning flags, and any door/bonnet/boot reported open.
+    aux_battery_percent: Optional[int] = None
+    tyre_pressure_warning: Optional[bool] = None
+    washer_fluid_warning: Optional[bool] = None
+    key_battery_warning: Optional[bool] = None
+    open_items: list[str] = field(default_factory=list)
 
     # Charger
     charger_status: str = "unknown"  # ChargerStatus value, e.g. "charging"
@@ -113,6 +120,12 @@ class AppState:
         self.last_is_locked: Optional[bool] = None
         self.last_latitude: Optional[float] = None
         self.last_longitude: Optional[float] = None
+        # Read-only vehicle health from the last read (see VehicleState).
+        self.last_aux_battery_percent: Optional[int] = None
+        self.last_tyre_pressure_warning: Optional[bool] = None
+        self.last_washer_fluid_warning: Optional[bool] = None
+        self.last_key_battery_warning: Optional[bool] = None
+        self.last_open_items: list[str] = []
         # Monotonic time of the last Bluelink reading, used to pace the mid-charge
         # live-SOC refresh (so it fires LIVE_SOC_INTERVAL after the plug-in read,
         # not immediately). None means no reading held yet.
@@ -223,6 +236,11 @@ class AppState:
         self.last_is_locked = state.is_locked
         self.last_latitude = state.latitude
         self.last_longitude = state.longitude
+        self.last_aux_battery_percent = state.aux_battery_percent
+        self.last_tyre_pressure_warning = state.tyre_pressure_warning
+        self.last_washer_fluid_warning = state.washer_fluid_warning
+        self.last_key_battery_warning = state.key_battery_warning
+        self.last_open_items = list(state.open_items)
         self.last_soc_at = time.monotonic()
 
     def clear_soc(self) -> None:
@@ -234,6 +252,11 @@ class AppState:
         self.last_is_locked = None
         self.last_latitude = None
         self.last_longitude = None
+        self.last_aux_battery_percent = None
+        self.last_tyre_pressure_warning = None
+        self.last_washer_fluid_warning = None
+        self.last_key_battery_warning = None
+        self.last_open_items = []
         self.last_soc_at = None
         # New session, clean slate for the plug-in failure alert.
         self.plugin_failure_notified = False
