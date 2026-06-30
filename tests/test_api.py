@@ -152,6 +152,27 @@ def test_status_reflects_snapshot(client):
     assert body["ready"] is True
 
 
+def test_status_serialises_vehicle_health(client):
+    store.update(
+        StatusSnapshot(
+            connected=True,
+            aux_battery_percent=85,
+            tyre_pressure_warning=True,
+            washer_fluid_warning=False,
+            key_battery_warning=None,
+            open_items=["Boot"],
+        )
+    )
+    health = client.get("/api/status").json()["vehicle"]["health"]
+    assert health == {
+        "auxBatteryPercent": 85,
+        "tyrePressureWarning": True,
+        "washerFluidWarning": False,
+        "keyBatteryWarning": None,
+        "openItems": ["Boot"],
+    }
+
+
 def test_status_before_first_poll_is_empty_but_ok(client):
     body = client.get("/api/status").json()
     assert body["ready"] is False
@@ -621,6 +642,39 @@ async def test_no_finish_notification_without_charging_transition(prev, new):
     snap = StatusSnapshot(charger_status=new, connected=True)
     with patch("ntfy.send", new=AsyncMock()) as mock_notify:
         await api._maybe_notify_finished(prev, snap)
+    mock_notify.assert_not_called()
+
+
+async def test_notifies_when_health_warning_newly_raised():
+    prev = StatusSnapshot(vehicle_name="IONIQ 5")  # nothing wrong before
+    snap = StatusSnapshot(
+        vehicle_name="IONIQ 5", tyre_pressure_warning=True, open_items=["Boot"],
+    )
+    with patch("ntfy.send", new=AsyncMock()) as mock_notify:
+        await api._maybe_notify_vehicle_health(prev, snap)
+
+    mock_notify.assert_awaited_once()
+    msg = mock_notify.call_args[0][0]
+    assert "Tyre pressure low" in msg
+    assert "Boot open" in msg
+    assert mock_notify.call_args.kwargs["tags"] == "warning"
+
+
+async def test_no_health_notification_when_warning_persists():
+    # Same warning in both snapshots — edge-triggered, so it must not repeat.
+    prev = StatusSnapshot(tyre_pressure_warning=True, open_items=["Boot"])
+    snap = StatusSnapshot(tyre_pressure_warning=True, open_items=["Boot"])
+    with patch("ntfy.send", new=AsyncMock()) as mock_notify:
+        await api._maybe_notify_vehicle_health(prev, snap)
+    mock_notify.assert_not_called()
+
+
+async def test_no_health_notification_when_warning_clears_on_unplug():
+    # Unplug zeroes the health fields; a True→None/[] change isn't a new warning.
+    prev = StatusSnapshot(tyre_pressure_warning=True, open_items=["Boot"])
+    snap = StatusSnapshot()  # disconnected: warnings None, open_items []
+    with patch("ntfy.send", new=AsyncMock()) as mock_notify:
+        await api._maybe_notify_vehicle_health(prev, snap)
     mock_notify.assert_not_called()
 
 

@@ -13,6 +13,13 @@ export const statusFixture: StatusResponse = {
     sohPercent: 98,
     isLocked: true,
     location: { latitude: 51.5, longitude: -0.12 },
+    health: {
+      auxBatteryPercent: 85,
+      tyrePressureWarning: false,
+      washerFluidWarning: false,
+      keyBatteryWarning: false,
+      openItems: [],
+    },
   },
   charger: {
     status: 'charging',

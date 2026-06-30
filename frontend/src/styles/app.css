@@ -256,6 +256,27 @@ body {
   font-weight: 600;
   margin-top: 2px;
 }
+.battery-caption .vehicle-health {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.health-chip {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-2, var(--surface));
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.health-chip.warn {
+  background: var(--warning-soft);
+  color: var(--warning);
+  border-color: transparent;
+}
 
 /* --- charge target editor --- */
 .target-editor {

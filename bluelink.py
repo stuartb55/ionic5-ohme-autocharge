@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from hyundai_kia_connect_api import VehicleManager
@@ -36,6 +36,42 @@ class VehicleState:
     is_locked: Optional[bool] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    # Read-only vehicle health (all best-effort). aux_battery_percent is the 12V
+    # auxiliary battery %; the *_warning flags mirror the SDK's own warnings
+    # (None when the car doesn't report them); open_items lists any door/bonnet/
+    # boot the car reports as open (empty when all closed or not reported).
+    aux_battery_percent: Optional[int] = None
+    tyre_pressure_warning: Optional[bool] = None
+    washer_fluid_warning: Optional[bool] = None
+    key_battery_warning: Optional[bool] = None
+    open_items: list[str] = field(default_factory=list)
+
+
+# SDK "is open" attribute -> human label, for the "left open" health chip. Order
+# is the order they're listed to the user.
+_OPEN_ITEMS = (
+    ("hood_is_open", "Bonnet"),
+    ("trunk_is_open", "Boot"),
+    ("front_left_door_is_open", "Front-left door"),
+    ("front_right_door_is_open", "Front-right door"),
+    ("back_left_door_is_open", "Rear-left door"),
+    ("back_right_door_is_open", "Rear-right door"),
+)
+
+
+def _as_bool(value) -> Optional[bool]:
+    """Coerce an SDK warning flag to a real bool, else None.
+
+    The flags are bools when reported, but can be absent or a non-bool (and are
+    MagicMocks in tests), so only a genuine bool is trusted — anything else is
+    "not reported" rather than a misleading False/True.
+    """
+    return value if isinstance(value, bool) else None
+
+
+def _open_items(vehicle) -> list[str]:
+    """Labels for any door/bonnet/boot the car reports as open (strictly True)."""
+    return [label for attr, label in _OPEN_ITEMS if getattr(vehicle, attr, None) is True]
 
 
 def _to_miles(value, unit) -> Optional[int]:
@@ -124,16 +160,29 @@ def get_vehicle_state(vehicle_id: Optional[str] = None) -> VehicleState:
         latitude = float(lat) if isinstance(lat, (int, float)) else None
         longitude = float(lon) if isinstance(lon, (int, float)) else None
 
+        raw_aux = getattr(vehicle, "car_battery_percentage", None)
+        # 12V battery; 0/None/non-numeric means "not reported".
+        aux_battery_percent = (
+            int(raw_aux) if isinstance(raw_aux, (int, float)) and raw_aux > 0 else None
+        )
+        tyre_pressure_warning = _as_bool(getattr(vehicle, "tire_pressure_all_warning_is_on", None))
+        washer_fluid_warning = _as_bool(getattr(vehicle, "washer_fluid_warning_is_on", None))
+        key_battery_warning = _as_bool(getattr(vehicle, "smart_key_battery_warning_is_on", None))
+        open_items = _open_items(vehicle)
+
     if soc is None:
         raise RuntimeError("Vehicle did not report a battery percentage — try again shortly")
 
     logger.info(
-        "Hyundai SOC: %s%%, range: %s mi, odometer: %s mi, SoH: %s%%, locked: %s",
-        soc, range_miles, odometer_miles, soh_percent, is_locked,
+        "Hyundai SOC: %s%%, range: %s mi, odometer: %s mi, SoH: %s%%, locked: %s, 12V: %s%%",
+        soc, range_miles, odometer_miles, soh_percent, is_locked, aux_battery_percent,
     )
     return VehicleState(
         soc=soc, range_miles=range_miles, odometer_miles=odometer_miles, soh_percent=soh_percent,
         is_locked=is_locked, latitude=latitude, longitude=longitude,
+        aux_battery_percent=aux_battery_percent, tyre_pressure_warning=tyre_pressure_warning,
+        washer_fluid_warning=washer_fluid_warning, key_battery_warning=key_battery_warning,
+        open_items=open_items,
     )
 
 

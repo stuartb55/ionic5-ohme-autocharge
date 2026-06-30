@@ -18,7 +18,8 @@ When the car is plugged in, the app reads the real battery state-of-charge from 
 - **Per-weekday targets** — e.g. 80% on weekdays, 100% before the weekend, applied automatically at plug-in.
 - **Live SOC while charging** — the ring climbs through the session (re-reads Bluelink on a slow cadence; never wakes the car).
 - **Multi-vehicle** — pick which car on the Hyundai account to track.
-- **Notifications** — optional [ntfy](https://ntfy.sh) alerts (plug-in, charge finished, problems) plus a weekly summary digest.
+- **Vehicle health** — read-only 12V auxiliary battery level plus the car's own tyre-pressure, washer-fluid and key-fob-battery warnings and anything left open (door/bonnet/boot), shown on the dashboard with an optional ntfy when a warning first appears.
+- **Notifications** — optional [ntfy](https://ntfy.sh) alerts (plug-in, charge finished, problems, vehicle-health warnings) plus a weekly summary digest.
 - **Octopus Agile** *(optional)* — upcoming half-hourly prices and the cheapest slots, plus an Agile-accurate session cost (each charge slot priced against the rate it falls in, not a flat average).
 - **House vs car energy** *(optional, needs Postgres)* — pulls whole-house electricity import from your Octopus account and breaks each half-hour into the car-charging share vs the rest of the household, on the dashboard and in Grafana.
 - **History & Grafana** *(optional)* — per-session and telemetry data persisted to Postgres.
@@ -146,7 +147,7 @@ uvicorn api:app --host 0.0.0.0 --port 8000   # web API + poll loop (docs at /doc
 
 A React + TypeScript single-page app (in `frontend/`) served by a hardened, non-root nginx image. It polls the backend and renders:
 
-1. **Vehicle & charger status** — a state-of-charge ring with target marker; driving range, battery health (SoH), and lock status + a "view location" link; connection state; live charge rate (kW / A); energy added and an estimated session cost. Controls: **target** stepper, **ready-by** time, **per-day targets** (in a collapsible), **pause/resume**, and **max-charge (boost)**.
+1. **Vehicle & charger status** — a state-of-charge ring with target marker; driving range, battery health (SoH), lock status + a "view location" link, and vehicle-health chips (12V battery, tyre/washer/key warnings, anything left open); connection state; live charge rate (kW / A); energy added and an estimated session cost. Controls: **target** stepper, **ready-by** time, **per-day targets** (in a collapsible), **pause/resume**, and **max-charge (boost)**.
 2. **Schedule** — a timeline of the allocated charging slots (active vs paused / off-peak windows) plus a slot-by-slot breakdown.
 3. **Statistics & savings** — energy, money saved vs the standard tariff, average price/kWh, CO₂ saved, measured driving efficiency, and a daily chart over a 7/30/90-day window — with **period-over-period deltas** and CSV export.
 4. **Recent sessions** *(when Postgres is enabled)* — the last plug-ins with SOC, target, top-up and odometer, with a CSV/JSON export of the full history.
@@ -174,7 +175,7 @@ npm run build    # type-check + production build to dist/
 |---|---|
 | `GET /api/health` | Liveness probe (503 if the poll loop has died) |
 | `GET /api/version` | Build git SHA (`dev` when unset) |
-| `GET /api/status` | Vehicle SOC, range, SoH, lock/location, connection, charge rate, target, session energy + estimated cost, ready-by, per-day targets |
+| `GET /api/status` | Vehicle SOC, range, SoH, lock/location, health (12V battery, tyre/washer/key warnings, anything left open), connection, charge rate, target, session energy + estimated cost, ready-by, per-day targets |
 | `GET /api/schedule` | Allocated charge slots + next slot times |
 | `GET /api/statistics?days=N` | Energy, savings, cost, CO₂, efficiency, daily series + previous-period comparison (N = 1–90) |
 | `GET /api/sessions?limit=N` | Recent plug-in sessions from Postgres (N = 1–50; `enabled: false` when persistence is off) |
