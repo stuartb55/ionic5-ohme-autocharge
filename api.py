@@ -34,6 +34,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 import bluelink
 import config
 import db
+import energy
 import main
 import ntfy
 import octopus
@@ -49,7 +50,15 @@ logger = logging.getLogger(__name__)
 # events we actually care about, so we drop those access-log lines. Anything that
 # errors (status >= 400) is still logged.
 _QUIET_ACCESS_PATHS = frozenset(
-    {"/api/health", "/api/status", "/api/schedule", "/api/statistics", "/api/sessions", "/api/tariff"}
+    {
+        "/api/health",
+        "/api/status",
+        "/api/schedule",
+        "/api/statistics",
+        "/api/sessions",
+        "/api/tariff",
+        "/api/energy-usage",
+    }
 )
 
 
@@ -387,6 +396,9 @@ async def poll_loop() -> None:
                     now_mono = time.monotonic()
                     if now_mono - last_daily_sync >= config.DAILY_STATS_INTERVAL:
                         await _persist_daily_stats(client)
+                        # Pull recent Octopus household consumption and break out
+                        # the car share (no-op when consumption isn't configured).
+                        await _persist_grid_consumption()
                         # Same slow cadence: stop the per-poll telemetry table
                         # from growing without bound.
                         await db.prune_telemetry(config.TELEMETRY_RETENTION_DAYS)
@@ -887,6 +899,52 @@ async def get_tariff() -> JSONResponse:
     return JSONResponse(payload)
 
 
+@app.get("/api/energy-usage")
+async def get_energy_usage(date: Optional[str] = Query(default=None)) -> JSONResponse:
+    """Half-hourly whole-house import vs car charging for a single day.
+
+    ``date`` is a ``YYYY-MM-DD`` string in the configured timezone; it defaults to
+    **yesterday** because Octopus consumption data lags ~a day (today is usually
+    incomplete). ``enabled`` is false when the consumption feature is unconfigured
+    or persistence is off — the dashboard hides the card, mirroring
+    ``/api/sessions`` and ``/api/tariff``.
+    """
+    if not octopus.consumption_is_enabled() or not db.is_enabled():
+        return JSONResponse({"enabled": False, "slots": [], "totals": None, "date": None})
+
+    tz = _STATS_TZ or datetime.timezone.utc
+    if date:
+        try:
+            day = datetime.date.fromisoformat(date)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD") from exc
+    else:
+        day = (datetime.datetime.now(tz) - datetime.timedelta(days=1)).date()
+
+    # Local-midnight bounds for the requested day, so a day's 48 slots line up
+    # with the user's calendar rather than the container's UTC day.
+    start = datetime.datetime.combine(day, datetime.time.min, tzinfo=tz)
+    end = start + datetime.timedelta(days=1)
+    rows = await db.get_grid_consumption(start, end)
+    if rows is None:
+        return JSONResponse({"enabled": False, "slots": [], "totals": None, "date": None})
+
+    totals = {
+        "importKwh": round(sum(r["importKwh"] or 0 for r in rows), 2),
+        "carKwh": round(sum(r["carKwh"] or 0 for r in rows), 2),
+        "houseKwh": round(sum(r["houseKwh"] or 0 for r in rows), 2),
+    }
+    return JSONResponse(
+        {
+            "enabled": True,
+            "date": day.isoformat(),
+            "currency": "GBP",
+            "slots": rows,
+            "totals": totals,
+        }
+    )
+
+
 @app.get("/api/sessions")
 async def get_sessions(limit: int = Query(default=10, ge=1, le=50)) -> JSONResponse:
     """Recent plug-in sessions from the Postgres history.
@@ -933,6 +991,32 @@ async def _persist_daily_stats(client: Any, days: int = 90) -> None:
     parsed = parse_summary({k: v for k, v in summary.items() if k != "granularity"}, days)
     _cache_avg_price(parsed)
     await db.record_daily_stats(parsed["daily"], parsed["currency"])
+
+
+async def _persist_grid_consumption(days: int = 3) -> None:
+    """Fetch recent Octopus household consumption and upsert the car/house split.
+
+    Pulls the last ``days`` of half-hourly grid import, reconstructs the car's
+    per-slot share from the telemetry history, and upserts both (plus the
+    rest-of-house remainder) into ``grid_consumption`` for the dashboard and
+    Grafana. Best-effort and a no-op unless consumption is configured *and*
+    persistence is enabled (the car share comes from the telemetry table). A
+    short window re-ingested each cycle backfills late-arriving Octopus data.
+    """
+    if not octopus.consumption_is_enabled() or not db.is_enabled():
+        return
+    now = datetime.datetime.now(datetime.timezone.utc)
+    period_from = now - datetime.timedelta(days=days)
+    consumption = await octopus.fetch_consumption(period_from, now)
+    if not consumption:
+        return
+    # Widen the telemetry read a little before the window so the first slot's
+    # cumulative-energy delta has a preceding reading to diff against.
+    tele_from = period_from - datetime.timedelta(seconds=max(config.POLL_INTERVAL * 2, 600))
+    telemetry = await db.get_telemetry_between(tele_from, now)
+    car_by_slot = energy.attribute_car_kwh(telemetry or [])
+    rows = energy.merge_usage(consumption, car_by_slot)
+    await db.upsert_grid_consumption(rows)
 
 
 def _cache_avg_price(parsed: dict[str, Any]) -> None:

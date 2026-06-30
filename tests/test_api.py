@@ -457,6 +457,71 @@ def test_soh_history_returns_points_and_passes_limit(client):
     mock_get.assert_awaited_once_with(30)
 
 
+# --- energy usage (household vs car) --------------------------------------------
+
+
+def test_energy_usage_disabled_when_consumption_off(client):
+    with patch("octopus.consumption_is_enabled", return_value=False):
+        body = client.get("/api/energy-usage").json()
+    assert body == {"enabled": False, "slots": [], "totals": None, "date": None}
+
+
+def test_energy_usage_disabled_when_persistence_off(client):
+    with patch("octopus.consumption_is_enabled", return_value=True), \
+        patch("db.is_enabled", return_value=False):
+        body = client.get("/api/energy-usage").json()
+    assert body["enabled"] is False
+
+
+def test_energy_usage_returns_slots_and_totals(client):
+    slots = [
+        {"start": "2026-06-01T00:00:00+00:00", "end": "2026-06-01T00:30:00+00:00",
+         "importKwh": 1.5, "carKwh": 1.0, "houseKwh": 0.5},
+        {"start": "2026-06-01T00:30:00+00:00", "end": "2026-06-01T01:00:00+00:00",
+         "importKwh": 0.4, "carKwh": 0.0, "houseKwh": 0.4},
+    ]
+    with patch("octopus.consumption_is_enabled", return_value=True), \
+        patch("db.is_enabled", return_value=True), \
+        patch("db.get_grid_consumption", new=AsyncMock(return_value=slots)):
+        body = client.get("/api/energy-usage?date=2026-06-01").json()
+
+    assert body["enabled"] is True
+    assert body["date"] == "2026-06-01"
+    assert body["slots"] == slots
+    assert body["totals"] == {"importKwh": 1.9, "carKwh": 1.0, "houseKwh": 0.9}
+
+
+def test_energy_usage_defaults_to_yesterday(client):
+    import datetime as dt
+
+    captured = {}
+
+    async def fake_get(start, end):
+        captured["start"] = start
+        captured["end"] = end
+        return []
+
+    with patch("octopus.consumption_is_enabled", return_value=True), \
+        patch("db.is_enabled", return_value=True), \
+        patch("db.get_grid_consumption", new=fake_get):
+        body = client.get("/api/energy-usage").json()
+
+    # Default date is yesterday in the configured timezone — compute it through
+    # the same logic rather than hard-coding a clock string (CI runs in UTC).
+    tz = api._STATS_TZ or dt.timezone.utc
+    expected = (dt.datetime.now(tz) - dt.timedelta(days=1)).date()
+    assert body["date"] == expected.isoformat()
+    # The query window is the local-midnight day for that date (24h span).
+    assert captured["end"] - captured["start"] == dt.timedelta(days=1)
+    assert captured["start"].date() == expected
+
+
+def test_energy_usage_rejects_bad_date(client):
+    with patch("octopus.consumption_is_enabled", return_value=True), \
+        patch("db.is_enabled", return_value=True):
+        assert client.get("/api/energy-usage?date=not-a-date").status_code == 400
+
+
 def test_soh_history_validates_limit(client):
     assert client.get("/api/soh-history?limit=0").status_code == 422
     assert client.get("/api/soh-history?limit=400").status_code == 422
