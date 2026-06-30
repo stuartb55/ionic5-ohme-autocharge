@@ -64,6 +64,15 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 OCTOPUS_PRODUCT_CODE = os.getenv("OCTOPUS_PRODUCT_CODE", "")
 OCTOPUS_REGION = os.getenv("OCTOPUS_REGION", "")
 
+# Optional Octopus household-consumption awareness (separate from the Agile rates
+# above — this needs an account). Both must be set to enable the energy-usage card
+# and its Postgres persistence. The API key is the account-level key from your
+# Octopus dashboard; the account number (e.g. "A-AAAA1111") lets the app discover
+# your electricity import meter (MPAN + serial) automatically. Used with HTTP Basic
+# auth (key as username, empty password) against the authenticated consumption API.
+OCTOPUS_API_KEY = os.getenv("OCTOPUS_API_KEY", "")
+OCTOPUS_ACCOUNT_NUMBER = os.getenv("OCTOPUS_ACCOUNT_NUMBER", "")
+
 # How often (seconds) the poll loop refreshes Ohme's daily totals into Postgres.
 # Independent of the dashboard being open. Default 6h.
 DAILY_STATS_INTERVAL = int(os.getenv("DAILY_STATS_INTERVAL", str(6 * 60 * 60)))

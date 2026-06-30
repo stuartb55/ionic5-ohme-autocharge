@@ -192,6 +192,31 @@ export interface TariffResponse {
   cheapest: TariffRate[];
 }
 
+export interface EnergyUsageSlot {
+  /** Half-hour interval start (ISO). */
+  start: string | null;
+  /** Half-hour interval end (ISO). */
+  end: string | null;
+  /** Whole-house grid import for the slot (kWh). */
+  importKwh: number | null;
+  /** Car charging share of the import (kWh). */
+  carKwh: number | null;
+  /** Rest-of-house usage = import − car (kWh). */
+  houseKwh: number | null;
+}
+
+export interface EnergyUsageResponse {
+  /** False when consumption is unconfigured or persistence is off — hide the card. */
+  enabled: boolean;
+  /** The day shown (YYYY-MM-DD), or null when disabled. */
+  date: string | null;
+  currency?: string | null;
+  /** Half-hourly slots for the day, chronological. */
+  slots: EnergyUsageSlot[];
+  /** Day totals, or null when disabled. */
+  totals: { importKwh: number; carKwh: number; houseKwh: number } | null;
+}
+
 export interface DailyStat {
   date: string | null;
   energyKwh: number;

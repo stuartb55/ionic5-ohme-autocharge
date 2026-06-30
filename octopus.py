@@ -9,6 +9,7 @@ swallowed so the tariff card simply hides.
 
 from __future__ import annotations
 
+import base64
 import datetime
 import logging
 from typing import Optional
@@ -21,14 +22,38 @@ logger = logging.getLogger(__name__)
 
 _BASE = "https://api.octopus.energy/v1"
 
+# Cached (mpan, serial) of the electricity import meter, discovered once from the
+# account endpoint (it never changes for a given home). None until the first
+# successful lookup — mirrors the singleton pattern in bluelink._manager.
+_meter: Optional[tuple[str, str]] = None
+
 
 def is_enabled() -> bool:
     """True when an Agile product code and region are configured."""
     return bool(config.OCTOPUS_PRODUCT_CODE and config.OCTOPUS_REGION)
 
 
+def consumption_is_enabled() -> bool:
+    """True when an Octopus account (API key + number) is configured.
+
+    Separate from :func:`is_enabled`: the Agile rates use the public API, while
+    half-hourly household consumption needs an authenticated account call.
+    """
+    return bool(config.OCTOPUS_API_KEY and config.OCTOPUS_ACCOUNT_NUMBER)
+
+
 def _tariff_code() -> str:
     return f"E-1R-{config.OCTOPUS_PRODUCT_CODE}-{config.OCTOPUS_REGION}"
+
+
+def _auth_headers() -> dict[str, str]:
+    """HTTP Basic auth header for the account API (key as user, empty password).
+
+    Built by hand rather than via ``aiohttp.BasicAuth`` (deprecated in 3.14 / to
+    be removed in 4.0) so it works regardless of the installed aiohttp version.
+    """
+    token = base64.b64encode(f"{config.OCTOPUS_API_KEY}:".encode()).decode()
+    return {"Authorization": f"Basic {token}"}
 
 
 async def fetch_rates() -> Optional[list[dict]]:
@@ -127,3 +152,102 @@ def cost_for_slots(slots: list, rates: Optional[list[dict]]) -> Optional[float]:
             return None
         total += slot_cost
     return round(total, 2)
+
+
+# --- household consumption (authenticated account API) -----------------------
+
+
+async def _discover_meter() -> Optional[tuple[str, str]]:
+    """Return the electricity import meter ``(mpan, serial)`` for the account.
+
+    Cached after the first success — a home's meter doesn't change. Reads the
+    account endpoint and picks the first non-export electricity meter point.
+    None when disabled or on any failure (so the feature degrades to off).
+    """
+    global _meter
+    if _meter is not None:
+        return _meter
+    if not consumption_is_enabled():
+        return None
+    url = f"{_BASE}/accounts/{config.OCTOPUS_ACCOUNT_NUMBER}/"
+    headers = _auth_headers()
+    timeout = aiohttp.ClientTimeout(total=10)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url, headers=headers) as resp:
+                if resp.status != 200:
+                    logger.warning("Octopus account API returned HTTP %s", resp.status)
+                    return None
+                data = await resp.json()
+        for prop in data.get("properties") or []:
+            for point in prop.get("electricity_meter_points") or []:
+                # Skip export (solar feed-in) meter points — we want grid import.
+                if point.get("is_export"):
+                    continue
+                mpan = point.get("mpan")
+                meters = point.get("meters") or []
+                serial = meters[0].get("serial_number") if meters else None
+                if mpan and serial:
+                    _meter = (mpan, serial)
+                    logger.info("Discovered Octopus import meter %s/%s", mpan, serial)
+                    return _meter
+    except Exception:
+        logger.warning("Failed to discover Octopus meter", exc_info=True)
+        return None
+    logger.warning("No electricity import meter found on the Octopus account")
+    return None
+
+
+async def fetch_consumption(
+    period_from: datetime.datetime, period_to: datetime.datetime
+) -> Optional[list[dict]]:
+    """Half-hourly household grid import between ``period_from`` and ``period_to``.
+
+    Returns ``[{from, to, importKwh}]`` chronological, following Octopus's
+    pagination. None when disabled, the meter can't be discovered, or on any
+    failure (so the energy-usage feature degrades to off, like the tariff card).
+    """
+    if not consumption_is_enabled():
+        return None
+    meter = await _discover_meter()
+    if meter is None:
+        return None
+    mpan, serial = meter
+    headers = _auth_headers()
+    timeout = aiohttp.ClientTimeout(total=15)
+    url: Optional[str] = (
+        f"{_BASE}/electricity-meter-points/{mpan}/meters/{serial}/consumption/"
+    )
+    params: Optional[dict] = {
+        "period_from": period_from.isoformat(),
+        "period_to": period_to.isoformat(),
+        "order_by": "period",  # chronological
+        "page_size": 25000,  # one request covers any realistic window
+    }
+    out: list[dict] = []
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            # Follow `next` links until exhausted. The first request carries the
+            # params; subsequent `next` URLs already embed them.
+            while url:
+                async with session.get(url, params=params, headers=headers) as resp:
+                    if resp.status != 200:
+                        logger.warning("Octopus consumption API returned HTTP %s", resp.status)
+                        return None
+                    data = await resp.json()
+                for row in data.get("results") or []:
+                    start = row.get("interval_start")
+                    end = row.get("interval_end")
+                    kwh = row.get("consumption")
+                    if start and isinstance(kwh, (int, float)):
+                        out.append(
+                            {"from": start, "to": end, "importKwh": round(float(kwh), 4)}
+                        )
+                url = data.get("next")
+                params = None  # the `next` URL already includes the query string
+    except Exception:
+        logger.warning("Failed to fetch Octopus consumption", exc_info=True)
+        return None
+
+    out.sort(key=lambda r: r["from"])
+    return out

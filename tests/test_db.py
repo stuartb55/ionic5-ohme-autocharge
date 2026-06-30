@@ -355,3 +355,76 @@ async def test_record_daily_stats_all_dateless_is_noop(fake_pool):
     _, cursor = fake_pool
     await db.record_daily_stats([{"date": None, "energyKwh": 1}], "GBP")
     assert cursor.executemany_calls == []
+
+
+# --- grid consumption ------------------------------------------------------------
+
+
+async def test_grid_consumption_helpers_are_noops_when_disabled():
+    import datetime as dt
+
+    db._pool = None
+    now = dt.datetime(2026, 6, 1, tzinfo=dt.timezone.utc)
+    assert await db.get_telemetry_between(now, now) is None
+    assert await db.get_grid_consumption(now, now) is None
+    await db.upsert_grid_consumption([{"start": now.isoformat(), "importKwh": 1}])  # no raise
+
+
+async def test_get_telemetry_between_maps_rows(fake_pool):
+    import datetime as dt
+
+    conn, cursor = fake_pool
+    t0 = dt.datetime(2026, 6, 1, 0, 0, tzinfo=dt.timezone.utc)
+    cursor.rows = [(t0, 0.0), (t0, 1000.0)]
+    start = t0
+    end = t0 + dt.timedelta(days=1)
+    rows = await db.get_telemetry_between(start, end)
+    sql, params = conn.executed[0]
+    assert "FROM telemetry" in sql and "ORDER BY recorded_at" in sql
+    assert params == (start, end)
+    assert rows == [(t0, 0.0), (t0, 1000.0)]
+
+
+async def test_upsert_grid_consumption_inserts_dated_rows(fake_pool):
+    _, cursor = fake_pool
+    rows = [
+        {"start": "2026-06-01T00:00:00+00:00", "end": "2026-06-01T00:30:00+00:00",
+         "importKwh": 1.5, "carKwh": 1.0, "houseKwh": 0.5},
+        {"start": None, "importKwh": 9},  # skipped (no interval start)
+    ]
+    await db.upsert_grid_consumption(rows)
+    assert len(cursor.executemany_calls) == 1
+    sql, params = cursor.executemany_calls[0]
+    assert "INSERT INTO grid_consumption" in sql
+    assert "ON CONFLICT (interval_start) DO UPDATE" in sql
+    assert params == [("2026-06-01T00:00:00+00:00", "2026-06-01T00:30:00+00:00", 1.5, 1.0, 0.5)]
+
+
+async def test_upsert_grid_consumption_empty_is_noop(fake_pool):
+    _, cursor = fake_pool
+    await db.upsert_grid_consumption([])
+    assert cursor.executemany_calls == []
+
+
+async def test_get_grid_consumption_maps_rows(fake_pool):
+    import datetime as dt
+
+    conn, cursor = fake_pool
+    t0 = dt.datetime(2026, 6, 1, 0, 0, tzinfo=dt.timezone.utc)
+    t1 = t0 + dt.timedelta(minutes=30)
+    cursor.rows = [(t0, t1, 1.5, 1.0, 0.5)]
+    start = t0
+    end = t0 + dt.timedelta(days=1)
+    out = await db.get_grid_consumption(start, end)
+    sql, params = conn.executed[0]
+    assert "FROM grid_consumption" in sql and "ORDER BY interval_start" in sql
+    assert params == (start, end)
+    assert out == [
+        {
+            "start": "2026-06-01T00:00:00+00:00",
+            "end": "2026-06-01T00:30:00+00:00",
+            "importKwh": 1.5,
+            "carKwh": 1.0,
+            "houseKwh": 0.5,
+        }
+    ]

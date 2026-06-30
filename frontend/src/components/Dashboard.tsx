@@ -4,6 +4,7 @@ import { usePolling } from '../api/usePolling';
 import { useNow } from '../hooks/useNow';
 import { relativeTime } from '../utils/format';
 import { Banner } from './Banner';
+import { EnergyUsageSection } from './EnergyUsageSection';
 import { ScheduleSection } from './ScheduleSection';
 import { SessionsSection } from './SessionsSection';
 import { SohTrendSection } from './SohTrendSection';
@@ -20,6 +21,9 @@ const STATS_INTERVAL = 300_000;
 // Sessions only change on plug-in events, so a slow poll is plenty.
 const SESSIONS_INTERVAL = 300_000;
 const TARIFF_INTERVAL = 1_800_000; // 30 min
+// Household consumption lags ~a day and only updates on the backend's slow
+// ingest cadence, so a 5-min poll is more than enough.
+const ENERGY_INTERVAL = 300_000;
 // SoH only moves a fraction of a percent over months — refresh rarely.
 const SOH_INTERVAL = 1_800_000; // 30 min
 
@@ -130,6 +134,14 @@ export function Dashboard() {
   const tariff = usePolling(api.getTariff, TARIFF_INTERVAL);
   const sohFetcher = useCallback((signal: AbortSignal) => api.getSohHistory(90, signal), []);
   const soh = usePolling(sohFetcher, SOH_INTERVAL);
+  // Household-vs-car energy. null = the backend default (yesterday); the user
+  // can page to earlier days via the card's day selector.
+  const [energyDate, setEnergyDate] = useState<string | null>(null);
+  const energyFetcher = useCallback(
+    (signal: AbortSignal) => api.getEnergyUsage(energyDate ?? undefined, signal),
+    [energyDate],
+  );
+  const energy = usePolling(energyFetcher, ENERGY_INTERVAL, [energyDate]);
 
   // refetch() from usePolling is stable, so these are safe to capture.
   const { refetch: refetchStatus } = status;
@@ -269,6 +281,10 @@ export function Dashboard() {
         {soh.data?.enabled && <SohTrendSection data={soh.data} />}
         {/* Agile tariff card — only shown when the feature is configured. */}
         {tariff.data?.enabled && <TariffSection data={tariff.data} />}
+        {/* Household-vs-car energy — only when Octopus consumption is configured. */}
+        {energy.data?.enabled && (
+          <EnergyUsageSection data={energy.data} onDateChange={setEnergyDate} />
+        )}
       </div>
 
       <footer className="app-footer">

@@ -1,6 +1,7 @@
 import type {
   ChargeActionResponse,
   DayTargetsUpdateResponse,
+  EnergyUsageResponse,
   ReadyByUpdateResponse,
   ScheduleResponse,
   SessionsResponse,
@@ -106,6 +107,12 @@ export const api = {
   getSohHistory: (limit = 90, signal?: AbortSignal) =>
     getJson<SohHistoryResponse>(`/api/soh-history?limit=${limit}`, signal),
   getTariff: (signal?: AbortSignal) => getJson<TariffResponse>('/api/tariff', signal),
+  // Household-vs-car energy for a day (YYYY-MM-DD); omit for yesterday (default).
+  getEnergyUsage: (date?: string, signal?: AbortSignal) =>
+    getJson<EnergyUsageResponse>(
+      date ? `/api/energy-usage?date=${date}` : '/api/energy-usage',
+      signal,
+    ),
   getVersion: (signal?: AbortSignal) => getJson<VersionResponse>('/api/version', signal),
   getVehicles: (signal?: AbortSignal) => getJson<VehiclesResponse>('/api/vehicles', signal),
   // Select which Hyundai vehicle to read (null = first).

@@ -31,6 +31,7 @@ In Grafana add a **PostgreSQL** datasource:
 | `charge_sessions`    | once per plug-in event                    | when the car was plugged in and what target was set |
 | `schedule_snapshots` | when a session is configured              | the Ohme charge schedule for a session |
 | `daily_stats`        | every `DAILY_STATS_INTERVAL` + on dashboard views | per-day energy / cost / savings |
+| `grid_consumption`   | every `DAILY_STATS_INTERVAL` (when Octopus consumption is configured) | half-hourly whole-house import split into car vs rest-of-house |
 
 ## Ready-made dashboard
 
@@ -130,4 +131,30 @@ SELECT s.recorded_at, s.next_slot_start, s.next_slot_end, s.slots
 FROM schedule_snapshots s
 ORDER BY s.recorded_at DESC
 LIMIT 20;
+```
+
+House vs car electricity usage — half-hourly whole-house grid import broken into
+the car-charging share and the rest of the household (stacked time series). Only
+populated when `OCTOPUS_API_KEY` + `OCTOPUS_ACCOUNT_NUMBER` are set; the car
+share is reconstructed from the `telemetry` history, so `DATABASE_URL` is
+required too:
+
+```sql
+SELECT interval_start AS time, car_kwh AS "Car", house_kwh AS "Rest of house"
+FROM grid_consumption
+WHERE $__timeFilter(interval_start)
+ORDER BY interval_start;
+```
+
+Daily totals — car vs rest-of-house energy per day (bar chart):
+
+```sql
+SELECT
+  date_trunc('day', interval_start) AS time,
+  SUM(car_kwh)   AS "Car",
+  SUM(house_kwh) AS "Rest of house"
+FROM grid_consumption
+WHERE $__timeFilter(interval_start)
+GROUP BY 1
+ORDER BY 1;
 ```

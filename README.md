@@ -20,6 +20,7 @@ When the car is plugged in, the app reads the real battery state-of-charge from 
 - **Multi-vehicle** — pick which car on the Hyundai account to track.
 - **Notifications** — optional [ntfy](https://ntfy.sh) alerts (plug-in, charge finished, problems) plus a weekly summary digest.
 - **Octopus Agile** *(optional)* — upcoming half-hourly prices and the cheapest slots, plus an Agile-accurate session cost (each charge slot priced against the rate it falls in, not a flat average).
+- **House vs car energy** *(optional, needs Postgres)* — pulls whole-house electricity import from your Octopus account and breaks each half-hour into the car-charging share vs the rest of the household, on the dashboard and in Grafana.
 - **History & Grafana** *(optional)* — per-session and telemetry data persisted to Postgres.
 - **Battery health trend** *(needs Postgres)* — a state-of-health sparkline on the dashboard showing degradation over time, not just the current figure.
 - **Installable PWA** — add to your phone/desktop home screen; works offline (app shell cached).
@@ -106,6 +107,7 @@ All settings come from environment variables (or `.env`). Only the five credenti
 | `NTFY_TOPIC` / `NTFY_URL` / `NTFY_TOKEN` | *(off)* | [ntfy](https://ntfy.sh) notifications. Blank `NTFY_TOPIC` disables them. |
 | `WEEKLY_DIGEST_DAY` / `WEEKLY_DIGEST_HOUR` | `0` / `8` | Weekday (0=Mon … 6=Sun) and local hour for the weekly digest. Day outside 0–6 disables it. Needs ntfy. |
 | `OCTOPUS_PRODUCT_CODE` / `OCTOPUS_REGION` | *(off)* | Octopus Agile product code + single-letter DNO region (A–P) to enable the tariff card. |
+| `OCTOPUS_API_KEY` / `OCTOPUS_ACCOUNT_NUMBER` | *(off)* | Octopus account API key + account number (e.g. `A-AAAA1111`) to enable the house-vs-car energy card. The import meter is auto-discovered. Needs `DATABASE_URL` too. |
 | `DATABASE_URL` | *(off)* | Postgres connection string for charging history. Blank runs entirely in memory. The compose files default this to the bundled Postgres. |
 | `DAILY_STATS_INTERVAL` | `21600` | Seconds between background refreshes of Ohme's daily totals into Postgres (6h). |
 | `TELEMETRY_RETENTION_DAYS` | `365` | How long to keep per-poll telemetry rows. `0` keeps forever. |
@@ -149,6 +151,7 @@ A React + TypeScript single-page app (in `frontend/`) served by a hardened, non-
 3. **Statistics & savings** — energy, money saved vs the standard tariff, average price/kWh, CO₂ saved, measured driving efficiency, and a daily chart over a 7/30/90-day window — with **period-over-period deltas** and CSV export.
 4. **Recent sessions** *(when Postgres is enabled)* — the last plug-ins with SOC, target, top-up and odometer.
 5. **Agile prices** *(when Octopus is configured)* — the current price and cheapest upcoming slots.
+6. **House vs car** *(when Octopus consumption + Postgres are configured)* — a stacked half-hourly chart of whole-house import split into car charging vs the rest of the household, with a day selector.
 
 The header has a live-freshness indicator, a manual **refresh**, a **theme** toggle, a **vehicle picker** (when the account has more than one car), and the build version in the footer.
 
@@ -177,6 +180,7 @@ npm run build    # type-check + production build to dist/
 | `GET /api/sessions?limit=N` | Recent plug-in sessions from Postgres (N = 1–50; `enabled: false` when persistence is off) |
 | `GET /api/soh-history?limit=N` | Battery state-of-health readings over time, one point per change (N = 1–365; `enabled: false` when persistence is off) |
 | `GET /api/tariff` | Upcoming Octopus Agile rates + cheapest slots (`enabled: false` when unconfigured) |
+| `GET /api/energy-usage?date=YYYY-MM-DD` | A day's half-hourly whole-house import split into car vs rest-of-house + totals (default yesterday; `enabled: false` when unconfigured) |
 | `GET /api/vehicles` | Vehicles on the Hyundai account, with the selected one flagged |
 | `POST /api/refresh` | Force a live re-read from Ohme (rate-limited) |
 | `POST /api/charge/pause` · `POST /api/charge/resume` | Pause / resume the active charge session |
@@ -205,6 +209,10 @@ A typical message:
 ## Octopus Agile tariff (optional)
 
 Set both `OCTOPUS_PRODUCT_CODE` (e.g. `AGILE-24-10-01`) and `OCTOPUS_REGION` (your single-letter DNO region, A–P) to show an **Agile prices** card with the current price and cheapest upcoming half-hourly slots. It uses Octopus's public unit-rate API — no account or key needed. Leave either blank to hide the card.
+
+## House vs car energy (optional)
+
+Set `OCTOPUS_API_KEY` (your account API key, from [octopus.energy/dashboard/developer](https://octopus.energy/dashboard/developer/)) and `OCTOPUS_ACCOUNT_NUMBER` (e.g. `A-AAAA1111`) to show a **House vs car** card: your whole-house grid import for a day, broken half-hour by half-hour into the car-charging share and the rest of the household. The car portion is reconstructed from the charge telemetry, so this also needs `DATABASE_URL`. The import meter (MPAN + serial) is discovered automatically from your account, and the data is also persisted to the `grid_consumption` table for Grafana. Because Octopus publishes consumption a day in arrears, the card defaults to **yesterday** (page back with the day selector). Leave either variable blank to hide the card.
 
 ## Charging history & Grafana (optional)
 
@@ -250,8 +258,9 @@ docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compo
 ├── bluelink.py                    # Hyundai Bluelink wrapper (SOC, range, odometer, SoH, lock/location)
 ├── ohme_client.py                 # Ohme charger wrapper (ohme)
 ├── ntfy.py                        # Ntfy notification client + weekly digest
-├── octopus.py                     # Optional Octopus Agile tariff client
-├── db.py                          # Optional Postgres history (sessions, telemetry, daily stats)
+├── octopus.py                     # Optional Octopus tariff (Agile) + household consumption client
+├── energy.py                      # Pure helpers: per-half-hour car share + house-vs-car merge
+├── db.py                          # Optional Postgres history (sessions, telemetry, daily stats, grid consumption)
 ├── config.py                      # Loads settings from .env
 ├── Dockerfile                     # Backend image (uvicorn)
 ├── docker-compose.yml             # Local dev: backend + frontend + postgres

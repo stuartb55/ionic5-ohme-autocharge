@@ -18,9 +18,46 @@ def _make_mock_session(payload: dict, status: int = 200):
     return session
 
 
+def _make_mock_session_seq(payloads: list[dict]):
+    """A session whose successive ``.get`` calls return successive payloads — for
+    the meter-discovery + paginated-consumption flow."""
+    responses = []
+    for payload in payloads:
+        resp = MagicMock()
+        resp.status = 200
+        resp.json = AsyncMock(return_value=payload)
+        resp.__aenter__ = AsyncMock(return_value=resp)
+        resp.__aexit__ = AsyncMock(return_value=False)
+        responses.append(resp)
+
+    session = MagicMock()
+    session.get.side_effect = responses
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=False)
+    return session
+
+
 def _enable(monkeypatch):
     monkeypatch.setattr(config, "OCTOPUS_PRODUCT_CODE", "AGILE-24-10-01")
     monkeypatch.setattr(config, "OCTOPUS_REGION", "C")
+
+
+def _enable_consumption(monkeypatch):
+    monkeypatch.setattr(config, "OCTOPUS_API_KEY", "sk_test")
+    monkeypatch.setattr(config, "OCTOPUS_ACCOUNT_NUMBER", "A-ABCD1234")
+    octopus._meter = None  # reset the discovery cache between tests
+
+
+_ACCOUNT_PAYLOAD = {
+    "properties": [
+        {
+            "electricity_meter_points": [
+                {"is_export": True, "mpan": "999", "meters": [{"serial_number": "EXP"}]},
+                {"is_export": False, "mpan": "1200012345678", "meters": [{"serial_number": "Z18"}]},
+            ]
+        }
+    ]
+}
 
 
 def test_is_enabled_requires_both(monkeypatch):
@@ -169,3 +206,88 @@ def test_cost_for_slots_handles_z_suffix_and_zero_length():
     rates = [{"from": "2026-01-01T00:00:00Z", "to": "2026-01-01T01:00:00Z", "pricePerKwh": 0.25}]
     slots = [_slot(0, 1, 8), _slot(0, 0, 0)]  # zero-length slot ignored
     assert octopus.cost_for_slots(slots, rates) == 2.0
+
+
+# --- household consumption --------------------------------------------------
+
+
+def _window():
+    base = _dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc)
+    return base, base + _dt.timedelta(days=1)
+
+
+def test_consumption_is_enabled_requires_both(monkeypatch):
+    monkeypatch.setattr(config, "OCTOPUS_API_KEY", "sk_test")
+    monkeypatch.setattr(config, "OCTOPUS_ACCOUNT_NUMBER", "")
+    assert octopus.consumption_is_enabled() is False
+    _enable_consumption(monkeypatch)
+    assert octopus.consumption_is_enabled() is True
+
+
+async def test_fetch_consumption_none_when_disabled(monkeypatch):
+    monkeypatch.setattr(config, "OCTOPUS_API_KEY", "")
+    monkeypatch.setattr(config, "OCTOPUS_ACCOUNT_NUMBER", "")
+    with patch("aiohttp.ClientSession") as mock_cls:
+        assert await octopus.fetch_consumption(*_window()) is None
+    mock_cls.assert_not_called()
+
+
+async def test_discover_meter_picks_import_point(monkeypatch):
+    _enable_consumption(monkeypatch)
+    with patch("aiohttp.ClientSession", return_value=_make_mock_session(_ACCOUNT_PAYLOAD)):
+        meter = await octopus._discover_meter()
+    # The export point is skipped; the import meter's mpan + serial are returned.
+    assert meter == ("1200012345678", "Z18")
+
+
+async def test_discover_meter_caches(monkeypatch):
+    _enable_consumption(monkeypatch)
+    session = _make_mock_session(_ACCOUNT_PAYLOAD)
+    with patch("aiohttp.ClientSession", return_value=session) as mock_cls:
+        await octopus._discover_meter()
+        await octopus._discover_meter()
+    # Second call is served from the module cache, not a fresh HTTP session.
+    mock_cls.assert_called_once()
+
+
+async def test_fetch_consumption_discovers_then_parses(monkeypatch):
+    _enable_consumption(monkeypatch)
+    consumption = {
+        "next": None,
+        "results": [
+            {"interval_start": "2026-01-01T00:30:00Z", "interval_end": "2026-01-01T01:00:00Z", "consumption": 0.2},
+            {"interval_start": "2026-01-01T00:00:00Z", "interval_end": "2026-01-01T00:30:00Z", "consumption": 0.5},
+        ],
+    }
+    # First .get is the account lookup, second is the consumption read.
+    session = _make_mock_session_seq([_ACCOUNT_PAYLOAD, consumption])
+    with patch("aiohttp.ClientSession", return_value=session):
+        rows = await octopus.fetch_consumption(*_window())
+    # Sorted chronologically; consumption carried through as importKwh.
+    assert [r["from"] for r in rows] == ["2026-01-01T00:00:00Z", "2026-01-01T00:30:00Z"]
+    assert rows[0]["importKwh"] == 0.5
+
+
+async def test_fetch_consumption_follows_pagination(monkeypatch):
+    _enable_consumption(monkeypatch)
+    octopus._meter = ("1200012345678", "Z18")  # skip discovery for this test
+    page1 = {
+        "next": "https://api.octopus.energy/v1/.../?page=2",
+        "results": [{"interval_start": "2026-01-01T00:00:00Z", "interval_end": "2026-01-01T00:30:00Z", "consumption": 0.5}],
+    }
+    page2 = {
+        "next": None,
+        "results": [{"interval_start": "2026-01-01T00:30:00Z", "interval_end": "2026-01-01T01:00:00Z", "consumption": 0.6}],
+    }
+    session = _make_mock_session_seq([page1, page2])
+    with patch("aiohttp.ClientSession", return_value=session):
+        rows = await octopus.fetch_consumption(*_window())
+    assert len(rows) == 2
+    assert session.get.call_count == 2  # followed the `next` link
+
+
+async def test_fetch_consumption_none_on_http_error(monkeypatch):
+    _enable_consumption(monkeypatch)
+    octopus._meter = ("1200012345678", "Z18")
+    with patch("aiohttp.ClientSession", return_value=_make_mock_session({}, status=500)):
+        assert await octopus.fetch_consumption(*_window()) is None

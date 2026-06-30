@@ -87,6 +87,19 @@ _SCHEMA: tuple[str, ...] = (
         updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
     )
     """,
+    # Half-hourly whole-house grid import (from Octopus) with the car share
+    # (reconstructed from telemetry) and the remaining household usage broken out,
+    # so Grafana can chart car-vs-house directly. See docs/grafana.md.
+    """
+    CREATE TABLE IF NOT EXISTS grid_consumption (
+        interval_start TIMESTAMPTZ PRIMARY KEY,
+        interval_end   TIMESTAMPTZ,
+        import_kwh     DOUBLE PRECISION,
+        car_kwh        DOUBLE PRECISION,
+        house_kwh      DOUBLE PRECISION,
+        updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
 )
 
 
@@ -360,3 +373,100 @@ async def record_daily_stats(daily: list[dict[str, Any]], currency: Optional[str
                 )
     except Exception:
         logger.warning("Failed to record daily stats to Postgres", exc_info=True)
+
+
+async def get_telemetry_between(
+    start: datetime.datetime, end: datetime.datetime
+) -> Optional[list[tuple[datetime.datetime, float]]]:
+    """Ordered ``(recorded_at, session_energy_wh)`` rows in ``[start, end]``.
+
+    Feeds :func:`energy.attribute_car_kwh` so the car's half-hourly share can be
+    reconstructed from the cumulative session energy. The window is widened by the
+    caller so the first slot's delta has a preceding reading. None when disabled
+    or the read fails.
+    """
+    if _pool is None:
+        return None
+    try:
+        async with _pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT recorded_at, session_energy_wh FROM telemetry "
+                "WHERE recorded_at >= %s AND recorded_at <= %s "
+                "ORDER BY recorded_at",
+                (start, end),
+            )
+            rows = await cur.fetchall()
+        return [(row[0], row[1]) for row in rows]
+    except Exception:
+        logger.warning("Failed to read telemetry from Postgres", exc_info=True)
+        return None
+
+
+async def upsert_grid_consumption(rows: list[dict[str, Any]]) -> None:
+    """Upsert half-hourly grid-import rows keyed by ``start`` (interval start).
+
+    ``rows`` is the list from :func:`energy.merge_usage`
+    (``{start, end, importKwh, carKwh, houseKwh}``). Idempotent so re-ingesting a
+    window refreshes late-arriving Octopus data. Best-effort like every write here.
+    """
+    if _pool is None or not rows:
+        return
+    params = [
+        (r["start"], r.get("end"), r.get("importKwh"), r.get("carKwh"), r.get("houseKwh"))
+        for r in rows
+        if r.get("start")
+    ]
+    if not params:
+        return
+    try:
+        async with _pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.executemany(
+                    "INSERT INTO grid_consumption "
+                    "(interval_start, interval_end, import_kwh, car_kwh, house_kwh) "
+                    "VALUES (%s, %s, %s, %s, %s) "
+                    "ON CONFLICT (interval_start) DO UPDATE SET "
+                    "  interval_end = EXCLUDED.interval_end, "
+                    "  import_kwh   = EXCLUDED.import_kwh, "
+                    "  car_kwh      = EXCLUDED.car_kwh, "
+                    "  house_kwh    = EXCLUDED.house_kwh, "
+                    "  updated_at   = now()",
+                    params,
+                )
+    except Exception:
+        logger.warning("Failed to upsert grid consumption to Postgres", exc_info=True)
+
+
+async def get_grid_consumption(
+    start: datetime.datetime, end: datetime.datetime
+) -> Optional[list[dict[str, Any]]]:
+    """Half-hourly grid-import rows in ``[start, end)``, chronological.
+
+    Returns None when persistence is disabled or the read fails, so the API can
+    report the energy-usage feature as unavailable (hiding the card).
+    """
+    if _pool is None:
+        return None
+    try:
+        async with _pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT interval_start, interval_end, import_kwh, car_kwh, house_kwh "
+                "FROM grid_consumption "
+                "WHERE interval_start >= %s AND interval_start < %s "
+                "ORDER BY interval_start",
+                (start, end),
+            )
+            rows = await cur.fetchall()
+        return [
+            {
+                "start": row[0].isoformat() if row[0] else None,
+                "end": row[1].isoformat() if row[1] else None,
+                "importKwh": row[2],
+                "carKwh": row[3],
+                "houseKwh": row[4],
+            }
+            for row in rows
+        ]
+    except Exception:
+        logger.warning("Failed to read grid consumption from Postgres", exc_info=True)
+        return None
