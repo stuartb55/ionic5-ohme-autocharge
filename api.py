@@ -1085,6 +1085,21 @@ async def export_sessions(format: str = Query(default="csv", pattern="^(csv|json
     )
 
 
+@app.get("/api/sessions/{session_id}/telemetry")
+async def get_session_telemetry(session_id: int) -> JSONResponse:
+    """Per-poll charge curve (SOC + power over time) for one session.
+
+    ``enabled`` is false when persistence is off (the sessions card itself is
+    hidden then, so this is defensive). A 404 means the session id is unknown.
+    """
+    if not db.is_enabled():
+        return JSONResponse({"enabled": False, "points": []})
+    points = await db.get_session_telemetry(session_id)
+    if points is None:
+        raise HTTPException(status_code=404, detail="Unknown session")
+    return JSONResponse({"enabled": True, "points": points})
+
+
 @app.get("/api/soh-history")
 async def get_soh_history(limit: int = Query(default=90, ge=1, le=365)) -> JSONResponse:
     """Battery state-of-health readings over time (one point per change).

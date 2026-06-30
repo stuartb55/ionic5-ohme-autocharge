@@ -439,6 +439,59 @@ async def get_telemetry_between(
         return None
 
 
+async def get_session_telemetry(session_id: int) -> Optional[list[dict[str, Any]]]:
+    """Per-poll telemetry for one session's charge curve, oldest first.
+
+    A session spans from its ``plugged_in_at`` up to the *next* session's
+    plug-in (or now, for the most recent one). Each point carries the SOC, draw
+    and cumulative session energy at that poll, so the dashboard can plot the
+    battery climbing through the charge. Returns None when persistence is off,
+    the read fails, or the session id is unknown (so the API can 404).
+    """
+    if _pool is None:
+        return None
+    try:
+        async with _pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT plugged_in_at FROM charge_sessions WHERE id = %s", (session_id,)
+            )
+            row = await cur.fetchone()
+            if row is None or row[0] is None:
+                return None
+            start = row[0]
+            # Upper bound is the next plug-in; None means this is the open session.
+            cur = await conn.execute(
+                "SELECT MIN(plugged_in_at) FROM charge_sessions WHERE plugged_in_at > %s",
+                (start,),
+            )
+            nxt = await cur.fetchone()
+            end = nxt[0] if nxt else None
+
+            select = (
+                "SELECT recorded_at, battery_percent, power_watts, session_energy_wh "
+                "FROM telemetry WHERE recorded_at >= %s "
+            )
+            if end is not None:
+                cur = await conn.execute(
+                    select + "AND recorded_at < %s ORDER BY recorded_at", (start, end)
+                )
+            else:
+                cur = await conn.execute(select + "ORDER BY recorded_at", (start,))
+            rows = await cur.fetchall()
+        return [
+            {
+                "at": r[0].isoformat() if r[0] else None,
+                "socPercent": r[1],
+                "powerWatts": r[2],
+                "sessionEnergyKwh": round(r[3] / 1000, 2) if r[3] is not None else None,
+            }
+            for r in rows
+        ]
+    except Exception:
+        logger.warning("Failed to read session telemetry from Postgres", exc_info=True)
+        return None
+
+
 async def upsert_grid_consumption(rows: list[dict[str, Any]]) -> None:
     """Upsert half-hourly grid-import rows keyed by ``start`` (interval start).
 
