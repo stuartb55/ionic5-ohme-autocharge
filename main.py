@@ -113,13 +113,17 @@ async def handle_plugin_event(client) -> bool:
             slots = list(client.slots)
             next_slot_start = client.next_slot_start
             next_slot_end = client.next_slot_end
-        msg = f"{vehicle_name} plugged in at {soc}% → {target}%"
+        # Multi-line body so each fact is on its own line — far easier to scan on
+        # a phone than one run-on sentence. The vehicle name goes in the title.
+        lines = [f"Charging {soc}% → {target}%"]
         if store.ready_by:
-            msg += f" (ready by {store.ready_by})"
+            lines.append(f"Ready by {store.ready_by}")
         schedule = ", ".join(str(s) for s in slots)
         if schedule:
-            msg += f". Charge schedule: {schedule}"
-        await ntfy.send(msg)
+            lines.append(f"Schedule: {schedule}")
+        await ntfy.send(
+            "\n".join(lines), title=f"{vehicle_name} plugged in", tags="electric_plug"
+        )
         if db.is_enabled():
             session_id = await db.record_session(
                 vehicle_name=vehicle_name,
@@ -156,7 +160,7 @@ async def _notify_plugin_failure(message: str) -> None:
     if store.plugin_failure_notified:
         return
     store.plugin_failure_notified = True
-    await ntfy.send(message, title="Autocharge problem", priority="high")
+    await ntfy.send(message, title="Autocharge problem", priority="high", tags="warning")
 
 
 class PlugInDetector:

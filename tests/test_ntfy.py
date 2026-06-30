@@ -79,6 +79,18 @@ async def test_title_and_priority_sent_as_headers(monkeypatch):
     assert headers["X-Priority"] == "high"
 
 
+async def test_tags_sent_as_header(monkeypatch):
+    monkeypatch.setattr(config, "NTFY_TOPIC", "my-topic")
+    monkeypatch.setattr(config, "NTFY_URL", "https://ntfy.example.com")
+    monkeypatch.setattr(config, "NTFY_TOKEN", "")
+
+    session = _make_mock_session()
+    with patch("aiohttp.ClientSession", return_value=session):
+        await ntfy.send("hi", tags="electric_plug")
+
+    assert session.post.call_args[1]["headers"]["X-Tags"] == "electric_plug"
+
+
 async def test_no_extra_headers_by_default(monkeypatch):
     monkeypatch.setattr(config, "NTFY_TOPIC", "my-topic")
     monkeypatch.setattr(config, "NTFY_TOKEN", "")
@@ -90,6 +102,7 @@ async def test_no_extra_headers_by_default(monkeypatch):
     headers = session.post.call_args[1]["headers"]
     assert "X-Title" not in headers
     assert "X-Priority" not in headers
+    assert "X-Tags" not in headers
 
 
 async def test_logs_warning_on_non_200_but_does_not_raise(monkeypatch):

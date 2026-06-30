@@ -84,7 +84,8 @@ async def test_sets_ohme_target_and_sends_notification_when_below_target(monkeyp
     msg = mock_notify.call_args[0][0]
     assert "62%" in msg
     assert "80%" in msg
-    assert "Charge schedule" not in msg  # no slots on this client
+    assert "Schedule" not in msg  # no slots on this client
+    assert mock_notify.call_args.kwargs["tags"] == "electric_plug"
 
 
 async def test_notification_includes_charge_schedule_when_slots_available(monkeypatch):
@@ -100,7 +101,9 @@ async def test_notification_includes_charge_schedule_when_slots_available(monkey
         await handle_plugin_event(client)
 
     msg = mock_notify.call_args[0][0]
-    assert "Charge schedule: 01:00-03:30" in msg
+    assert "Schedule: 01:00-03:30" in msg
+    # Each fact on its own line for readability.
+    assert "62% → 80%" in msg.splitlines()[0]
 
 
 async def test_records_session_and_schedule_when_db_enabled(monkeypatch):

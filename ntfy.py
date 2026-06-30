@@ -5,11 +5,21 @@ import config
 logger = logging.getLogger(__name__)
 
 
-async def send(message: str, *, title: str | None = None, priority: str | None = None) -> None:
+async def send(
+    message: str,
+    *,
+    title: str | None = None,
+    priority: str | None = None,
+    tags: str | None = None,
+) -> None:
     """Send a notification via ntfy. No-ops silently if NTFY_TOPIC is not configured.
 
     ``priority`` is an ntfy priority name ("min" … "max"); use "high" for
-    alerts that should break through quiet phone settings.
+    alerts that should break through quiet phone settings. ``tags`` is a
+    comma-separated list of ntfy tags — emoji shortcodes like
+    ``"electric_plug"`` render as an icon in front of the title on every
+    client (unlike markdown, which phones show raw), so it's the readable way
+    to make a notification's type recognisable at a glance.
     """
     if not config.NTFY_TOPIC:
         return
@@ -20,6 +30,8 @@ async def send(message: str, *, title: str | None = None, priority: str | None =
         headers["X-Title"] = title
     if priority:
         headers["X-Priority"] = priority
+    if tags:
+        headers["X-Tags"] = tags
     timeout = aiohttp.ClientTimeout(total=10)
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
