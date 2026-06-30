@@ -6,6 +6,7 @@ import {
   formatMoney,
   formatPower,
   formatPricePerKwh,
+  formatPricePerMile,
   relativeTime,
   statusLabel,
 } from './format';
@@ -57,6 +58,16 @@ describe('formatPricePerKwh', () => {
   });
   it('falls back to money formatting when currency is null', () => {
     expect(formatPricePerKwh(0.125, null)).toBe('0.13');
+  });
+});
+
+describe('formatPricePerMile', () => {
+  it('shows GBP per-mile costs in pence', () => {
+    expect(formatPricePerMile(0.083, 'GBP')).toBe('8.3p');
+    expect(formatPricePerMile(0.25, 'GBP')).toBe('25.0p');
+  });
+  it('falls back to money formatting when currency is null', () => {
+    expect(formatPricePerMile(0.083, null)).toBe('0.08');
   });
 });
 

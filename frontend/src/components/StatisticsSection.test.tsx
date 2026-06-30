@@ -36,6 +36,20 @@ describe('StatisticsSection insights', () => {
     expect(screen.getByText('@ 4 mi/kWh')).toBeInTheDocument();
   });
 
+  it('hides the Running cost insight when none is available', () => {
+    renderSection(); // fixture runningCost: null
+    expect(screen.queryByText('Running cost')).not.toBeInTheDocument();
+  });
+
+  it('shows the Running cost insight when present', () => {
+    renderSection({
+      ...statisticsFixture,
+      runningCost: { costPerMile: 0.083, milesDriven: 210, costTotal: 17.4 },
+    });
+    expect(screen.getByText('Running cost')).toBeInTheDocument();
+    expect(screen.getByText('8.3p / mi')).toBeInTheDocument();
+  });
+
   it('shows period-over-period deltas when a comparison is present', () => {
     // Fixture: energy 42 vs prev 35 -> +20% up; savings 8.4 vs 7.2 -> +17% up.
     renderSection();

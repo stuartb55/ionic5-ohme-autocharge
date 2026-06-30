@@ -148,7 +148,7 @@ A React + TypeScript single-page app (in `frontend/`) served by a hardened, non-
 
 1. **Vehicle & charger status** — a state-of-charge ring with target marker; driving range, battery health (SoH), and lock status + a "view location" link; connection state; live charge rate (kW / A); energy added and an estimated session cost. Controls: **target** stepper, **ready-by** time, **per-day targets** (in a collapsible), **pause/resume**, and **max-charge (boost)**.
 2. **Schedule** — a timeline of the allocated charging slots (active vs paused / off-peak windows) plus a slot-by-slot breakdown.
-3. **Statistics & savings** — energy, money saved vs the standard tariff, average price/kWh, CO₂ saved, measured driving efficiency, and a daily chart over a 7/30/90-day window — with **period-over-period deltas** and CSV export.
+3. **Statistics & savings** — energy, money saved vs the standard tariff, average price/kWh, CO₂ saved, measured driving efficiency, real-world running cost (£/mile), and a daily chart over a 7/30/90-day window — with **period-over-period deltas** and CSV export.
 4. **Recent sessions** *(when Postgres is enabled)* — the last plug-ins with SOC, target, top-up and odometer, with a CSV/JSON export of the full history.
 5. **Agile prices** *(when Octopus is configured)* — the current price and cheapest upcoming slots.
 6. **House vs car** *(when Octopus consumption + Postgres are configured)* — a stacked half-hourly chart of whole-house import split into car charging vs the rest of the household, with a day selector.
@@ -176,7 +176,7 @@ npm run build    # type-check + production build to dist/
 | `GET /api/version` | Build git SHA (`dev` when unset) |
 | `GET /api/status` | Vehicle SOC, range, SoH, lock/location, connection, charge rate, target, session energy + estimated cost, ready-by, per-day targets |
 | `GET /api/schedule` | Allocated charge slots + next slot times |
-| `GET /api/statistics?days=N` | Energy, savings, cost, CO₂, efficiency, daily series + previous-period comparison (N = 1–90) |
+| `GET /api/statistics?days=N` | Energy, savings, cost, CO₂, efficiency, running cost (£/mile), daily series + previous-period comparison (N = 1–90) |
 | `GET /api/sessions?limit=N` | Recent plug-in sessions from Postgres (N = 1–50; `enabled: false` when persistence is off) |
 | `GET /api/sessions/export?format=csv\|json` | Download the **full** plug-in history as a CSV or JSON attachment (404 when persistence is off) |
 | `GET /api/soh-history?limit=N` | Battery state-of-health readings over time, one point per change (N = 1–365; `enabled: false` when persistence is off) |
