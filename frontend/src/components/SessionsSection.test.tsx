@@ -19,13 +19,17 @@ describe('SessionsSection', () => {
     expect(screen.getByText(/no plug-in sessions recorded yet/i)).toBeInTheDocument();
   });
 
-  it('lists sessions with SOC, target and action', () => {
+  it('lists sessions with backend session details and action', () => {
     render(<SessionsSection data={sessionsFixture} />);
 
     expect(screen.getByRole('heading', { name: /recent sessions/i })).toBeInTheDocument();
-    expect(screen.getByText('54% → 80%')).toBeInTheDocument();
+    expect(screen.getByText(/54%\s*→\s*80%/)).toBeInTheDocument();
+    expect(screen.getByText(/\+26%/)).toBeInTheDocument();
+    expect(screen.getByText(/12,450 mi/)).toBeInTheDocument();
+    expect(screen.getAllByText(/SoH 98%/)).toHaveLength(2);
+    expect(screen.getAllByText(/Hyundai IONIQ 5/).length).toBeGreaterThan(0);
     expect(screen.getByText('Target set')).toBeInTheDocument();
-    expect(screen.getByText('85% → 80%')).toBeInTheDocument();
+    expect(screen.getByText(/85%\s*→\s*80%/)).toBeInTheDocument();
     expect(screen.getByText('Already at target')).toBeInTheDocument();
   });
 

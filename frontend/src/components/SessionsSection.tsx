@@ -51,6 +51,16 @@ export function SessionsSection({ data }: { data: SessionsResponse }) {
           </div>
           {data.sessions.map((s) => {
             const expanded = expandedId === s.id;
+            const battery =
+              s.socPercent != null && s.targetPercent != null
+                ? `${s.socPercent}% → ${s.targetPercent}%`
+                : null;
+            const extras: string[] = [];
+            if (s.topupPercent != null) extras.push(`+${s.topupPercent}%`);
+            if (s.odometerMiles != null) extras.push(`${Math.round(s.odometerMiles).toLocaleString()} mi`);
+            if (s.sohPercent != null) extras.push(`SoH ${s.sohPercent}%`);
+            if (s.vehicleName) extras.push(s.vehicleName);
+            const detail = [battery, ...extras].filter(Boolean).join(' · ') || '—';
             return (
               <div className="session-item" key={s.id}>
                 <button
@@ -64,11 +74,7 @@ export function SessionsSection({ data }: { data: SessionsResponse }) {
                       ? `${formatDateShort(s.pluggedInAt)} · ${formatTime(s.pluggedInAt)}`
                       : '—'}
                   </span>
-                  <span className="detail">
-                    {s.socPercent != null && s.targetPercent != null
-                      ? `${s.socPercent}% → ${s.targetPercent}%`
-                      : '—'}
-                  </span>
+                  <span className="detail">{detail}</span>
                   <span className={`session-action ${s.action ?? ''}`}>
                     {ACTION_LABEL[s.action ?? ''] ?? s.action ?? ''}
                   </span>
