@@ -6,6 +6,6 @@ hyundai-kia-connect-api==4.23.2
 ohme==1.9.1
 python-dotenv==1.2.2
 fastapi==0.139.0
-uvicorn[standard]==0.50.2
+uvicorn[standard]==0.51.0
 psycopg[binary]==3.3.4
 psycopg-pool==3.3.1
