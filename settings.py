@@ -176,4 +176,29 @@ def save_session_active(value: bool) -> bool:
     """Persist whether the active plug-in session has been handled. Best-effort."""
     data = _load()
     data["sessionActive"] = bool(value)
+    if not value:
+        # Legacy callers use False to mean the physical session ended.
+        data.pop("sessionKey", None)
+    return _save(data)
+
+
+def load_session_key() -> str | None:
+    """Stable idempotency key for the physically connected session, if any."""
+    value = _load().get("sessionKey")
+    return value if isinstance(value, str) and value else None
+
+
+def save_session_marker(session_key: str, *, handled: bool) -> bool:
+    """Atomically persist the active session key and whether it was handled."""
+    data = _load()
+    data["sessionKey"] = session_key
+    data["sessionActive"] = handled
+    return _save(data)
+
+
+def clear_session_marker() -> bool:
+    """Clear all state for the session that has just been unplugged."""
+    data = _load()
+    data.pop("sessionKey", None)
+    data["sessionActive"] = False
     return _save(data)

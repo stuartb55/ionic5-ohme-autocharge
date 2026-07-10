@@ -6,9 +6,21 @@ no-op when disabled and swallows errors when the DB misbehaves.
 """
 
 import pytest
+from unittest.mock import patch
 
 import db
+import config
 from state import StatusSnapshot
+
+
+def test_run_migrations_uses_psycopg_driver(monkeypatch):
+    monkeypatch.setattr(config, "DATABASE_URL", "postgresql://user:p%25@db/app")
+    with patch("db.command.upgrade") as upgrade:
+        db._run_migrations()
+    cfg, revision = upgrade.call_args.args
+    assert revision == "head"
+    assert cfg.get_main_option("sqlalchemy.url") == "postgresql+psycopg://user:p%25@db/app"
+    assert cfg.get_main_option("script_location").endswith("/alembic")
 
 
 class _FakeCursor:
@@ -113,7 +125,46 @@ async def test_record_session_inserts_and_returns_id(fake_pool):
     sql, params = conn.executed[0]
     assert "INSERT INTO charge_sessions" in sql
     assert "RETURNING id" in sql
-    assert params == ("IONIQ 5", 62, 80, 18, "configured", 12450, 98)
+    assert params == (
+        "IONIQ 5", 62, 80, 18, "configured", 12450, 98,
+        None, None, None, None, None, None,
+    )
+
+
+async def test_record_session_uses_idempotency_key_and_identity(fake_pool):
+    import datetime as dt
+
+    conn, _ = fake_pool
+    observed = dt.datetime(2026, 6, 1, 20, 0, tzinfo=dt.timezone.utc)
+    assert await db.record_session(
+        vehicle_name="IONIQ 5", soc_percent=62, target_percent=80, topup_percent=18,
+        action="configured", session_key="session-1", vehicle_id="vehicle-1",
+        vin="VIN123", charger_id="charger-1", source_observed_at=observed,
+        plugged_in_at=observed,
+    ) == 42
+    sql, params = conn.executed[0]
+    assert "ON CONFLICT (session_key)" in sql
+    assert params[7:] == (
+        "session-1", "vehicle-1", "VIN123", "charger-1", observed, observed,
+    )
+
+
+async def test_close_session_is_idempotent_update(fake_pool):
+    conn, _ = fake_pool
+    await db.close_session("session-1", actual_energy_wh=4321.4, end_soc_percent=80)
+    sql, params = conn.executed[0]
+    assert "UPDATE charge_sessions" in sql
+    assert "COALESCE(unplugged_at, now())" in sql
+    assert params == (80, 4321, "unplugged", 4321, "session-1")
+
+
+async def test_record_session_event_wraps_details_as_jsonb(fake_pool):
+    conn, _ = fake_pool
+    await db.record_session_event(42, "target_configured", {"target": 80})
+    sql, params = conn.executed[0]
+    assert "INSERT INTO session_events" in sql
+    assert params[:2] == (42, "target_configured")
+    assert params[2].obj == {"target": 80}
 
 
 async def test_record_session_swallows_errors():

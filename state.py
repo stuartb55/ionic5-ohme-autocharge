@@ -165,6 +165,10 @@ class AppState:
         # is failing, so the per-poll retries don't re-notify. Cleared when a
         # plug-in is handled successfully and when the car unplugs.
         self.plugin_failure_notified: bool = False
+        # Durable identity of the physically connected session. Telemetry and
+        # session events use these instead of inferring boundaries from time.
+        self.active_session_id: Optional[int] = None
+        self.active_session_key: Optional[str] = None
         # Local date the weekly digest was last sent, so it goes out once on its
         # scheduled day rather than every poll during the digest hour. In-memory:
         # a restart within that hour could re-send once (rare, low-harm).
@@ -260,6 +264,8 @@ class AppState:
         self.last_soc_at = None
         # New session, clean slate for the plug-in failure alert.
         self.plugin_failure_notified = False
+        self.active_session_id = None
+        self.active_session_key = None
 
 
 # Module-level singleton imported by api.py and tests.

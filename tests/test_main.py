@@ -1,4 +1,5 @@
 import asyncio
+import datetime as dt
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import bluelink
@@ -119,12 +120,17 @@ async def test_records_session_and_schedule_when_db_enabled(monkeypatch):
          patch("db.is_enabled", return_value=True), \
          patch("db.record_session", new=AsyncMock(return_value=7)) as mock_session, \
          patch("db.record_schedule", new=AsyncMock()) as mock_schedule:
-        result = await handle_plugin_event(client)
+        plugged_at = dt.datetime(2026, 6, 1, 20, 0, tzinfo=dt.timezone.utc)
+        result = await handle_plugin_event(
+            client, session_key="session-1", plugged_in_at=plugged_at
+        )
 
     assert result is True
     mock_session.assert_awaited_once_with(
         vehicle_name="IONIQ 5", soc_percent=62, target_percent=80, topup_percent=18,
         action="configured", odometer_miles=10000, soh_percent=98,
+        session_key="session-1", vehicle_id=None, vin=None, charger_id=None,
+        source_observed_at=None, plugged_in_at=plugged_at,
     )
     mock_schedule.assert_awaited_once()
     assert mock_schedule.call_args.kwargs["session_id"] == 7
@@ -138,12 +144,17 @@ async def test_records_skipped_session_when_already_at_target(monkeypatch):
     with patch("bluelink.get_vehicle_state", return_value=_vstate(90, odometer_miles=12000, soh_percent=97)), \
          patch("db.is_enabled", return_value=True), \
          patch("db.record_session", new=AsyncMock(return_value=1)) as mock_session:
-        result = await handle_plugin_event(client)
+        plugged_at = dt.datetime(2026, 6, 1, 20, 0, tzinfo=dt.timezone.utc)
+        result = await handle_plugin_event(
+            client, session_key="session-2", plugged_in_at=plugged_at
+        )
 
     assert result is True
     mock_session.assert_awaited_once_with(
         vehicle_name="IONIQ 5", soc_percent=90, target_percent=80, topup_percent=0,
         action="skipped_at_target", odometer_miles=12000, soh_percent=97,
+        session_key="session-2", vehicle_id=None, vin=None, charger_id=None,
+        source_observed_at=None, plugged_in_at=plugged_at,
     )
 
 
