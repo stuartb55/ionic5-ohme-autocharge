@@ -32,6 +32,11 @@ In Grafana add a **PostgreSQL** datasource:
 | `schedule_snapshots` | when a session is configured              | the Ohme charge schedule for a session |
 | `daily_stats`        | every `DAILY_STATS_INTERVAL` + on dashboard views | per-day energy / cost / savings |
 | `grid_consumption`   | every `DAILY_STATS_INTERVAL` (when Octopus consumption is configured) | half-hourly whole-house import split into car vs rest-of-house |
+| `session_events`     | target changes and other session lifecycle events | audit trail for each physical plug-in |
+
+Schema changes are versioned with Alembic and applied automatically at backend
+startup. `charge_sessions.session_key` is the durable idempotency key for a
+physical plug-in; new telemetry and event rows reference `charge_sessions.id`.
 
 ## Ready-made dashboard
 

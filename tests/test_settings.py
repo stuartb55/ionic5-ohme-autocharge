@@ -134,6 +134,18 @@ def test_session_active_round_trip(settings_path):
     assert settings.load_session_active() is False
 
 
+def test_session_marker_round_trip_and_clear(settings_path):
+    assert settings.load_session_key() is None
+    assert settings.save_session_marker("session-123", handled=False) is True
+    assert settings.load_session_key() == "session-123"
+    assert settings.load_session_active() is False
+    settings.save_session_marker("session-123", handled=True)
+    assert settings.load_session_active() is True
+    assert settings.clear_session_marker() is True
+    assert settings.load_session_key() is None
+    assert settings.load_session_active() is False
+
+
 # --- preservation & robustness ---------------------------------------------
 
 def test_setters_preserve_other_keys(settings_path):

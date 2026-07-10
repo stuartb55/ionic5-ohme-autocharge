@@ -15,10 +15,14 @@ upserts Ohme's daily totals.
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import logging
+from pathlib import Path
 from typing import Any, Optional
 
+from alembic import command
+from alembic.config import Config
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
@@ -30,82 +34,28 @@ logger = logging.getLogger(__name__)
 # which is the signal every write helper checks to decide whether it is a no-op.
 _pool: Optional[AsyncConnectionPool] = None
 
-# Schema is idempotent (IF NOT EXISTS) so init() can run on every startup. psycopg
-# sends one statement per execute() with the extended protocol, so keep these as
-# separate statements rather than one multi-statement string.
-_SCHEMA: tuple[str, ...] = (
-    """
-    CREATE TABLE IF NOT EXISTS charge_sessions (
-        id              BIGSERIAL PRIMARY KEY,
-        plugged_in_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-        vehicle_name    TEXT,
-        soc_percent     INTEGER,
-        target_percent  INTEGER,
-        topup_percent   INTEGER,
-        action          TEXT
-    )
-    """,
-    # Added after the initial release; ALTER keeps existing databases in step.
-    # The odometer (miles) at plug-in lets us derive driving efficiency (mi/kWh)
-    # from the distance between consecutive sessions and the energy charged.
-    "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS odometer_miles INTEGER",
-    # Battery state of health (%) at plug-in, for a degradation trend over time.
-    "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS soh_percent INTEGER",
-    """
-    CREATE TABLE IF NOT EXISTS schedule_snapshots (
-        id               BIGSERIAL PRIMARY KEY,
-        session_id       BIGINT REFERENCES charge_sessions(id) ON DELETE CASCADE,
-        recorded_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-        next_slot_start  TIMESTAMPTZ,
-        next_slot_end    TIMESTAMPTZ,
-        slots            JSONB
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS telemetry (
-        recorded_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-        vehicle_name       TEXT,
-        battery_percent    INTEGER,
-        charger_status     TEXT,
-        connected          BOOLEAN,
-        charger_online     BOOLEAN,
-        power_watts        DOUBLE PRECISION,
-        power_amps         DOUBLE PRECISION,
-        power_volts        INTEGER,
-        target_percent     INTEGER,
-        session_energy_wh  DOUBLE PRECISION
-    )
-    """,
-    "CREATE INDEX IF NOT EXISTS telemetry_recorded_at_idx ON telemetry (recorded_at)",
-    """
-    CREATE TABLE IF NOT EXISTS daily_stats (
-        stat_date    DATE PRIMARY KEY,
-        energy_kwh   DOUBLE PRECISION,
-        savings      DOUBLE PRECISION,
-        cost         DOUBLE PRECISION,
-        currency     TEXT,
-        updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-    )
-    """,
-    # Half-hourly whole-house grid import (from Octopus) with the car share
-    # (reconstructed from telemetry) and the remaining household usage broken out,
-    # so Grafana can chart car-vs-house directly. See docs/grafana.md.
-    """
-    CREATE TABLE IF NOT EXISTS grid_consumption (
-        interval_start TIMESTAMPTZ PRIMARY KEY,
-        interval_end   TIMESTAMPTZ,
-        import_kwh     DOUBLE PRECISION,
-        car_kwh        DOUBLE PRECISION,
-        house_kwh      DOUBLE PRECISION,
-        updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
-    )
-    """,
-)
-
-
 def is_enabled() -> bool:
     """True when history persistence is configured (``DATABASE_URL`` set)."""
     return bool(config.DATABASE_URL)
+
+
+def is_available() -> bool:
+    """True only when Postgres was configured *and* initialised successfully."""
+    return _pool is not None
+
+
+def _run_migrations() -> None:
+    """Upgrade the configured database to the repository's latest schema."""
+    cfg = Config()
+    cfg.set_main_option("script_location", str(Path(__file__).with_name("alembic")))
+    # Percent signs have interpolation semantics in ConfigParser.
+    url = config.DATABASE_URL
+    if url.startswith("postgresql://"):
+        url = "postgresql+psycopg://" + url.removeprefix("postgresql://")
+    elif url.startswith("postgres://"):
+        url = "postgresql+psycopg://" + url.removeprefix("postgres://")
+    cfg.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
+    command.upgrade(cfg, "head")
 
 
 async def init() -> None:
@@ -118,13 +68,13 @@ async def init() -> None:
     if not is_enabled():
         return
     try:
+        # Alembic/SQLAlchemy uses a synchronous connection; keep it off the event
+        # loop before opening the application's async psycopg pool.
+        await asyncio.to_thread(_run_migrations)
         pool = AsyncConnectionPool(config.DATABASE_URL, min_size=1, max_size=4, open=False)
         await pool.open(wait=True, timeout=10)
-        async with pool.connection() as conn:
-            for statement in _SCHEMA:
-                await conn.execute(statement)
         _pool = pool
-        logger.info("Postgres history persistence enabled")
+        logger.info("Postgres history persistence enabled; schema is at Alembic head")
     except Exception:
         logger.warning(
             "Could not initialise Postgres — history persistence disabled for this run",
@@ -152,6 +102,12 @@ async def record_session(
     action: str,
     odometer_miles: Optional[int] = None,
     soh_percent: Optional[int] = None,
+    session_key: Optional[str] = None,
+    vehicle_id: Optional[str] = None,
+    vin: Optional[str] = None,
+    charger_id: Optional[str] = None,
+    source_observed_at: Optional[datetime.datetime] = None,
+    plugged_in_at: Optional[datetime.datetime] = None,
 ) -> Optional[int]:
     """Insert one charge-session row and return its id (None when disabled/failed).
 
@@ -165,16 +121,68 @@ async def record_session(
             cur = await conn.execute(
                 "INSERT INTO charge_sessions "
                 "(vehicle_name, soc_percent, target_percent, topup_percent, action, "
-                " odometer_miles, soh_percent) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                " odometer_miles, soh_percent, session_key, vehicle_id, vin, charger_id, "
+                " source_observed_at, plugged_in_at, quality_status) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                " COALESCE(%s, now()), 'validated') "
+                "ON CONFLICT (session_key) WHERE session_key IS NOT NULL DO UPDATE SET "
+                " vehicle_name = EXCLUDED.vehicle_name, soc_percent = EXCLUDED.soc_percent, "
+                " target_percent = EXCLUDED.target_percent, topup_percent = EXCLUDED.topup_percent, "
+                " action = EXCLUDED.action, odometer_miles = EXCLUDED.odometer_miles, "
+                " soh_percent = EXCLUDED.soh_percent, vehicle_id = EXCLUDED.vehicle_id, "
+                " vin = EXCLUDED.vin, charger_id = EXCLUDED.charger_id, "
+                " source_observed_at = EXCLUDED.source_observed_at, updated_at = now() "
+                "RETURNING id",
                 (vehicle_name, soc_percent, target_percent, topup_percent, action,
-                 odometer_miles, soh_percent),
+                 odometer_miles, soh_percent, session_key, vehicle_id, vin, charger_id,
+                 source_observed_at, plugged_in_at),
             )
             row = await cur.fetchone()
             return row[0] if row else None
     except Exception:
         logger.warning("Failed to record charge session to Postgres", exc_info=True)
         return None
+
+
+async def close_session(
+    session_key: Optional[str],
+    *,
+    actual_energy_wh: Optional[float],
+    end_soc_percent: Optional[int] = None,
+    completion_reason: str = "unplugged",
+) -> None:
+    """Close the durable session identified by ``session_key``. Idempotent."""
+    if _pool is None or not session_key:
+        return
+    energy = round(actual_energy_wh) if actual_energy_wh is not None else None
+    try:
+        async with _pool.connection() as conn:
+            await conn.execute(
+                "UPDATE charge_sessions SET unplugged_at = COALESCE(unplugged_at, now()), "
+                " completed_at = COALESCE(completed_at, now()), end_soc_percent = %s, "
+                " actual_energy_wh = %s, completion_reason = %s, "
+                " quality_status = CASE WHEN %s IS NULL THEN 'incomplete' ELSE 'complete' END, "
+                " updated_at = now() WHERE session_key = %s",
+                (end_soc_percent, energy, completion_reason, energy, session_key),
+            )
+    except Exception:
+        logger.warning("Failed to close charge session in Postgres", exc_info=True)
+
+
+async def record_session_event(
+    session_id: Optional[int], event_type: str, details: Optional[dict[str, Any]] = None
+) -> None:
+    """Append an immutable lifecycle/control event for a durable session."""
+    if _pool is None or session_id is None:
+        return
+    try:
+        async with _pool.connection() as conn:
+            await conn.execute(
+                "INSERT INTO session_events (session_id, event_type, details) VALUES (%s, %s, %s)",
+                (session_id, event_type, Jsonb(details or {})),
+            )
+    except Exception:
+        logger.warning("Failed to record charge-session event", exc_info=True)
 
 
 async def get_recent_sessions(limit: int) -> Optional[list[dict[str, Any]]]:

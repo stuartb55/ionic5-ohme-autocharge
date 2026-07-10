@@ -8,8 +8,10 @@ Run once (CI/test): python main.py --once
 
 import argparse
 import asyncio
+import datetime
 import logging
 import sys
+import uuid
 
 import bluelink
 import ohme_client
@@ -47,10 +49,17 @@ def load_persisted_settings() -> None:
         logger.info("Loaded persisted vehicle selection: %s", vehicle_id)
 
 
-async def handle_plugin_event(client) -> bool:
+async def handle_plugin_event(
+    client,
+    *,
+    session_key: str | None = None,
+    plugged_in_at: datetime.datetime | None = None,
+) -> bool:
     """Called once per session when the car transitions from unplugged → plugged in.
     Returns True only when Ohme has been successfully updated (or no update was needed)."""
-    logger.info("Plug-in detected — fetching vehicle state from Bluelink...")
+    session_key = session_key or uuid.uuid4().hex
+    plugged_in_at = plugged_in_at or datetime.datetime.now(datetime.timezone.utc)
+    logger.info("Plug-in detected (session=%s) — fetching vehicle state from Bluelink...", session_key)
     try:
         # hyundai_kia_connect_api is synchronous; run it in a thread (bounded by
         # UPSTREAM_TIMEOUT) so a hung Bluelink call can't stall the loop.
@@ -78,7 +87,7 @@ async def handle_plugin_event(client) -> bool:
             target,
         )
         if db.is_enabled():
-            await db.record_session(
+            session_id = await db.record_session(
                 vehicle_name=client.current_vehicle,
                 soc_percent=soc,
                 target_percent=target,
@@ -86,7 +95,16 @@ async def handle_plugin_event(client) -> bool:
                 action="skipped_at_target",
                 odometer_miles=vehicle.odometer_miles,
                 soh_percent=vehicle.soh_percent,
+                session_key=session_key,
+                vehicle_id=vehicle.vehicle_id,
+                vin=vehicle.vin,
+                charger_id=client.serial if isinstance(getattr(client, "serial", None), str) else None,
+                source_observed_at=vehicle.observed_at,
+                plugged_in_at=plugged_in_at,
             )
+            store.active_session_id = session_id
+            store.active_session_key = session_key
+            await db.record_session_event(session_id, "skipped_at_target", {"soc": soc, "target": target})
         store.plugin_failure_notified = False
         return True
 
@@ -133,7 +151,16 @@ async def handle_plugin_event(client) -> bool:
                 action="configured",
                 odometer_miles=vehicle.odometer_miles,
                 soh_percent=vehicle.soh_percent,
+                session_key=session_key,
+                vehicle_id=vehicle.vehicle_id,
+                vin=vehicle.vin,
+                charger_id=client.serial if isinstance(getattr(client, "serial", None), str) else None,
+                source_observed_at=vehicle.observed_at,
+                plugged_in_at=plugged_in_at,
             )
+            store.active_session_id = session_id
+            store.active_session_key = session_key
+            await db.record_session_event(session_id, "target_configured", {"soc": soc, "target": target})
             await db.record_schedule(
                 session_id=session_id,
                 slots=[s.to_dict() for s in slots],
@@ -176,6 +203,8 @@ class PlugInDetector:
     def __init__(self) -> None:
         self.was_connected = False
         self.session_handled = False
+        self.session_key: str | None = None
+        self.plugged_in_at: datetime.datetime | None = None
 
     def prime(self, status) -> None:
         """Seed the initial connection state from a startup snapshot.
@@ -195,6 +224,10 @@ class PlugInDetector:
         self.was_connected = ohme_client.is_connected(status)
         if not self.was_connected:
             return
+        self.session_key = settings.load_session_key() or uuid.uuid4().hex
+        self.plugged_in_at = datetime.datetime.now(datetime.timezone.utc)
+        settings.save_session_marker(self.session_key, handled=settings.load_session_active())
+        store.active_session_key = self.session_key
         if settings.load_session_active():
             self.session_handled = True
             logger.info("Car already connected on startup — session already handled before restart")
@@ -214,21 +247,41 @@ class PlugInDetector:
         if now_connected and not self.was_connected:
             # Transition: disconnected → connected (car just plugged in)
             self.session_handled = False
+            self.session_key = uuid.uuid4().hex
+            self.plugged_in_at = datetime.datetime.now(datetime.timezone.utc)
+            # Persist the key before any upstream/DB work. If the process dies
+            # after inserting a row, the retry uses the same unique key.
+            settings.save_session_marker(self.session_key, handled=False)
+            store.active_session_key = self.session_key
 
         if now_connected and not self.session_handled:
-            self.session_handled = await handle_plugin_event(client)
+            if self.session_key is None:
+                self.session_key = settings.load_session_key() or uuid.uuid4().hex
+                self.plugged_in_at = datetime.datetime.now(datetime.timezone.utc)
+                settings.save_session_marker(self.session_key, handled=False)
+            self.session_handled = await handle_plugin_event(
+                client, session_key=self.session_key, plugged_in_at=self.plugged_in_at
+            )
             # Persist once the session is configured/recorded so a restart
             # mid-session doesn't re-record a duplicate row or re-notify.
             if self.session_handled:
-                settings.save_session_active(True)
+                settings.save_session_marker(self.session_key, handled=True)
 
         if not now_connected and self.was_connected:
             logger.info("Car unplugged (status=%s). Waiting for next session.", status)
+            raw_energy = getattr(client, "energy", None)
+            await db.close_session(
+                self.session_key or settings.load_session_key(),
+                actual_energy_wh=float(raw_energy) if isinstance(raw_energy, (int, float)) else None,
+                end_soc_percent=store.last_soc,
+            )
             self.session_handled = False
             # Clear the persisted marker so the next plug-in is handled afresh.
-            settings.save_session_active(False)
+            settings.clear_session_marker()
             # The plug-in SOC is meaningless once the car drives away.
             store.clear_soc()
+            self.session_key = None
+            self.plugged_in_at = None
 
         self.was_connected = now_connected
         return now_connected

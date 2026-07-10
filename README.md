@@ -222,6 +222,12 @@ Set `OCTOPUS_API_KEY` (your account API key, from [octopus.energy/dashboard/deve
 
 ## Charging history & Grafana (optional)
 
+The Postgres schema is versioned with Alembic and upgraded automatically before
+the backend opens its connection pool. Existing installations are adopted
+idempotently. Physical plug-ins have durable session keys, lifecycle timestamps,
+vehicle/charger identity, quality state, schedule revisions and an event audit
+trail so retries cannot create duplicate sessions.
+
 Set `DATABASE_URL` (the compose files default it to the bundled Postgres) to persist per-plug-in sessions, schedule snapshots, per-poll telemetry, and daily totals. This powers the dashboard's recent-sessions card and lets you build Grafana panels (energy/cost/savings over time, driving efficiency, battery-health trend). See [`docs/grafana.md`](docs/grafana.md) for the schema and example queries. With `DATABASE_URL` blank, the app runs entirely in memory — every history feature simply switches off.
 
 ## Progressive web app
