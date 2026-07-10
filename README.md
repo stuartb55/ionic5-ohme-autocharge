@@ -180,7 +180,7 @@ npm run build    # type-check + production build to dist/
 | `GET /api/version` | Build git SHA (`dev` when unset) |
 | `GET /api/status` | Vehicle SOC, range, SoH, lock/location, health (12V battery, tyre/washer/key warnings, anything left open), connection, charge rate, target, session energy + estimated cost, ready-by, per-day targets |
 | `GET /api/schedule` | Allocated charge slots + next slot times |
-| `GET /api/statistics?days=N` | Complete-calendar-day Ohme totals and daily series, window/scope metadata, matched single-vehicle home-energy efficiency, actual running cost, and previous-period comparison (N = 1–90) |
+| `GET /api/statistics?days=N` | Typed complete-calendar-day totals plus per-family source, method, observation/completeness timestamps, quality and matched coverage; includes scoped efficiency, actual running cost and prior comparison (N = 1–90) |
 | `GET /api/sessions?limit=N` | Recent plug-in sessions from Postgres (N = 1–50; `enabled: false` when persistence is off) |
 | `GET /api/sessions/export?format=csv\|json` | Download the **full** plug-in history as a CSV or JSON attachment (404 when persistence is off) |
 | `GET /api/sessions/{id}/telemetry` | Per-poll charge curve (SOC + power over time) for one session (404 when the id is unknown; `enabled: false` when persistence is off) |

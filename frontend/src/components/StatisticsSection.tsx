@@ -96,6 +96,7 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
   const { totals, currency } = stats;
   const insights = useMemo(() => deriveInsights(stats), [stats]);
   const prev = stats.comparison?.previous;
+  const lastCompleteDay = stats.daily[stats.daily.length - 1]?.date;
 
   return (
     <section className="card" aria-labelledby="stats-heading">
@@ -127,6 +128,28 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
           </div>
         </div>
       </header>
+
+      <div className="stats-context" aria-label="Statistics coverage">
+        <span>
+          {lastCompleteDay ? `Complete through ${formatDateShort(lastCompleteDay)}` : 'No complete days'}
+          {' · '}
+          {stats.window.timezone}
+        </span>
+        <details>
+          <summary>Sources &amp; methods</summary>
+          <ul>
+            <li>Account totals: Ohme charge summary for complete local days.</li>
+            <li>
+              Efficiency: same-vehicle distance after{' '}
+              {stats.metadata.efficiency.coverage.matchedIntervals as number} matched home charges.
+            </li>
+            <li>
+              Running cost: reconciled tariff-interval cost across{' '}
+              {stats.metadata.runningCost.coverage.matchedIntervals as number} matched intervals.
+            </li>
+          </ul>
+        </details>
+      </div>
 
       <div className="stat-cards">
         <StatCard

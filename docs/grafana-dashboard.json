@@ -765,6 +765,7 @@
       "type": "table",
       "id": 25,
       "title": "Recent charge sessions",
+      "description": "Session identity, measured energy/cost and reconciliation quality. Null actuals are intentionally not replaced with estimates.",
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
       "gridPos": { "h": 8, "w": 18, "x": 0, "y": 36 },
       "fieldConfig": {
@@ -804,7 +805,7 @@
           "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT plugged_in_at AS \"Plugged in\", vehicle_name AS \"Vehicle\", soc_percent AS \"SOC %\", target_percent AS \"Target %\", topup_percent AS \"Top-up %\", action AS \"Action\" FROM charge_sessions WHERE $__timeFilter(plugged_in_at) ORDER BY plugged_in_at DESC LIMIT 100"
+          "rawSql": "SELECT plugged_in_at AS \"Plugged in\", vehicle_name AS \"Vehicle\", soc_percent AS \"SOC %\", target_percent AS \"Target %\", topup_percent AS \"Top-up %\", actual_energy_wh / 1000.0 AS \"Actual kWh\", actual_cost_minor / 100.0 AS \"Actual cost\", cost_method AS \"Cost method\", tariff_coverage AS \"Tariff coverage\", quality_status AS \"Quality\", action AS \"Action\" FROM charge_sessions WHERE $__timeFilter(plugged_in_at) ORDER BY plugged_in_at DESC LIMIT 100"
         }
       ]
     },

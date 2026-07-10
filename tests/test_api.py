@@ -288,6 +288,10 @@ def test_statistics_parses_summary(client):
     assert charged_day["cost"] == 2.3
     assert charged_day["savings"] == 3.7
     assert all(day["isComplete"] for day in body["daily"])
+    assert body["metadata"]["summary"]["source"] == "ohme_charge_summary"
+    assert body["metadata"]["summary"]["quality"] == "complete"
+    assert body["metadata"]["daily"]["coverage"]["completeDays"] == 7
+    assert body["metadata"]["daily"]["completeThrough"] == body["window"]["completeThrough"]
 
 
 def _summary_client(energy_wh=42000):
@@ -318,6 +322,11 @@ def test_statistics_includes_efficiency_when_data_available(client):
     assert body["efficiency"]["energyKwh"] == 42.0
     assert body["efficiency"]["vehicleId"] == "car-1"
     assert body["efficiency"]["scope"] == "matched_home_charging"
+    provenance = body["metadata"]["efficiency"]
+    assert provenance["quality"] == "measured"
+    assert provenance["calculationType"] == "same_vehicle_charge_to_next_plugin"
+    assert provenance["coverage"]["matchedIntervals"] == 3
+    assert provenance["coverage"]["matchedEnergyKwh"] == 42.0
 
 
 def test_statistics_efficiency_null_when_persistence_disabled(client):
@@ -325,6 +334,7 @@ def test_statistics_efficiency_null_when_persistence_disabled(client):
     with patch("db.is_enabled", return_value=False):
         body = client.get("/api/statistics?days=7").json()
     assert body["efficiency"] is None
+    assert body["metadata"]["efficiency"]["quality"] == "unavailable"
 
 
 def test_statistics_includes_period_comparison(client):
@@ -405,6 +415,17 @@ def test_statistics_includes_running_cost_when_data_available(client):
     assert body["runningCost"]["milesDriven"] == 210
     assert body["runningCost"]["costTotal"] == 52.5
     assert body["runningCost"]["scope"] == "matched_actual_home_charging"
+    provenance = body["metadata"]["runningCost"]
+    assert provenance["quality"] == "actual"
+    assert provenance["coverage"]["matchedIntervals"] == 4
+
+
+def test_statistics_response_contract_is_published_in_openapi(client):
+    schema = client.get("/openapi.json").json()
+    response = schema["paths"]["/api/statistics"]["get"]["responses"]["200"]
+    assert response["content"]["application/json"]["schema"]["$ref"].endswith(
+        "/StatisticsResponseModel"
+    )
 
 
 def test_statistics_running_cost_null_without_miles(client):
