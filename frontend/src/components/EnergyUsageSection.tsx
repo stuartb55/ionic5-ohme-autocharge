@@ -105,6 +105,12 @@ export function EnergyUsageSection({
           <dt>Rest of house</dt>
           <dd>{formatKwh(data.totals.houseKwh)}</dd>
         </div>
+        {data.totals.unattributedKwh > 0 && (
+          <div className="energy-unattributed">
+            <dt>Unattributed</dt>
+            <dd>{formatKwh(data.totals.unattributedKwh)}</dd>
+          </div>
+        )}
       </dl>
 
       {n === 0 ? (
@@ -116,11 +122,14 @@ export function EnergyUsageSection({
               const imp = s.importKwh ?? 0;
               const car = s.carKwh ?? 0;
               const house = s.houseKwh ?? 0;
+              const unattributed = s.unattributedKwh ?? 0;
               const x = i * slotW + (slotW - barW) / 2;
               const carH = (car / max) * chartH;
               const houseH = (house / max) * chartH;
+              const unattributedH = (unattributed / max) * chartH;
               const carY = PAD_TOP + (chartH - carH);
               const houseY = carY - houseH;
+              const unattributedY = houseY - unattributedH;
               return (
                 <g key={s.start ?? i}>
                   {/* Rest-of-house stacked on top of the car portion. */}
@@ -128,6 +137,12 @@ export function EnergyUsageSection({
                     fill="var(--success)" fillOpacity={0.7}>
                     <title>
                       {slotLabel(s.start)} · house {formatKwh(house)} · car {formatKwh(car)} · total {formatKwh(imp)}
+                    </title>
+                  </rect>
+                  <rect x={x} y={unattributedY} width={barW} height={Math.max(0, unattributedH)} rx={2}
+                    fill="var(--muted)" fillOpacity={0.7}>
+                    <title>
+                      {slotLabel(s.start)} · unattributed {formatKwh(unattributed)} · quality {s.quality}
                     </title>
                   </rect>
                   <rect x={x} y={carY} width={barW} height={Math.max(0, carH)} rx={2}
@@ -148,6 +163,9 @@ export function EnergyUsageSection({
           <div className="energy-legend">
             <span className="legend-item"><span className="swatch swatch-car" /> Car</span>
             <span className="legend-item"><span className="swatch swatch-house" /> Rest of house</span>
+            {data.totals.unattributedKwh > 0 && (
+              <span className="legend-item"><span className="swatch swatch-unattributed" /> Unattributed</span>
+            )}
           </div>
         </div>
       )}

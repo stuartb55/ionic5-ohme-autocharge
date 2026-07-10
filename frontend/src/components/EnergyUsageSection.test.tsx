@@ -13,10 +13,10 @@ const data: EnergyUsageResponse = {
   date: '2026-06-01',
   currency: 'GBP',
   slots: [
-    { start: '2026-06-01T00:00:00+00:00', end: '2026-06-01T00:30:00+00:00', importKwh: 1.5, carKwh: 1.0, houseKwh: 0.5 },
-    { start: '2026-06-01T00:30:00+00:00', end: '2026-06-01T01:00:00+00:00', importKwh: 0.4, carKwh: 0, houseKwh: 0.4 },
+    { start: '2026-06-01T00:00:00+00:00', end: '2026-06-01T00:30:00+00:00', importKwh: 1.5, carKwh: 1.0, houseKwh: 0.5, unattributedKwh: 0, quality: 'good' },
+    { start: '2026-06-01T00:30:00+00:00', end: '2026-06-01T01:00:00+00:00', importKwh: 0.4, carKwh: 0, houseKwh: 0.4, unattributedKwh: 0, quality: 'good' },
   ],
-  totals: { importKwh: 1.9, carKwh: 1.0, houseKwh: 0.9 },
+  totals: { importKwh: 1.9, carKwh: 1.0, houseKwh: 0.9, unattributedKwh: 0 },
 };
 
 describe('EnergyUsageSection', () => {
@@ -60,10 +60,25 @@ describe('EnergyUsageSection', () => {
   it('shows an empty state when the day has no slots', () => {
     render(
       <EnergyUsageSection
-        data={{ ...data, slots: [], totals: { importKwh: 0, carKwh: 0, houseKwh: 0 } }}
+        data={{ ...data, slots: [], totals: { importKwh: 0, carKwh: 0, houseKwh: 0, unattributedKwh: 0 } }}
         onDateChange={() => {}}
       />,
     );
     expect(screen.getByText(/no consumption data/i)).toBeInTheDocument();
+  });
+
+  it('surfaces energy that could not be attributed confidently', () => {
+    const uncertain: EnergyUsageResponse = {
+      ...data,
+      slots: [{
+        start: '2026-06-01T00:00:00+00:00', end: '2026-06-01T00:30:00+00:00',
+        importKwh: 1.2, carKwh: 0, houseKwh: 0, unattributedKwh: 1.2,
+        quality: 'uncertain_gap',
+      }],
+      totals: { importKwh: 1.2, carKwh: 0, houseKwh: 0, unattributedKwh: 1.2 },
+    };
+    render(<EnergyUsageSection data={uncertain} onDateChange={() => {}} />);
+    expect(screen.getByText('Unattributed')).toBeInTheDocument();
+    expect(screen.getAllByText('1.2 kWh')).toHaveLength(2);
   });
 });

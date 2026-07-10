@@ -904,6 +904,7 @@ a.ghost-button {
   flex-wrap: wrap;
 }
 .energy-totals div { display: flex; flex-direction: column; gap: 2px; }
+.energy-unattributed { color: var(--muted); }
 .energy-totals dt { font-size: 0.8rem; color: var(--text-muted); }
 .energy-totals dd { margin: 0; font-size: 1.1rem; font-weight: 600; }
 .energy-totals .energy-car dd { color: var(--brand); }
@@ -916,6 +917,7 @@ a.ghost-button {
   color: var(--text-muted);
 }
 .energy-legend .legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.swatch-unattributed { background: var(--muted); }
 .energy-legend .swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
 .energy-legend .swatch-car { background: var(--brand); }
 .energy-legend .swatch-house { background: var(--success); opacity: 0.7; }

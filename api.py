@@ -316,6 +316,16 @@ async def _maybe_notify_finished(prev_status: str, snap: StatusSnapshot) -> None
         return
     if snap.session_energy_wh <= 0:
         return
+    await db.complete_session(
+        store.active_session_key,
+        actual_energy_wh=snap.session_energy_wh,
+        end_soc_percent=snap.battery_percent,
+    )
+    await db.record_session_event(
+        store.active_session_id,
+        "charging_finished",
+        {"energyWh": round(snap.session_energy_wh), "soc": snap.battery_percent},
+    )
     name = snap.vehicle_name or "EV"
     kwh = snap.session_energy_wh / 1000
     await ntfy.send(
@@ -381,7 +391,11 @@ async def _maybe_record_telemetry(snap: StatusSnapshot) -> None:
     if not snap.connected and sig == _last_telemetry_sig:
         return
     _last_telemetry_sig = sig
-    await db.record_telemetry(snap)
+    if snap.connected and store.active_session_id is None and store.active_session_key:
+        store.active_session_id = await db.get_session_id_by_key(store.active_session_key)
+    await db.record_telemetry(
+        snap, session_id=store.active_session_id if snap.connected else None
+    )
 
 
 def _on_poll_task_done(task: asyncio.Task) -> None:
@@ -738,12 +752,32 @@ async def _reapply_target_if_connected() -> bool:
         )
         soc = store.last_soc
     if soc is None or soc >= target:
+        await db.record_session_event(
+            store.active_session_id,
+            "target_reapply_skipped",
+            {"soc": soc, "target": target},
+        )
         return False
     try:
         async with store.client_lock:
             await ohme_client.set_target(
                 client, current_soc=soc, target_percent=target, target_time=store.ready_by_tuple
             )
+            slots = list(client.slots)
+            next_slot_start = client.next_slot_start
+            next_slot_end = client.next_slot_end
+        await db.record_session_event(
+            store.active_session_id,
+            "target_reapplied",
+            {"soc": soc, "target": target, "readyBy": store.ready_by},
+        )
+        await db.record_schedule(
+            session_id=store.active_session_id,
+            slots=[slot.to_dict() for slot in slots],
+            next_slot_start=next_slot_start,
+            next_slot_end=next_slot_end,
+            reason="target_reapplied",
+        )
         return True
     except Exception:  # noqa: BLE001 - never let an Ohme hiccup fail the settings write
         logger.warning("Could not re-apply charge target to Ohme", exc_info=True)
@@ -1016,6 +1050,7 @@ async def get_energy_usage(date: Optional[str] = Query(default=None)) -> JSONRes
         "importKwh": round(sum(r["importKwh"] or 0 for r in rows), 2),
         "carKwh": round(sum(r["carKwh"] or 0 for r in rows), 2),
         "houseKwh": round(sum(r["houseKwh"] or 0 for r in rows), 2),
+        "unattributedKwh": round(sum(r.get("unattributedKwh") or 0 for r in rows), 2),
     }
     return JSONResponse(
         {
@@ -1156,8 +1191,10 @@ async def _persist_grid_consumption(days: int = 3) -> None:
     # cumulative-energy delta has a preceding reading to diff against.
     tele_from = period_from - datetime.timedelta(seconds=max(config.POLL_INTERVAL * 2, 600))
     telemetry = await db.get_telemetry_between(tele_from, now)
-    car_by_slot = energy.attribute_car_kwh(telemetry or [])
-    rows = energy.merge_usage(consumption, car_by_slot)
+    attribution = energy.attribute_car_kwh(
+        telemetry or [], max_gap_seconds=max(config.POLL_INTERVAL * 3, 15 * 60)
+    )
+    rows = energy.merge_usage(consumption, attribution)
     await db.upsert_grid_consumption(rows)
 
 
@@ -1359,6 +1396,11 @@ async def _charge_action(name: str, action: Any) -> JSONResponse:
         logger.warning("Charge control '%s' failed", name, exc_info=True)
         raise HTTPException(status_code=502, detail=f"Could not {name} via Ohme") from exc
     logger.info("Charge control '%s' requested from the dashboard", name)
+    await db.record_session_event(
+        store.active_session_id,
+        "charge_control",
+        {"action": name, "status": store.status.charger_status, "maxCharge": store.status.max_charge},
+    )
     return JSONResponse(
         {
             "ok": True,

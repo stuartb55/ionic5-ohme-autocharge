@@ -160,13 +160,37 @@ async def close_session(
             await conn.execute(
                 "UPDATE charge_sessions SET unplugged_at = COALESCE(unplugged_at, now()), "
                 " completed_at = COALESCE(completed_at, now()), end_soc_percent = %s, "
-                " actual_energy_wh = %s, completion_reason = %s, "
+                " actual_energy_wh = COALESCE(%s, actual_energy_wh), "
+                " completion_reason = COALESCE(completion_reason, %s), "
                 " quality_status = CASE WHEN %s IS NULL THEN 'incomplete' ELSE 'complete' END, "
                 " updated_at = now() WHERE session_key = %s",
                 (end_soc_percent, energy, completion_reason, energy, session_key),
             )
     except Exception:
         logger.warning("Failed to close charge session in Postgres", exc_info=True)
+
+
+async def complete_session(
+    session_key: Optional[str],
+    *,
+    actual_energy_wh: float,
+    end_soc_percent: Optional[int],
+    completion_reason: str = "finished",
+) -> None:
+    """Record charge completion while the cable may remain connected."""
+    if _pool is None or not session_key:
+        return
+    energy = max(0, round(actual_energy_wh))
+    try:
+        async with _pool.connection() as conn:
+            await conn.execute(
+                "UPDATE charge_sessions SET completed_at = COALESCE(completed_at, now()), "
+                "end_soc_percent = %s, actual_energy_wh = %s, completion_reason = %s, "
+                "quality_status = 'complete', updated_at = now() WHERE session_key = %s",
+                (end_soc_percent, energy, completion_reason, session_key),
+            )
+    except Exception:
+        logger.warning("Failed to complete charge session in Postgres", exc_info=True)
 
 
 async def record_session_event(
@@ -183,6 +207,22 @@ async def record_session_event(
             )
     except Exception:
         logger.warning("Failed to record charge-session event", exc_info=True)
+
+
+async def get_session_id_by_key(session_key: Optional[str]) -> Optional[int]:
+    """Resolve a persisted active-session key after a process restart."""
+    if _pool is None or not session_key:
+        return None
+    try:
+        async with _pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT id FROM charge_sessions WHERE session_key = %s", (session_key,)
+            )
+            row = await cur.fetchone()
+        return row[0] if row else None
+    except Exception:
+        logger.warning("Failed to resolve active charge session", exc_info=True)
+        return None
 
 
 async def get_recent_sessions(limit: int) -> Optional[list[dict[str, Any]]]:
@@ -323,6 +363,7 @@ async def record_schedule(
     slots: list[dict[str, Any]],
     next_slot_start: Optional[datetime.datetime],
     next_slot_end: Optional[datetime.datetime],
+    reason: str = "initial",
 ) -> None:
     """Persist the Ohme charge schedule captured when a session was configured."""
     if _pool is None:
@@ -331,15 +372,17 @@ async def record_schedule(
         async with _pool.connection() as conn:
             await conn.execute(
                 "INSERT INTO schedule_snapshots "
-                "(session_id, next_slot_start, next_slot_end, slots) "
-                "VALUES (%s, %s, %s, %s)",
-                (session_id, next_slot_start, next_slot_end, Jsonb(slots)),
+                "(session_id, next_slot_start, next_slot_end, slots, revision, reason) "
+                "VALUES (%s, %s, %s, %s, "
+                " (SELECT COALESCE(MAX(revision), 0) + 1 FROM schedule_snapshots "
+                "  WHERE session_id IS NOT DISTINCT FROM %s), %s)",
+                (session_id, next_slot_start, next_slot_end, Jsonb(slots), session_id, reason),
             )
     except Exception:
         logger.warning("Failed to record charge schedule to Postgres", exc_info=True)
 
 
-async def record_telemetry(snap: Any) -> None:
+async def record_telemetry(snap: Any, *, session_id: Optional[int] = None) -> None:
     """Append one telemetry row from a :class:`state.StatusSnapshot`."""
     if _pool is None:
         return
@@ -348,8 +391,9 @@ async def record_telemetry(snap: Any) -> None:
             await conn.execute(
                 "INSERT INTO telemetry "
                 "(vehicle_name, battery_percent, charger_status, connected, charger_online, "
-                " power_watts, power_amps, power_volts, target_percent, session_energy_wh) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                " power_watts, power_amps, power_volts, target_percent, session_energy_wh, "
+                " session_id, quality_status) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (
                     snap.vehicle_name,
                     snap.battery_percent,
@@ -361,6 +405,8 @@ async def record_telemetry(snap: Any) -> None:
                     snap.power_volts,
                     snap.target_percent,
                     snap.session_energy_wh,
+                    session_id,
+                    "session_linked" if session_id is not None else "unlinked",
                 ),
             )
     except Exception:
@@ -422,8 +468,8 @@ async def record_daily_stats(daily: list[dict[str, Any]], currency: Optional[str
 
 async def get_telemetry_between(
     start: datetime.datetime, end: datetime.datetime
-) -> Optional[list[tuple[datetime.datetime, float]]]:
-    """Ordered ``(recorded_at, session_energy_wh)`` rows in ``[start, end]``.
+) -> Optional[list[tuple]]:
+    """Ordered session-linked telemetry rows in ``[start, end]``.
 
     Feeds :func:`energy.attribute_car_kwh` so the car's half-hourly share can be
     reconstructed from the cumulative session energy. The window is widened by the
@@ -435,13 +481,14 @@ async def get_telemetry_between(
     try:
         async with _pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT recorded_at, session_energy_wh FROM telemetry "
+                "SELECT recorded_at, session_id, session_energy_wh, power_watts, "
+                "charger_status, connected FROM telemetry "
                 "WHERE recorded_at >= %s AND recorded_at <= %s "
                 "ORDER BY recorded_at",
                 (start, end),
             )
             rows = await cur.fetchall()
-        return [(row[0], row[1]) for row in rows]
+        return [tuple(row) for row in rows]
     except Exception:
         logger.warning("Failed to read telemetry from Postgres", exc_info=True)
         return None
@@ -450,41 +497,23 @@ async def get_telemetry_between(
 async def get_session_telemetry(session_id: int) -> Optional[list[dict[str, Any]]]:
     """Per-poll telemetry for one session's charge curve, oldest first.
 
-    A session spans from its ``plugged_in_at`` up to the *next* session's
-    plug-in (or now, for the most recent one). Each point carries the SOC, draw
-    and cumulative session energy at that poll, so the dashboard can plot the
-    battery climbing through the charge. Returns None when persistence is off,
-    the read fails, or the session id is unknown (so the API can 404).
+    Rows are selected by their explicit ``telemetry.session_id`` foreign key;
+    timestamps are never used to infer a boundary. Each point carries the SOC,
+    draw and cumulative session energy at that poll. Returns None when persistence
+    is off, the read fails, or the session id is unknown.
     """
     if _pool is None:
         return None
     try:
         async with _pool.connection() as conn:
-            cur = await conn.execute(
-                "SELECT plugged_in_at FROM charge_sessions WHERE id = %s", (session_id,)
-            )
+            cur = await conn.execute("SELECT id FROM charge_sessions WHERE id = %s", (session_id,))
             row = await cur.fetchone()
-            if row is None or row[0] is None:
+            if row is None:
                 return None
-            start = row[0]
-            # Upper bound is the next plug-in; None means this is the open session.
             cur = await conn.execute(
-                "SELECT MIN(plugged_in_at) FROM charge_sessions WHERE plugged_in_at > %s",
-                (start,),
-            )
-            nxt = await cur.fetchone()
-            end = nxt[0] if nxt else None
-
-            select = (
                 "SELECT recorded_at, battery_percent, power_watts, session_energy_wh "
-                "FROM telemetry WHERE recorded_at >= %s "
+                "FROM telemetry WHERE session_id = %s ORDER BY recorded_at", (session_id,)
             )
-            if end is not None:
-                cur = await conn.execute(
-                    select + "AND recorded_at < %s ORDER BY recorded_at", (start, end)
-                )
-            else:
-                cur = await conn.execute(select + "ORDER BY recorded_at", (start,))
             rows = await cur.fetchall()
         return [
             {
@@ -510,7 +539,10 @@ async def upsert_grid_consumption(rows: list[dict[str, Any]]) -> None:
     if _pool is None or not rows:
         return
     params = [
-        (r["start"], r.get("end"), r.get("importKwh"), r.get("carKwh"), r.get("houseKwh"))
+        (
+            r["start"], r.get("end"), r.get("importKwh"), r.get("carKwh"),
+            r.get("houseKwh"), r.get("unattributedKwh", 0), r.get("quality", "unknown"),
+        )
         for r in rows
         if r.get("start")
     ]
@@ -521,13 +553,16 @@ async def upsert_grid_consumption(rows: list[dict[str, Any]]) -> None:
             async with conn.cursor() as cur:
                 await cur.executemany(
                     "INSERT INTO grid_consumption "
-                    "(interval_start, interval_end, import_kwh, car_kwh, house_kwh) "
-                    "VALUES (%s, %s, %s, %s, %s) "
+                    "(interval_start, interval_end, import_kwh, car_kwh, house_kwh, "
+                    "unattributed_kwh, quality_status) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s) "
                     "ON CONFLICT (interval_start) DO UPDATE SET "
                     "  interval_end = EXCLUDED.interval_end, "
                     "  import_kwh   = EXCLUDED.import_kwh, "
                     "  car_kwh      = EXCLUDED.car_kwh, "
                     "  house_kwh    = EXCLUDED.house_kwh, "
+                    "  unattributed_kwh = EXCLUDED.unattributed_kwh, "
+                    "  quality_status = EXCLUDED.quality_status, "
                     "  updated_at   = now()",
                     params,
                 )
@@ -548,7 +583,8 @@ async def get_grid_consumption(
     try:
         async with _pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT interval_start, interval_end, import_kwh, car_kwh, house_kwh "
+                "SELECT interval_start, interval_end, import_kwh, car_kwh, house_kwh, "
+                "unattributed_kwh, quality_status "
                 "FROM grid_consumption "
                 "WHERE interval_start >= %s AND interval_start < %s "
                 "ORDER BY interval_start",
@@ -562,6 +598,8 @@ async def get_grid_consumption(
                 "importKwh": row[2],
                 "carKwh": row[3],
                 "houseKwh": row[4],
+                "unattributedKwh": row[5],
+                "quality": row[6],
             }
             for row in rows
         ]

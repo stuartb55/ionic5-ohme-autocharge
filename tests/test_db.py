@@ -158,6 +158,16 @@ async def test_close_session_is_idempotent_update(fake_pool):
     assert params == (80, 4321, "unplugged", 4321, "session-1")
 
 
+async def test_complete_session_records_final_measurements(fake_pool):
+    conn, _ = fake_pool
+    await db.complete_session(
+        "session-1", actual_energy_wh=4321.4, end_soc_percent=80
+    )
+    sql, params = conn.executed[0]
+    assert "completed_at = COALESCE(completed_at, now())" in sql
+    assert params == (80, 4321, "finished", "session-1")
+
+
 async def test_record_session_event_wraps_details_as_jsonb(fake_pool):
     conn, _ = fake_pool
     await db.record_session_event(42, "target_configured", {"target": 80})
@@ -165,6 +175,12 @@ async def test_record_session_event_wraps_details_as_jsonb(fake_pool):
     assert "INSERT INTO session_events" in sql
     assert params[:2] == (42, "target_configured")
     assert params[2].obj == {"target": 80}
+
+
+async def test_get_session_id_by_key(fake_pool):
+    conn, _ = fake_pool
+    assert await db.get_session_id_by_key("session-1") == 42
+    assert conn.executed[0][1] == ("session-1",)
 
 
 async def test_record_session_swallows_errors():
@@ -256,8 +272,10 @@ async def test_get_session_telemetry_maps_points(fake_pool):
 
     points = await db.get_session_telemetry(7)
 
-    assert "FROM charge_sessions WHERE id = %s" in conn.executed[0][0]
+    assert "SELECT id FROM charge_sessions WHERE id = %s" in conn.executed[0][0]
     assert conn.executed[0][1] == (7,)
+    assert "FROM telemetry WHERE session_id = %s" in conn.executed[1][0]
+    assert conn.executed[1][1] == (7,)
     assert points == [
         {"at": "2026-06-01T20:05:00+00:00", "socPercent": 62,
          "powerWatts": 7400.0, "sessionEnergyKwh": 1.5},
@@ -373,6 +391,8 @@ async def test_record_schedule_wraps_slots_as_jsonb(fake_pool):
     assert params[0] == 42
     # The slots are passed through psycopg's Jsonb adapter (carries the original obj).
     assert params[3].obj == slots
+    assert params[4:] == (42, "initial")
+    assert "MAX(revision)" in sql
 
 
 # --- telemetry -----------------------------------------------------------------
@@ -392,11 +412,12 @@ async def test_record_telemetry_maps_snapshot_fields(fake_pool):
         target_percent=80,
         session_energy_wh=4500.0,
     )
-    await db.record_telemetry(snap)
+    await db.record_telemetry(snap, session_id=42)
     sql, params = conn.executed[0]
     assert "INSERT INTO telemetry" in sql
     assert params == (
         "IONIQ 5", 62, "charging", True, True, 7400.0, 32.0, 230, 80, 4500.0,
+        42, "session_linked",
     )
 
 
@@ -482,14 +503,17 @@ async def test_get_telemetry_between_maps_rows(fake_pool):
 
     conn, cursor = fake_pool
     t0 = dt.datetime(2026, 6, 1, 0, 0, tzinfo=dt.timezone.utc)
-    cursor.rows = [(t0, 0.0), (t0, 1000.0)]
+    cursor.rows = [
+        (t0, 42, 0.0, 7400.0, "charging", True),
+        (t0, 42, 1000.0, 7400.0, "charging", True),
+    ]
     start = t0
     end = t0 + dt.timedelta(days=1)
     rows = await db.get_telemetry_between(start, end)
     sql, params = conn.executed[0]
     assert "FROM telemetry" in sql and "ORDER BY recorded_at" in sql
     assert params == (start, end)
-    assert rows == [(t0, 0.0), (t0, 1000.0)]
+    assert rows == cursor.rows
 
 
 async def test_upsert_grid_consumption_inserts_dated_rows(fake_pool):
@@ -504,7 +528,9 @@ async def test_upsert_grid_consumption_inserts_dated_rows(fake_pool):
     sql, params = cursor.executemany_calls[0]
     assert "INSERT INTO grid_consumption" in sql
     assert "ON CONFLICT (interval_start) DO UPDATE" in sql
-    assert params == [("2026-06-01T00:00:00+00:00", "2026-06-01T00:30:00+00:00", 1.5, 1.0, 0.5)]
+    assert params == [
+        ("2026-06-01T00:00:00+00:00", "2026-06-01T00:30:00+00:00", 1.5, 1.0, 0.5, 0, "unknown")
+    ]
 
 
 async def test_upsert_grid_consumption_empty_is_noop(fake_pool):
@@ -519,7 +545,7 @@ async def test_get_grid_consumption_maps_rows(fake_pool):
     conn, cursor = fake_pool
     t0 = dt.datetime(2026, 6, 1, 0, 0, tzinfo=dt.timezone.utc)
     t1 = t0 + dt.timedelta(minutes=30)
-    cursor.rows = [(t0, t1, 1.5, 1.0, 0.5)]
+    cursor.rows = [(t0, t1, 1.5, 1.0, 0.5, 0.0, "good")]
     start = t0
     end = t0 + dt.timedelta(days=1)
     out = await db.get_grid_consumption(start, end)
@@ -533,5 +559,7 @@ async def test_get_grid_consumption_maps_rows(fake_pool):
             "importKwh": 1.5,
             "carKwh": 1.0,
             "houseKwh": 0.5,
+            "unattributedKwh": 0.0,
+            "quality": "good",
         }
     ]
