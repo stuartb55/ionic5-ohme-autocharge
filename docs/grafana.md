@@ -30,7 +30,7 @@ In Grafana add a **PostgreSQL** datasource:
 | `telemetry`          | every poll (`POLL_INTERVAL`)              | power / energy / SOC time-series |
 | `charge_sessions`    | once per plug-in event                    | when the car was plugged in and what target was set |
 | `schedule_snapshots` | when a session is configured              | the Ohme charge schedule for a session |
-| `daily_stats`        | every `DAILY_STATS_INTERVAL` + on dashboard views | per-day energy / cost / savings |
+| `daily_stats`        | every `DAILY_STATS_INTERVAL` + on dashboard views | complete local-day energy in Wh and money in integer minor units (legacy float mirrors retained) |
 | `grid_consumption`   | every `DAILY_STATS_INTERVAL` (when Octopus consumption is configured) | half-hourly whole-house import split into car vs rest-of-house |
 | `session_events`     | target changes and other session lifecycle events | audit trail for each physical plug-in |
 | `tariff_rates`       | every 30 minutes when Agile is enabled | durable tariff windows used for actual cost |
@@ -83,18 +83,20 @@ ORDER BY recorded_at;
 Energy charged per day (bar chart):
 
 ```sql
-SELECT stat_date AS "time", energy_kwh
+SELECT stat_date AS "time", energy_wh / 1000.0 AS energy_kwh
 FROM daily_stats
-WHERE $__timeFilter(stat_date)
+WHERE $__timeFilter(stat_date) AND is_complete
 ORDER BY stat_date;
 ```
 
 Cost & savings per day:
 
 ```sql
-SELECT stat_date AS "time", cost, savings
+SELECT stat_date AS "time",
+       cost_minor / 100.0 AS cost,
+       savings_minor / 100.0 AS savings
 FROM daily_stats
-WHERE $__timeFilter(stat_date)
+WHERE $__timeFilter(stat_date) AND is_complete
 ORDER BY stat_date;
 ```
 
@@ -121,18 +123,28 @@ WHERE $__timeFilter(plugged_in_at) AND soh_percent IS NOT NULL
 ORDER BY plugged_in_at;
 ```
 
-Driving efficiency (miles per kWh) over the selected range — distance covered
-between the first and last plug-in, divided by the energy charged in that
-window (stat panel). Needs a couple of plug-ins with odometer data to be
-meaningful:
+Home-energy efficiency by vehicle over the selected range. Each session's final
+charger energy is paired only with that same vehicle's odometer delta at its
+next plug-in. Both ends must fall inside the range; missing energy, odometer
+regressions and incomplete boundary intervals are excluded:
 
 ```sql
-SELECT
-  (MAX(odometer_miles) - MIN(odometer_miles))::float
-    / NULLIF((SELECT SUM(energy_kwh) FROM daily_stats WHERE $__timeFilter(stat_date)), 0)
-    AS miles_per_kwh
-FROM charge_sessions
-WHERE $__timeFilter(plugged_in_at) AND odometer_miles IS NOT NULL;
+WITH paired AS (
+  SELECT vehicle_id, plugged_in_at, odometer_miles, actual_energy_wh,
+         LEAD(plugged_in_at) OVER w AS next_plugged_in_at,
+         LEAD(odometer_miles) OVER w AS next_odometer_miles
+  FROM charge_sessions
+  WHERE vehicle_id IS NOT NULL
+  WINDOW w AS (PARTITION BY vehicle_id ORDER BY plugged_in_at)
+)
+SELECT vehicle_id,
+       SUM(next_odometer_miles - odometer_miles) * 1000.0
+         / NULLIF(SUM(actual_energy_wh), 0) AS home_miles_per_kwh,
+       COUNT(*) AS matched_intervals
+FROM paired
+WHERE plugged_in_at >= $__timeFrom() AND next_plugged_in_at <= $__timeTo()
+  AND next_odometer_miles > odometer_miles AND actual_energy_wh > 0
+GROUP BY vehicle_id;
 ```
 
 Latest charge schedule (table):

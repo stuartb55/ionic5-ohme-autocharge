@@ -445,7 +445,7 @@
           "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT SUM(energy_kwh) AS \"Total energy\" FROM daily_stats WHERE $__timeFilter(stat_date)"
+          "rawSql": "SELECT SUM(energy_wh) / 1000.0 AS \"Total energy\" FROM daily_stats WHERE $__timeFilter(stat_date) AND is_complete"
         }
       ]
     },
@@ -472,7 +472,7 @@
           "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT SUM(cost) AS \"Total cost\" FROM daily_stats WHERE $__timeFilter(stat_date)"
+          "rawSql": "SELECT SUM(cost_minor) / 100.0 AS \"Total cost\" FROM daily_stats WHERE $__timeFilter(stat_date) AND is_complete"
         }
       ]
     },
@@ -500,7 +500,7 @@
           "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT SUM(savings) AS \"Total savings\" FROM daily_stats WHERE $__timeFilter(stat_date)"
+          "rawSql": "SELECT SUM(savings_minor) / 100.0 AS \"Total savings\" FROM daily_stats WHERE $__timeFilter(stat_date) AND is_complete"
         }
       ]
     },
@@ -528,7 +528,7 @@
           "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT SUM(cost) / NULLIF(SUM(energy_kwh), 0) AS \"Avg cost/kWh\" FROM daily_stats WHERE $__timeFilter(stat_date)"
+          "rawSql": "SELECT SUM(cost_minor) * 10.0 / NULLIF(SUM(energy_wh), 0) AS \"Avg cost/kWh\" FROM daily_stats WHERE $__timeFilter(stat_date) AND is_complete"
         }
       ]
     },
@@ -560,7 +560,7 @@
           "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT to_char(stat_date, 'Dy DD Mon') AS \"Day\", energy_kwh AS \"Energy\" FROM daily_stats WHERE $__timeFilter(stat_date) ORDER BY stat_date"
+          "rawSql": "SELECT to_char(stat_date, 'Dy DD Mon') AS \"Day\", energy_wh / 1000.0 AS \"Energy\" FROM daily_stats WHERE $__timeFilter(stat_date) AND is_complete ORDER BY stat_date"
         }
       ]
     },
@@ -602,7 +602,7 @@
           "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT to_char(stat_date, 'Dy DD Mon') AS \"Day\", cost AS \"Cost\", savings AS \"Savings\" FROM daily_stats WHERE $__timeFilter(stat_date) ORDER BY stat_date"
+          "rawSql": "SELECT to_char(stat_date, 'Dy DD Mon') AS \"Day\", cost_minor / 100.0 AS \"Cost\", savings_minor / 100.0 AS \"Savings\" FROM daily_stats WHERE $__timeFilter(stat_date) AND is_complete ORDER BY stat_date"
         }
       ]
     },
@@ -639,7 +639,7 @@
           "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT stat_date AS \"time\", SUM(savings) OVER (ORDER BY stat_date) AS \"Cumulative savings\" FROM daily_stats WHERE $__timeFilter(stat_date) ORDER BY stat_date"
+          "rawSql": "SELECT stat_date AS \"time\", SUM(savings_minor) OVER (ORDER BY stat_date) / 100.0 AS \"Cumulative savings\" FROM daily_stats WHERE $__timeFilter(stat_date) AND is_complete ORDER BY stat_date"
         }
       ]
     },

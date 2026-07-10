@@ -261,11 +261,20 @@ export interface DailyStat {
   energyKwh: number;
   savings: number;
   cost: number;
+  /** True only after the local calendar day has ended. */
+  isComplete: boolean;
 }
 
 export interface StatisticsResponse {
   rangeDays: number;
   currency: string | null;
+  window: {
+    from: string;
+    toExclusive: string;
+    completeThrough: string;
+    timezone: string;
+  };
+  scope: { summary: 'ohme_account' | string; vehicleId: string | null };
   totals: {
     energyKwh: number;
     savingsVsStandard: number;
@@ -275,14 +284,20 @@ export interface StatisticsResponse {
   };
   daily: DailyStat[];
   /**
-   * Measured driving efficiency over the range, from odometer history. Null
-   * when persistence is off or there isn't enough data to compute it.
+   * Efficiency for complete charge-to-next-plug-in intervals for one vehicle.
+   * It deliberately does not combine account-wide energy with an odometer span.
    */
   efficiency: {
     /** Miles driven across the window (odometer span). */
     milesDriven: number;
-    /** Real-world miles per kWh: milesDriven / energy charged. */
+    /** Miles per kWh for the matched home-charging intervals. */
     milesPerKwh: number;
+    energyKwh: number;
+    intervalCount: number;
+    vehicleId: string;
+    from: string | null;
+    to: string | null;
+    scope: 'matched_home_charging' | string;
   } | null;
   /**
    * Real-world running cost over the range, from odometer history + spend. Null
@@ -295,6 +310,9 @@ export interface StatisticsResponse {
     milesDriven: number;
     /** Total spent charging across the window. */
     costTotal: number;
+    currency: string;
+    intervalCount: number;
+    scope: 'matched_actual_home_charging' | string;
   } | null;
   /**
    * Totals for the previous equal-length period, for a period-over-period

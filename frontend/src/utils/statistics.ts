@@ -20,7 +20,7 @@ export interface Insights {
   avgPerChargingDay: number;
   /** The single biggest charging day, or null if nothing was charged. */
   bestDay: DailyStat | null;
-  /** Estimated driving range added across the whole range, in miles. */
+  /** Estimated range when assumed, or matched distance when measured. */
   estimatedMiles: number;
   /** mi/kWh the range estimate uses: measured when available, else the assumed default. */
   milesPerKwh: number;
@@ -30,6 +30,9 @@ export interface Insights {
   milesDriven: number | null;
   /** Real-world running cost per mile (in the stats currency), or null when unknown. */
   costPerMile: number | null;
+  matchedEnergyKwh: number | null;
+  efficiencyIntervalCount: number | null;
+  costIntervalCount: number | null;
 }
 
 /** Derive higher-level insights from the raw daily/total figures. */
@@ -43,8 +46,8 @@ export function deriveInsights(stats: StatisticsResponse): Insights {
     null,
   );
 
-  // Prefer the measured efficiency from odometer history; fall back to the
-  // assumed average so the range estimate still works before any data exists.
+  // A measured efficiency covers only matched charge-to-drive intervals. Never
+  // multiply it by the account-wide total, which may cover different sessions.
   const efficiency = stats.efficiency;
   const milesPerKwh = efficiency?.milesPerKwh ?? MILES_PER_KWH;
 
@@ -53,11 +56,14 @@ export function deriveInsights(stats: StatisticsResponse): Insights {
     totalDays: daily.length,
     avgPerChargingDay: active.length ? totalEnergy / active.length : 0,
     bestDay: bestDay && bestDay.energyKwh > 0 ? bestDay : null,
-    estimatedMiles: totalEnergy * milesPerKwh,
+    estimatedMiles: efficiency?.milesDriven ?? totalEnergy * milesPerKwh,
     milesPerKwh,
     efficiencyIsReal: efficiency != null,
     milesDriven: efficiency?.milesDriven ?? stats.runningCost?.milesDriven ?? null,
     costPerMile: stats.runningCost?.costPerMile ?? null,
+    matchedEnergyKwh: efficiency?.energyKwh ?? null,
+    efficiencyIntervalCount: efficiency?.intervalCount ?? null,
+    costIntervalCount: stats.runningCost?.intervalCount ?? null,
   };
 }
 

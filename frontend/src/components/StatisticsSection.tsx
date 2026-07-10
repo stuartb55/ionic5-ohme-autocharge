@@ -163,22 +163,22 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
         />
         {insights.efficiencyIsReal && (
           <Insight
-            label="Efficiency"
+            label="Home-energy efficiency"
             value={`${insights.milesPerKwh} mi/kWh`}
-            sub={`over ${insights.milesDriven} mi`}
+            sub={`${insights.matchedEnergyKwh} kWh across ${insights.efficiencyIntervalCount} matched intervals`}
           />
         )}
         {insights.costPerMile != null && (
           <Insight
-            label="Running cost"
+            label="Actual home running cost"
             value={`${formatPricePerMile(insights.costPerMile, currency)} / mi`}
-            sub={insights.milesDriven != null ? `over ${insights.milesDriven} mi` : undefined}
+            sub={`${insights.costIntervalCount} matched intervals`}
           />
         )}
         <Insight
-          label="Est. range added"
+          label={insights.efficiencyIsReal ? 'Matched distance' : 'Est. range added'}
           value={`${Math.round(insights.estimatedMiles)} mi`}
-          sub={`@ ${insights.milesPerKwh} mi/kWh`}
+          sub={insights.efficiencyIsReal ? 'after matched home charges' : `@ ${insights.milesPerKwh} mi/kWh assumed`}
         />
         <Insight
           label="Total cost"

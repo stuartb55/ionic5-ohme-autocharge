@@ -5,8 +5,10 @@ assert the SQL/params the helpers emit, plus the contract that every write is a
 no-op when disabled and swallows errors when the DB misbehaves.
 """
 
-import pytest
+import datetime as dt
 from unittest.mock import patch
+
+import pytest
 
 import db
 import config
@@ -362,36 +364,71 @@ async def test_get_recent_sessions_none_on_error():
         db._pool = None
 
 
-# --- odometer / efficiency ------------------------------------------------------
+# --- vehicle-scoped driving metrics -------------------------------------------
 
 
-async def test_get_miles_driven_returns_span(fake_pool):
-    import datetime as dt
+async def test_get_single_vehicle_id_requires_exactly_one_distinct_vehicle():
+    for row, expected in [(("car-1", 1), "car-1"), (("car-1", 2), None), ((None, 0), None)]:
+        conn = _FakeConn(_FakeCursor(row=row))
+        db._pool = _FakePool(conn)
+        try:
+            assert await db.get_single_vehicle_id() == expected
+            assert "COUNT(DISTINCT vehicle_id)" in conn.executed[0][0]
+        finally:
+            db._pool = None
 
-    conn, _ = fake_pool  # default fake cursor returns row (42,)
-    miles = await db.get_miles_driven(dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc))
-    assert miles == 42
-    sql, _params = conn.executed[0]
-    assert "MAX(odometer_miles) - MIN(odometer_miles)" in sql
-    assert "HAVING COUNT(odometer_miles) >= 2" in sql  # never report from a lone reading
 
-
-async def test_get_miles_driven_none_when_insufficient_data():
-    import datetime as dt
-
-    # fetchone returns None when the HAVING clause filters out the single group.
-    db._pool = _FakePool(_FakeConn(_FakeCursor(row=None)))
+async def test_vehicle_driving_metrics_pairs_only_valid_complete_intervals():
+    start = dt.datetime(2026, 6, 1, tzinfo=dt.timezone.utc)
+    end = dt.datetime(2026, 6, 8, tzinfo=dt.timezone.utc)
+    rows = [
+        # Before-window session is fetched for ordering but not attributed.
+        (start - dt.timedelta(days=1), 900, 5000, 100, "GBP"),
+        (start, 1000, 10000, 250, "GBP"),  # +100 mi, valid energy + cost
+        (start + dt.timedelta(days=2), 1100, 8000, None, None),  # regression: ignored
+        (start + dt.timedelta(days=3), 1090, 9000, 300, "GBP"),
+        (start + dt.timedelta(days=5), 1190, None, 400, "GBP"),  # missing energy: ignored
+        (end, 1290, 7000, 500, "GBP"),
+    ]
+    cursor = _FakeCursor(rows=rows)
+    conn = _FakeConn(cursor)
+    db._pool = _FakePool(conn)
     try:
-        assert await db.get_miles_driven(dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)) is None
+        result = await db.get_vehicle_driving_metrics(start, end, "car-1")
     finally:
         db._pool = None
 
+    assert result == {
+        "vehicleId": "car-1",
+        "milesDriven": 200,
+        "energyWh": 19000,
+        "intervalCount": 2,
+        "from": start,
+        "to": start + dt.timedelta(days=5),
+        "costMilesDriven": 200,
+        "costMinor": 550,
+        "costIntervalCount": 2,
+        "costCurrency": "GBP",
+    }
+    sql, params = conn.executed[0]
+    assert "WHERE vehicle_id = %s" in sql
+    assert params == ("car-1", start, end)
 
-async def test_get_miles_driven_none_when_disabled():
-    import datetime as dt
 
-    db._pool = None
-    assert await db.get_miles_driven(dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)) is None
+async def test_vehicle_driving_metrics_returns_none_without_vehicle_or_intervals():
+    db._pool = _FakePool(_FakeConn(_FakeCursor(rows=[])))
+    try:
+        start = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
+        assert (
+            await db.get_vehicle_driving_metrics(start, start + dt.timedelta(days=1), None)
+            is None
+        )
+        assert (
+            await db.get_vehicle_driving_metrics(start, start + dt.timedelta(days=1), "car-1")
+            is None
+        )
+    finally:
+        db._pool = None
 
 
 # --- schedule ------------------------------------------------------------------
@@ -472,9 +509,15 @@ async def test_prune_telemetry_swallows_errors():
 async def test_record_daily_stats_upserts_each_dated_row(fake_pool):
     _, cursor = fake_pool
     daily = [
-        {"date": "2026-06-01", "energyKwh": 18.5, "savings": 3.7, "cost": 2.3},
+        {
+            "date": "2026-06-01", "energyKwh": 18.5, "savings": 3.7,
+            "cost": 2.3, "isComplete": True,
+        },
         {"date": None, "energyKwh": 0, "savings": 0, "cost": 0},  # skipped (no date)
-        {"date": "2026-06-02", "energyKwh": 12.0, "savings": 2.1, "cost": 1.4},
+        {
+            "date": "2026-06-02", "energyKwh": 12.0, "savings": 2.1,
+            "cost": 1.4, "isComplete": True,
+        },
     ]
     await db.record_daily_stats(daily, "GBP")
     # One executemany with only the two dated rows.
@@ -483,8 +526,8 @@ async def test_record_daily_stats_upserts_each_dated_row(fake_pool):
     assert "INSERT INTO daily_stats" in sql
     assert "ON CONFLICT (stat_date) DO UPDATE" in sql
     assert rows == [
-        ("2026-06-01", 18.5, 3.7, 2.3, "GBP"),
-        ("2026-06-02", 12.0, 2.1, 1.4, "GBP"),
+        ("2026-06-01", 18.5, 3.7, 2.3, "GBP", 18500, 370, 230, True),
+        ("2026-06-02", 12.0, 2.1, 1.4, "GBP", 12000, 210, 140, True),
     ]
 
 

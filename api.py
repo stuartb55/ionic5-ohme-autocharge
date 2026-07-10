@@ -664,22 +664,57 @@ except Exception:  # noqa: BLE001 - bad TIMEZONE value; fall back to host-local
     logger.warning("Unknown TIMEZONE %r — using host-local time for daily stats", config.TIMEZONE)
     _STATS_TZ = None
 
-# Ohme returns Money amounts in the currency's *minor* unit (pence for GBP), so
-# e.g. a 7.284 p/kWh price comes back as amount "7.284" and a £13.97 cost as
-# "1396.663". Divide by 100 to convert to major units (pounds) here, once, so the
-# whole pipeline downstream works in pounds. (This app is GBP-only.)
-_MINOR_UNITS_PER_MAJOR = 100
-
-
 def _money(node: Any) -> tuple[float, Optional[str]]:
     """Return (amount_in_major_units, currencyCode) from an Ohme Money dict."""
     if not isinstance(node, dict):
         return 0.0, None
     try:
-        amount = float(node.get("amount") or 0)
-    except (TypeError, ValueError):
-        amount = 0.0
-    return amount / _MINOR_UNITS_PER_MAJOR, node.get("currencyCode")
+        amount = Decimal(str(node.get("amount") or 0))
+    except (TypeError, ValueError, ArithmeticError):
+        amount = Decimal("0")
+    currency = node.get("currencyCode")
+    factor = {"JPY": 1, "KWD": 1000}.get(str(currency or "GBP").upper(), 100)
+    return float(amount / factor), currency
+
+
+def _statistics_window(days: int, now: Optional[datetime.datetime] = None) -> dict[str, Any]:
+    """The last ``days`` complete local calendar days and prior comparison window."""
+    tz = _STATS_TZ or datetime.timezone.utc
+    local_now = now.astimezone(tz) if now is not None else datetime.datetime.now(tz)
+    end_day = local_now.date()  # today's midnight: today itself is incomplete
+    start_day = end_day - datetime.timedelta(days=days)
+    previous_start_day = start_day - datetime.timedelta(days=days)
+    start = datetime.datetime.combine(start_day, datetime.time.min, tzinfo=tz)
+    end = datetime.datetime.combine(end_day, datetime.time.min, tzinfo=tz)
+    previous_start = datetime.datetime.combine(
+        previous_start_day, datetime.time.min, tzinfo=tz
+    )
+    return {
+        "days": days,
+        "timezone": config.TIMEZONE,
+        "start": start,
+        "end": end,
+        "previousStart": previous_start,
+        "startMs": int(start.timestamp() * 1000),
+        "endMs": int(end.timestamp() * 1000),
+        "previousStartMs": int(previous_start.timestamp() * 1000),
+    }
+
+
+def _complete_daily_series(
+    daily: list[dict[str, Any]], window: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Return exactly one row for every complete local day in the window."""
+    by_date = {row["date"]: row for row in daily if row.get("date")}
+    day = window["start"].date()
+    end_day = window["end"].date()
+    result = []
+    while day < end_day:
+        key = day.isoformat()
+        row = by_date.get(key) or {"date": key, "energyKwh": 0.0, "savings": 0.0, "cost": 0.0}
+        result.append({**row, "isComplete": True})
+        day += datetime.timedelta(days=1)
+    return result
 
 
 def parse_summary(summary: dict[str, Any], days: int) -> dict[str, Any]:
@@ -1226,15 +1261,17 @@ async def _persist_daily_stats(client: Any, days: int = 90) -> None:
     """
     if not db.is_enabled():
         return
-    end_ts = int(time.time() * 1000)
-    start_ts = end_ts - days * 24 * 60 * 60 * 1000
+    window = _statistics_window(days)
     try:
         async with store.client_lock:
-            summary = await client.async_get_charge_summary(start_ts=start_ts, end_ts=end_ts)
+            summary = await client.async_get_charge_summary(
+                start_ts=window["startMs"], end_ts=window["endMs"]
+            )
     except Exception:
         logger.warning("Could not fetch charge summary for daily-stats persist", exc_info=True)
         return
     parsed = parse_summary({k: v for k, v in summary.items() if k != "granularity"}, days)
+    parsed["daily"] = _complete_daily_series(parsed["daily"], window)
     _cache_avg_price(parsed)
     await db.record_daily_stats(parsed["daily"], parsed["currency"])
 
@@ -1318,11 +1355,12 @@ async def _maybe_send_weekly_digest(client: Any) -> None:
     if store.last_digest_date == today:
         return
 
-    end_ts = int(time.time() * 1000)
-    start_ts = end_ts - 7 * 24 * 60 * 60 * 1000
+    window = _statistics_window(7, now_local)
     try:
         async with store.client_lock:
-            summary = await client.async_get_charge_summary(start_ts=start_ts, end_ts=end_ts)
+            summary = await client.async_get_charge_summary(
+                start_ts=window["startMs"], end_ts=window["endMs"]
+            )
     except Exception:
         logger.warning("Weekly digest: could not fetch charge summary", exc_info=True)
         return
@@ -1333,21 +1371,25 @@ async def _maybe_send_weekly_digest(client: Any) -> None:
     logger.info("Sent weekly charging digest")
 
 
-async def _previous_period_totals(client: Any, current_start_ts: int, days: int) -> Optional[dict[str, Any]]:
+async def _previous_period_totals(
+    client: Any, window: dict[str, Any]
+) -> Optional[dict[str, Any]]:
     """Totals for the equal-length window immediately before the current one.
 
     Used for the month-over-month comparison. Best-effort: None on any failure,
     so the comparison simply hides rather than failing the statistics request.
     """
-    prev_end = current_start_ts
-    prev_start = prev_end - days * 24 * 60 * 60 * 1000
     try:
         async with store.client_lock:
-            summary = await client.async_get_charge_summary(start_ts=prev_start, end_ts=prev_end)
+            summary = await client.async_get_charge_summary(
+                start_ts=window["previousStartMs"], end_ts=window["startMs"]
+            )
     except Exception:  # noqa: BLE001
         logger.warning("Could not fetch previous-period summary for comparison", exc_info=True)
         return None
-    totals = parse_summary({k: v for k, v in summary.items() if k != "granularity"}, days)["totals"]
+    totals = parse_summary(
+        {k: v for k, v in summary.items() if k != "granularity"}, window["days"]
+    )["totals"]
     return {
         "energyKwh": totals["energyKwh"],
         "costTotal": totals["costTotal"],
@@ -1355,42 +1397,51 @@ async def _previous_period_totals(client: Any, current_start_ts: int, days: int)
     }
 
 
-async def _miles_driven(days: int) -> Optional[int]:
-    """Odometer span (miles) across this window's charge sessions, or None.
-
-    None when persistence is off or there aren't two odometer readings to span.
-    Shared by the efficiency and running-cost figures so both rest on one read.
-    """
+async def _driving_metrics(window: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """Fully-contained, single-vehicle charge-to-drive intervals for this window."""
     if not db.is_enabled():
         return None
-    since = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
-    miles = await db.get_miles_driven(since)
-    return miles if miles and miles > 0 else None
-
-
-def _efficiency(miles: Optional[int], energy_kwh: float) -> Optional[dict[str, Any]]:
-    """Driving efficiency (mi/kWh): miles driven / energy charged.
-
-    Over a long enough window energy charged ≈ energy consumed, so this is a fair
-    real-world figure. None when there's no mileage span or no energy.
-    """
-    if miles is None or energy_kwh <= 0:
+    vehicle_id = store.selected_vehicle_id or await db.get_single_vehicle_id()
+    if not vehicle_id:
         return None
-    return {"milesDriven": miles, "milesPerKwh": round(miles / energy_kwh, 2)}
+    return await db.get_vehicle_driving_metrics(
+        window["start"].astimezone(datetime.timezone.utc),
+        window["end"].astimezone(datetime.timezone.utc),
+        vehicle_id,
+    )
 
 
-def _running_cost(miles: Optional[int], cost_total: float) -> Optional[dict[str, Any]]:
-    """Real-world running cost (£/mile): money spent charging / miles driven.
-
-    The honest petrol-comparison figure, in the statistics currency. None when
-    there's no mileage span or nothing was spent in the window.
-    """
-    if miles is None or cost_total <= 0:
+def _efficiency(metrics: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """Distance after home charging divided by matched final charger energy."""
+    if not metrics or metrics["energyWh"] <= 0 or metrics["milesDriven"] <= 0:
         return None
+    energy_kwh = metrics["energyWh"] / 1000
     return {
-        "costPerMile": round(cost_total / miles, 3),
-        "milesDriven": miles,
+        "milesDriven": metrics["milesDriven"],
+        "milesPerKwh": round(metrics["milesDriven"] / energy_kwh, 2),
+        "energyKwh": round(energy_kwh, 3),
+        "intervalCount": metrics["intervalCount"],
+        "vehicleId": metrics["vehicleId"],
+        "from": metrics["from"].isoformat() if metrics.get("from") else None,
+        "to": metrics["to"].isoformat() if metrics.get("to") else None,
+        "scope": "matched_home_charging",
+    }
+
+
+def _running_cost(metrics: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """Actual reconciled home-charging cost per matched odometer mile."""
+    if not metrics or metrics.get("costMinor") is None or metrics["costMilesDriven"] <= 0:
+        return None
+    currency = metrics.get("costCurrency") or "GBP"
+    factor = {"JPY": 1, "KWD": 1000}.get(currency, 100)
+    cost_total = metrics["costMinor"] / factor
+    return {
+        "costPerMile": round(cost_total / metrics["costMilesDriven"], 3),
+        "milesDriven": metrics["costMilesDriven"],
         "costTotal": round(cost_total, 2),
+        "currency": currency,
+        "intervalCount": metrics["costIntervalCount"],
+        "scope": "matched_actual_home_charging",
     }
 
 
@@ -1400,7 +1451,8 @@ async def get_statistics(days: int = Query(default=7, ge=1, le=90)) -> JSONRespo
     if client is None:
         raise HTTPException(status_code=503, detail="Backend not connected to Ohme yet")
 
-    cache_key = f"days={days}"
+    window = _statistics_window(days)
+    cache_key = f"days={days};end={window['end'].date().isoformat()}"
     now = time.time()
     if (
         _summary_cache["key"] == cache_key
@@ -1409,25 +1461,34 @@ async def get_statistics(days: int = Query(default=7, ge=1, le=90)) -> JSONRespo
     ):
         return JSONResponse(_summary_cache["value"])
 
-    end_ts = int(now * 1000)
-    start_ts = end_ts - days * 24 * 60 * 60 * 1000
     try:
         async with store.client_lock:
-            summary = await client.async_get_charge_summary(start_ts=start_ts, end_ts=end_ts)
+            summary = await client.async_get_charge_summary(
+                start_ts=window["startMs"], end_ts=window["endMs"]
+            )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to fetch charge summary", exc_info=True)
         raise HTTPException(status_code=502, detail="Could not fetch statistics from Ohme") from exc
 
     # async_get_charge_summary returns granularity as an enum; drop it before serialising.
     parsed = parse_summary({k: v for k, v in summary.items() if k != "granularity"}, days)
+    parsed["daily"] = _complete_daily_series(parsed["daily"], window)
+    parsed["window"] = {
+        "from": window["start"].isoformat(),
+        "toExclusive": window["end"].isoformat(),
+        "completeThrough": window["end"].isoformat(),
+        "timezone": window["timezone"],
+    }
     _cache_avg_price(parsed)
-    # Driving efficiency + real-world running cost from the odometer history (one
-    # mileage read feeds both; each is null when unavailable).
-    miles = await _miles_driven(days)
-    parsed["efficiency"] = _efficiency(miles, parsed["totals"]["energyKwh"])
-    parsed["runningCost"] = _running_cost(miles, parsed["totals"]["costTotal"])
+    metrics = await _driving_metrics(window)
+    parsed["efficiency"] = _efficiency(metrics)
+    parsed["runningCost"] = _running_cost(metrics)
+    parsed["scope"] = {
+        "summary": "ohme_account",
+        "vehicleId": metrics.get("vehicleId") if metrics else store.selected_vehicle_id,
+    }
     # Period-over-period comparison: the previous equal-length window (best-effort).
-    previous = await _previous_period_totals(client, start_ts, days)
+    previous = await _previous_period_totals(client, window)
     parsed["comparison"] = {"previous": previous} if previous is not None else None
     _summary_cache.update(key=cache_key, value=parsed, at=now)
     # Opportunistically persist the day totals we just fetched (no-op when disabled).
