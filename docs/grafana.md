@@ -33,6 +33,8 @@ In Grafana add a **PostgreSQL** datasource:
 | `daily_stats`        | every `DAILY_STATS_INTERVAL` + on dashboard views | per-day energy / cost / savings |
 | `grid_consumption`   | every `DAILY_STATS_INTERVAL` (when Octopus consumption is configured) | half-hourly whole-house import split into car vs rest-of-house |
 | `session_events`     | target changes and other session lifecycle events | audit trail for each physical plug-in |
+| `tariff_rates`       | every 30 minutes when Agile is enabled | durable tariff windows used for actual cost |
+| `charging_intervals` | when a session finishes and reconciles | measured session Wh and integer-minor-unit cost by tariff interval |
 
 Schema changes are versioned with Alembic and applied automatically at backend
 startup. `charge_sessions.session_key` is the durable idempotency key for a
@@ -99,7 +101,11 @@ ORDER BY stat_date;
 Recent charge sessions (table):
 
 ```sql
-SELECT plugged_in_at, vehicle_name, soc_percent, target_percent, topup_percent, action, odometer_miles, soh_percent
+SELECT plugged_in_at, vehicle_name, soc_percent, target_percent, topup_percent,
+       actual_energy_wh / 1000.0 AS actual_kwh,
+       actual_cost_minor / 100.0 AS actual_cost,
+       cost_currency, tariff_coverage, quality_status,
+       action, odometer_miles, soh_percent
 FROM charge_sessions
 ORDER BY plugged_in_at DESC
 LIMIT 50;

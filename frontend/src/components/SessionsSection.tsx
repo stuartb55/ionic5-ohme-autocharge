@@ -59,6 +59,13 @@ export function SessionsSection({ data }: { data: SessionsResponse }) {
             if (s.topupPercent != null) extras.push(`+${s.topupPercent}%`);
             if (s.odometerMiles != null) extras.push(`${Math.round(s.odometerMiles).toLocaleString()} mi`);
             if (s.sohPercent != null) extras.push(`SoH ${s.sohPercent}%`);
+            if (s.actualEnergyKwh != null) extras.push(`${s.actualEnergyKwh.toFixed(1)} kWh actual`);
+            if (s.actualCost != null) {
+              extras.push(`${new Intl.NumberFormat(undefined, { style: 'currency', currency: s.costCurrency ?? 'GBP' }).format(s.actualCost)} actual`);
+            }
+            if (s.quality && s.quality !== 'reconciled' && s.quality !== 'complete') {
+              extras.push(`Data: ${s.quality.replace(/_/g, ' ')}`);
+            }
             if (s.vehicleName) extras.push(s.vehicleName);
             const detail = [battery, ...extras].filter(Boolean).join(' · ') || '—';
             return (

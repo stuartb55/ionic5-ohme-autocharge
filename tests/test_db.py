@@ -201,9 +201,10 @@ async def test_get_recent_sessions_maps_rows(fake_pool):
     import datetime as dt
 
     conn, cursor = fake_pool
+    completed = dt.datetime(2026, 6, 2, 1, 0, tzinfo=dt.timezone.utc)
     cursor.rows = [
-        (3, dt.datetime(2026, 6, 1, 21, 42, tzinfo=dt.timezone.utc), "IONIQ 5", 54, 80, 26, "configured", 12450, 98),
-        (2, None, "IONIQ 5", 85, 80, 0, "skipped_at_target", None, None),
+        (3, dt.datetime(2026, 6, 1, 21, 42, tzinfo=dt.timezone.utc), "IONIQ 5", 54, 80, 26, "configured", 12450, 98, 18500, 123, "GBP", "actual_agile", 1.0, "reconciled", completed),
+        (2, None, "IONIQ 5", 85, 80, 0, "skipped_at_target", None, None, None, None, None, None, None, "validated", None),
     ]
 
     sessions = await db.get_recent_sessions(10)
@@ -222,6 +223,13 @@ async def test_get_recent_sessions_maps_rows(fake_pool):
             "action": "configured",
             "odometerMiles": 12450,
             "sohPercent": 98,
+            "actualEnergyKwh": 18.5,
+            "actualCost": 1.23,
+            "costCurrency": "GBP",
+            "costMethod": "actual_agile",
+            "tariffCoverage": 1.0,
+            "quality": "reconciled",
+            "completedAt": completed.isoformat(),
         },
         {
             "id": 2,
@@ -233,6 +241,13 @@ async def test_get_recent_sessions_maps_rows(fake_pool):
             "action": "skipped_at_target",
             "odometerMiles": None,
             "sohPercent": None,
+            "actualEnergyKwh": None,
+            "actualCost": None,
+            "costCurrency": None,
+            "costMethod": None,
+            "tariffCoverage": None,
+            "quality": "validated",
+            "completedAt": None,
         },
     ]
 
@@ -242,7 +257,7 @@ async def test_get_all_sessions_orders_chronologically_unbounded(fake_pool):
 
     conn, cursor = fake_pool
     cursor.rows = [
-        (1, dt.datetime(2026, 5, 1, 20, 0, tzinfo=dt.timezone.utc), "IONIQ 5", 40, 80, 40, "configured", 12000, 99),
+        (1, dt.datetime(2026, 5, 1, 20, 0, tzinfo=dt.timezone.utc), "IONIQ 5", 40, 80, 40, "configured", 12000, 99, None, None, None, None, None, "validated", None),
     ]
 
     sessions = await db.get_all_sessions()
@@ -514,6 +529,78 @@ async def test_get_telemetry_between_maps_rows(fake_pool):
     assert "FROM telemetry" in sql and "ORDER BY recorded_at" in sql
     assert params == (start, end)
     assert rows == cursor.rows
+
+
+async def test_get_session_attribution_rows_filters_by_session(fake_pool):
+    import datetime as dt
+
+    conn, cursor = fake_pool
+    t0 = dt.datetime(2026, 6, 1, tzinfo=dt.timezone.utc)
+    cursor.rows = [(t0, 42, 1000.0, 7400.0, "charging", True)]
+    assert await db.get_session_attribution_rows(42) == cursor.rows
+    assert "WHERE session_id = %s" in conn.executed[0][0]
+    assert conn.executed[0][1] == (42,)
+
+
+async def test_tariff_rate_round_trip_helpers(fake_pool, monkeypatch):
+    import datetime as dt
+    from decimal import Decimal
+
+    conn, cursor = fake_pool
+    monkeypatch.setattr(config, "OCTOPUS_PRODUCT_CODE", "AGILE-TEST")
+    monkeypatch.setattr(config, "OCTOPUS_REGION", "A")
+    await db.upsert_tariff_rates([{
+        "from": "2026-06-01T00:00:00Z",
+        "to": "2026-06-01T00:30:00Z",
+        "pricePerKwh": 0.1234,
+    }])
+    _, params = cursor.executemany_calls[0]
+    assert params[0][2] == Decimal("12.3400")
+    assert params[0][4] == "octopus_agile:AGILE-TEST:A"
+
+    t0 = dt.datetime(2026, 6, 1, tzinfo=dt.timezone.utc)
+    t1 = t0 + dt.timedelta(minutes=30)
+    cursor.rows = [(t0, t1, Decimal("12.34"), "GBP", "octopus_agile:AGILE-TEST:A")]
+    rates = await db.get_tariff_rates(t0, t1)
+    assert rates == [{
+        "from": t0.isoformat(), "to": t1.isoformat(), "pricePerKwh": 0.1234,
+        "currency": "GBP", "source": "octopus_agile:AGILE-TEST:A",
+    }]
+    assert conn.executed[-1][1] == (t0, t1)
+
+
+async def test_record_session_reconciliation_persists_intervals_and_total(fake_pool):
+    import datetime as dt
+    import octopus
+
+    conn, cursor = fake_pool
+    t0 = dt.datetime(2026, 6, 1, tzinfo=dt.timezone.utc)
+    priced = octopus.PricedEnergy(
+        intervals=[{
+            "start": t0, "end": t0 + dt.timedelta(minutes=30), "energyWh": 1000,
+            "costMinor": 10, "rateMinorPerKwh": 10.0, "currency": "GBP",
+            "quality": "priced",
+        }],
+        cost_minor=10,
+        coverage=1.0,
+        energy_wh=1000,
+    )
+    await db.record_session_reconciliation(42, priced, counter_energy_wh=1005)
+    assert cursor.executemany_calls[0][1][0][0] == 42
+    sql, params = conn.executed[-1]
+    assert "actual_cost_minor" in sql
+    assert params == (10, "GBP", "actual_agile", 1.0, 1000, 5, "reconciled", 42)
+
+
+async def test_reconciliation_with_energy_mismatch_withholds_actual_cost(fake_pool):
+    import octopus
+
+    conn, _ = fake_pool
+    priced = octopus.PricedEnergy(cost_minor=10, coverage=1.0, energy_wh=500)
+    await db.record_session_reconciliation(42, priced, counter_energy_wh=1000)
+    _, params = conn.executed[-1]
+    assert params[0:3] == (None, None, None)
+    assert params[6] == "energy_mismatch"
 
 
 async def test_upsert_grid_consumption_inserts_dated_rows(fake_pool):

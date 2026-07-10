@@ -163,6 +163,13 @@ export interface ChargeSessionEntry {
   odometerMiles: number | null;
   /** Battery state of health (%) at plug-in, or null. */
   sohPercent: number | null;
+  actualEnergyKwh: number | null;
+  actualCost: number | null;
+  costCurrency: string | null;
+  costMethod: string | null;
+  tariffCoverage: number | null;
+  quality: string | null;
+  completedAt: string | null;
 }
 
 export interface SessionsResponse {
