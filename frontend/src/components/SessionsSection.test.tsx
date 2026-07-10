@@ -26,6 +26,8 @@ describe('SessionsSection', () => {
     expect(screen.getByText(/54%\s*→\s*80%/)).toBeInTheDocument();
     expect(screen.getByText(/\+26%/)).toBeInTheDocument();
     expect(screen.getByText(/12,450 mi/)).toBeInTheDocument();
+    expect(screen.getByText(/18\.5 kWh actual/)).toBeInTheDocument();
+    expect(screen.getByText(/£1\.23 actual/)).toBeInTheDocument();
     expect(screen.getAllByText(/SoH 98%/)).toHaveLength(2);
     expect(screen.getAllByText(/Hyundai IONIQ 5/).length).toBeGreaterThan(0);
     expect(screen.getByText('Target set')).toBeInTheDocument();

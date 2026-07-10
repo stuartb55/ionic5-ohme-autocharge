@@ -208,6 +208,54 @@ def test_cost_for_slots_handles_z_suffix_and_zero_length():
     assert octopus.cost_for_slots(slots, rates) == 2.0
 
 
+def test_cost_for_slots_rejects_overlapping_rates():
+    rates = [_rate(0, 2, 0.10), _rate(1, 2, 0.30)]
+    assert octopus.cost_for_slots([_slot(0, 2, 10)], rates) is None
+
+
+def test_price_energy_buckets_returns_integer_minor_units():
+    base = _dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc)
+    rates = [
+        {"from": base.isoformat(), "to": (base + _dt.timedelta(minutes=30)).isoformat(), "pricePerKwh": 0.10},
+        {"from": (base + _dt.timedelta(minutes=30)).isoformat(), "to": (base + _dt.timedelta(hours=1)).isoformat(), "pricePerKwh": 0.30},
+    ]
+    priced = octopus.price_energy_buckets(
+        {base.isoformat(): 1.0, (base + _dt.timedelta(minutes=30)).isoformat(): 2.0},
+        rates,
+    )
+    assert priced.energy_wh == 3000
+    assert priced.cost_minor == 70  # 1 kWh*10p + 2 kWh*30p
+    assert priced.coverage == 1.0
+    assert [row["costMinor"] for row in priced.intervals] == [10, 60]
+
+
+def test_price_energy_buckets_with_rate_gap_has_no_actual_total():
+    base = _dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc)
+    rates = [{
+        "from": base.isoformat(),
+        "to": (base + _dt.timedelta(minutes=30)).isoformat(),
+        "pricePerKwh": 0.10,
+    }]
+    priced = octopus.price_energy_buckets(
+        {base.isoformat(): 1.0, (base + _dt.timedelta(minutes=30)).isoformat(): 1.0},
+        rates,
+    )
+    assert priced.cost_minor is None
+    assert priced.coverage == 0.5
+    assert priced.intervals[1]["quality"] == "rate_gap_or_overlap"
+
+
+def test_price_energy_buckets_supports_negative_agile_rate():
+    base = _dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc)
+    rates = [{
+        "from": base.isoformat(),
+        "to": (base + _dt.timedelta(minutes=30)).isoformat(),
+        "pricePerKwh": -0.05,
+    }]
+    priced = octopus.price_energy_buckets({base.isoformat(): 1.0}, rates)
+    assert priced.cost_minor == -5
+
+
 # --- household consumption --------------------------------------------------
 
 

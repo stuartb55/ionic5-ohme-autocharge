@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Optional
 
@@ -237,7 +238,9 @@ async def get_recent_sessions(limit: int) -> Optional[list[dict[str, Any]]]:
         async with _pool.connection() as conn:
             cur = await conn.execute(
                 "SELECT id, plugged_in_at, vehicle_name, soc_percent, target_percent, "
-                "topup_percent, action, odometer_miles, soh_percent FROM charge_sessions "
+                "topup_percent, action, odometer_miles, soh_percent, actual_energy_wh, "
+                "actual_cost_minor, cost_currency, cost_method, tariff_coverage, "
+                "quality_status, completed_at FROM charge_sessions "
                 "ORDER BY plugged_in_at DESC LIMIT %s",
                 (limit,),
             )
@@ -253,6 +256,13 @@ async def get_recent_sessions(limit: int) -> Optional[list[dict[str, Any]]]:
                 "action": row[6],
                 "odometerMiles": row[7],
                 "sohPercent": row[8],
+                "actualEnergyKwh": round(row[9] / 1000, 3) if row[9] is not None else None,
+                "actualCost": round(row[10] / 100, 2) if row[10] is not None else None,
+                "costCurrency": row[11],
+                "costMethod": row[12],
+                "tariffCoverage": row[13],
+                "quality": row[14],
+                "completedAt": row[15].isoformat() if row[15] else None,
             }
             for row in rows
         ]
@@ -275,7 +285,9 @@ async def get_all_sessions() -> Optional[list[dict[str, Any]]]:
         async with _pool.connection() as conn:
             cur = await conn.execute(
                 "SELECT id, plugged_in_at, vehicle_name, soc_percent, target_percent, "
-                "topup_percent, action, odometer_miles, soh_percent FROM charge_sessions "
+                "topup_percent, action, odometer_miles, soh_percent, actual_energy_wh, "
+                "actual_cost_minor, cost_currency, cost_method, tariff_coverage, "
+                "quality_status, completed_at FROM charge_sessions "
                 "ORDER BY plugged_in_at ASC"
             )
             rows = await cur.fetchall()
@@ -290,6 +302,13 @@ async def get_all_sessions() -> Optional[list[dict[str, Any]]]:
                 "action": row[6],
                 "odometerMiles": row[7],
                 "sohPercent": row[8],
+                "actualEnergyKwh": round(row[9] / 1000, 3) if row[9] is not None else None,
+                "actualCost": round(row[10] / 100, 2) if row[10] is not None else None,
+                "costCurrency": row[11],
+                "costMethod": row[12],
+                "tariffCoverage": row[13],
+                "quality": row[14],
+                "completedAt": row[15].isoformat() if row[15] else None,
             }
             for row in rows
         ]
@@ -492,6 +511,148 @@ async def get_telemetry_between(
     except Exception:
         logger.warning("Failed to read telemetry from Postgres", exc_info=True)
         return None
+
+
+async def get_session_attribution_rows(session_id: int) -> Optional[list[tuple]]:
+    """Raw counter/power rows for one explicit session, oldest first."""
+    if _pool is None:
+        return None
+    try:
+        async with _pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT recorded_at, session_id, session_energy_wh, power_watts, "
+                "charger_status, connected FROM telemetry "
+                "WHERE session_id = %s ORDER BY recorded_at",
+                (session_id,),
+            )
+            return [tuple(row) for row in await cur.fetchall()]
+    except Exception:
+        logger.warning("Failed to read session attribution telemetry", exc_info=True)
+        return None
+
+
+async def upsert_tariff_rates(rates: list[dict[str, Any]]) -> None:
+    """Persist normalized tariff windows so actual cost is dashboard-independent."""
+    if _pool is None or not rates:
+        return
+    source = f"octopus_agile:{config.OCTOPUS_PRODUCT_CODE}:{config.OCTOPUS_REGION}"
+    params = []
+    for rate in rates:
+        if not rate.get("from") or not rate.get("to"):
+            continue
+        try:
+            price_minor = Decimal(str(rate["pricePerKwh"])) * 100
+        except (KeyError, ValueError, TypeError):
+            continue
+        params.append((rate["from"], rate["to"], price_minor, "GBP", source))
+    if not params:
+        return
+    try:
+        async with _pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.executemany(
+                    "INSERT INTO tariff_rates "
+                    "(valid_from, valid_to, price_minor_per_kwh, currency, source) "
+                    "VALUES (%s, %s, %s, %s, %s) "
+                    "ON CONFLICT (valid_from, source) DO UPDATE SET "
+                    "valid_to = EXCLUDED.valid_to, "
+                    "price_minor_per_kwh = EXCLUDED.price_minor_per_kwh, "
+                    "currency = EXCLUDED.currency, ingested_at = now()",
+                    params,
+                )
+    except Exception:
+        logger.warning("Failed to persist tariff rates", exc_info=True)
+
+
+async def get_tariff_rates(
+    start: datetime.datetime, end: datetime.datetime
+) -> Optional[list[dict[str, Any]]]:
+    """Persisted tariff windows overlapping ``[start, end)``."""
+    if _pool is None:
+        return None
+    try:
+        async with _pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT valid_from, valid_to, price_minor_per_kwh, currency, source "
+                "FROM tariff_rates WHERE valid_to > %s AND valid_from < %s "
+                "ORDER BY valid_from",
+                (start, end),
+            )
+            rows = await cur.fetchall()
+        return [
+            {
+                "from": row[0].isoformat(),
+                "to": row[1].isoformat(),
+                "pricePerKwh": float(row[2] / 100),
+                "currency": row[3],
+                "source": row[4],
+            }
+            for row in rows
+        ]
+    except Exception:
+        logger.warning("Failed to read persisted tariff rates", exc_info=True)
+        return None
+
+
+async def record_session_reconciliation(
+    session_id: Optional[int], priced: Any, *, counter_energy_wh: float
+) -> None:
+    """Persist tariff-bucket energy and the reconciled actual session cost."""
+    if _pool is None or session_id is None:
+        return
+    counter_wh = max(0, round(counter_energy_wh))
+    delta_wh = counter_wh - priced.energy_wh
+    tolerance_wh = max(100, round(counter_wh * 0.02))
+    if priced.coverage < 1:
+        quality = "tariff_incomplete"
+    elif abs(delta_wh) > tolerance_wh:
+        quality = "energy_mismatch"
+    else:
+        quality = "reconciled"
+    interval_params = [
+        (
+            session_id, interval["start"], interval["end"], interval["energyWh"],
+            interval["costMinor"], interval["rateMinorPerKwh"], interval["currency"],
+            interval["quality"],
+        )
+        for interval in priced.intervals
+    ]
+    try:
+        async with _pool.connection() as conn:
+            if interval_params:
+                async with conn.cursor() as cur:
+                    await cur.executemany(
+                        "INSERT INTO charging_intervals "
+                        "(session_id, interval_start, interval_end, energy_wh, cost_minor, "
+                        "rate_minor_per_kwh, currency, quality_status) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
+                        "ON CONFLICT (session_id, interval_start) DO UPDATE SET "
+                        "interval_end = EXCLUDED.interval_end, energy_wh = EXCLUDED.energy_wh, "
+                        "cost_minor = EXCLUDED.cost_minor, "
+                        "rate_minor_per_kwh = EXCLUDED.rate_minor_per_kwh, "
+                        "currency = EXCLUDED.currency, quality_status = EXCLUDED.quality_status, "
+                        "updated_at = now()",
+                        interval_params,
+                    )
+            stored_cost_minor = priced.cost_minor if quality == "reconciled" else None
+            await conn.execute(
+                "UPDATE charge_sessions SET actual_cost_minor = %s, cost_currency = %s, "
+                "cost_method = %s, tariff_coverage = %s, reconstructed_energy_wh = %s, "
+                "reconciliation_delta_wh = %s, quality_status = %s, updated_at = now() "
+                "WHERE id = %s",
+                (
+                    stored_cost_minor,
+                    "GBP" if stored_cost_minor is not None else None,
+                    "actual_agile" if stored_cost_minor is not None else None,
+                    priced.coverage,
+                    priced.energy_wh,
+                    delta_wh,
+                    quality,
+                    session_id,
+                ),
+            )
+    except Exception:
+        logger.warning("Failed to persist session reconciliation", exc_info=True)
 
 
 async def get_session_telemetry(session_id: int) -> Optional[list[dict[str, Any]]]:

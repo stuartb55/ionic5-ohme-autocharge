@@ -21,6 +21,7 @@ When the car is plugged in, the app reads the real battery state-of-charge from 
 - **Vehicle health** — read-only 12V auxiliary battery level plus the car's own tyre-pressure, washer-fluid and key-fob-battery warnings and anything left open (door/bonnet/boot), shown on the dashboard with an optional ntfy when a warning first appears.
 - **Notifications** — optional [ntfy](https://ntfy.sh) alerts (plug-in, charge finished, problems, vehicle-health warnings) plus a weekly summary digest.
 - **Octopus Agile** *(optional)* — upcoming half-hourly prices and the cheapest slots, plus an Agile-accurate session cost (each charge slot priced against the rate it falls in, not a flat average).
+- **Reconciled actual cost** *(Octopus Agile + Postgres)* — persists tariff windows in the background and prices measured session-energy intervals after charging finishes; incomplete tariff or telemetry coverage is reported instead of guessed.
 - **House vs car energy** *(optional, needs Postgres)* — splits Octopus import into car, household and explicitly unattributed energy; telemetry gaps and inconsistencies remain visible instead of being silently forced into a plausible split.
 - **History & Grafana** *(optional)* — per-session and telemetry data persisted to Postgres.
 - **Battery health trend** *(needs Postgres)* — a state-of-health sparkline on the dashboard showing degradation over time, not just the current figure.

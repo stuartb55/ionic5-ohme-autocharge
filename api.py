@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import time
+from decimal import Decimal, ROUND_HALF_UP
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
@@ -169,7 +170,8 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
     slots = client.slots
     # Total energy the charger will draw this session — the sum of all allocated
     # slots is grid-side (watts × hours), so it already includes charging losses.
-    planned_energy_kwh = round(sum(s.energy for s in slots), 2) if connected else 0.0
+    planned_energy_raw = sum(s.energy for s in slots) if connected else 0.0
+    planned_energy_kwh = round(planned_energy_raw, 2)
     # Prefer an Agile-accurate cost: price each slot against the half-hourly rate
     # it falls in (so an overnight charge through cheap slots isn't valued at a
     # flat average). Falls back to the recent average £/kWh when Agile rates are
@@ -186,7 +188,11 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
         else:
             price = store.avg_price_per_kwh
             if price:
-                projected_cost = round(price * planned_energy_kwh, 2)
+                projected_cost = float(
+                    (Decimal(str(price)) * Decimal(str(planned_energy_raw))).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP
+                    )
+                )
                 projected_cost_method = "average"
                 projected_cost_currency = store.price_currency
 
@@ -326,6 +332,7 @@ async def _maybe_notify_finished(prev_status: str, snap: StatusSnapshot) -> None
         "charging_finished",
         {"energyWh": round(snap.session_energy_wh), "soc": snap.battery_percent},
     )
+    await _reconcile_finished_session(snap)
     name = snap.vehicle_name or "EV"
     kwh = snap.session_energy_wh / 1000
     await ntfy.send(
@@ -398,6 +405,41 @@ async def _maybe_record_telemetry(snap: StatusSnapshot) -> None:
     )
 
 
+async def _reconcile_finished_session(snap: StatusSnapshot) -> None:
+    """Price measured session energy only when telemetry and tariff coverage agree."""
+    if store.active_session_id is None:
+        return
+    rows = await db.get_session_attribution_rows(store.active_session_id)
+    if not rows:
+        await db.record_session_event(
+            store.active_session_id, "reconciliation_skipped", {"reason": "no_telemetry"}
+        )
+        return
+    attribution = energy.attribute_car_kwh(
+        rows, max_gap_seconds=max(config.POLL_INTERVAL * 3, 15 * 60)
+    )
+    start = rows[0][0]
+    end = rows[-1][0] + datetime.timedelta(minutes=30)
+    rates = await db.get_tariff_rates(start, end)
+    if not rates:
+        rates = store.agile_rates
+    priced = octopus.price_energy_buckets(attribution.car_by_slot, rates)
+    await db.record_session_reconciliation(
+        store.active_session_id, priced, counter_energy_wh=snap.session_energy_wh
+    )
+    await db.record_session_event(
+        store.active_session_id,
+        "session_reconciled",
+        {
+            "counterEnergyWh": round(snap.session_energy_wh),
+            "reconstructedEnergyWh": priced.energy_wh,
+            "tariffCoverage": priced.coverage,
+            "costMinor": priced.cost_minor,
+            "attributionIssues": attribution.issue_count,
+        },
+    )
+
+
 def _on_poll_task_done(task: asyncio.Task) -> None:
     """Log loudly if the poll loop ever exits unexpectedly.
 
@@ -440,6 +482,7 @@ async def poll_loop() -> None:
         logger.warning("Could not determine initial charge state", exc_info=True)
 
     last_daily_sync = 0.0  # monotonic time of the last daily-stats persist (0 = never)
+    last_tariff_sync = 0.0
     try:
         while True:
             try:
@@ -468,18 +511,26 @@ async def poll_loop() -> None:
                         title="Autocharge reconnected",
                         tags="white_check_mark",
                     )
-                await _maybe_notify_finished(prev_status, store.status)
-                await _maybe_notify_vehicle_health(prev_snapshot, store.status)
-
                 # Append a telemetry point for Grafana (best-effort, no-op when
                 # persistence is disabled). Outside the lock: it doesn't touch the
                 # Ohme client. Identical idle rows are de-duplicated.
                 await _maybe_record_telemetry(store.status)
+                await _maybe_notify_finished(prev_status, store.status)
+                await _maybe_notify_vehicle_health(prev_snapshot, store.status)
+
+                # Tariff ingestion is a background responsibility: projected and
+                # actual cost accuracy must not depend on opening the dashboard.
+                now_mono = time.monotonic()
+                if (
+                    octopus.is_enabled()
+                    and now_mono - last_tariff_sync >= _TARIFF_CACHE_TTL
+                ):
+                    await _refresh_tariff_rates()
+                    last_tariff_sync = now_mono
 
                 # Refresh Ohme's daily totals into Postgres on a slow cadence so
                 # the history is populated even when nobody opens the dashboard.
                 if db.is_enabled():
-                    now_mono = time.monotonic()
                     if now_mono - last_daily_sync >= config.DAILY_STATS_INTERVAL:
                         await _persist_daily_stats(client)
                         # Pull recent Octopus household consumption and break out
@@ -988,6 +1039,24 @@ _TARIFF_CACHE_TTL = 1800  # 30 min; Agile rates change at most once a day
 _tariff_cache: dict[str, Any] = {"value": None, "at": 0.0}
 
 
+async def _refresh_tariff_rates() -> Optional[dict[str, Any]]:
+    """Fetch, cache and persist tariff windows for forecasts and actual costs."""
+    rates = await octopus.fetch_rates()
+    if rates is None:
+        return None
+    store.agile_rates = rates
+    await db.upsert_tariff_rates(rates)
+    upcoming = rates[:24]
+    payload = {
+        "enabled": True,
+        "currency": "GBP",
+        "rates": upcoming,
+        "cheapest": sorted(upcoming, key=lambda rate: rate["pricePerKwh"])[:3],
+    }
+    _tariff_cache.update(value=payload, at=time.time())
+    return payload
+
+
 @app.get("/api/tariff")
 async def get_tariff() -> JSONResponse:
     """Upcoming Octopus Agile half-hourly rates and the cheapest upcoming slots.
@@ -1001,18 +1070,11 @@ async def get_tariff() -> JSONResponse:
     now = time.time()
     if _tariff_cache["value"] is not None and now - _tariff_cache["at"] < _TARIFF_CACHE_TTL:
         return JSONResponse(_tariff_cache["value"])
-    rates = await octopus.fetch_rates()
-    if rates is None:
+    payload = await _refresh_tariff_rates()
+    if payload is None:
         if _tariff_cache["value"] is not None:
             return JSONResponse(_tariff_cache["value"])
         return JSONResponse({"enabled": True, "currency": "GBP", "rates": [], "cheapest": []})
-    # Cache the full rate list so the synchronous build_snapshot can price the
-    # session's slots against the real per-slot rate (Agile-accurate cost).
-    store.agile_rates = rates
-    upcoming = rates[:24]  # next ~12 hours
-    cheapest = sorted(upcoming, key=lambda r: r["pricePerKwh"])[:3]
-    payload = {"enabled": True, "currency": "GBP", "rates": upcoming, "cheapest": cheapest}
-    _tariff_cache.update(value=payload, at=now)
     return JSONResponse(payload)
 
 
@@ -1088,6 +1150,13 @@ _EXPORT_FIELDS = (
     "action",
     "odometerMiles",
     "sohPercent",
+    "actualEnergyKwh",
+    "actualCost",
+    "costCurrency",
+    "costMethod",
+    "tariffCoverage",
+    "quality",
+    "completedAt",
 )
 
 

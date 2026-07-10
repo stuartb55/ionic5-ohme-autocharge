@@ -12,6 +12,8 @@ from __future__ import annotations
 import base64
 import datetime
 import logging
+from dataclasses import dataclass, field
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
 import aiohttp
@@ -26,6 +28,16 @@ _BASE = "https://api.octopus.energy/v1"
 # account endpoint (it never changes for a given home). None until the first
 # successful lookup — mirrors the singleton pattern in bluelink._manager.
 _meter: Optional[tuple[str, str]] = None
+
+
+@dataclass
+class PricedEnergy:
+    """Delivered energy priced in integer currency-minor units."""
+
+    intervals: list[dict] = field(default_factory=list)
+    cost_minor: Optional[int] = None
+    coverage: float = 0.0
+    energy_wh: int = 0
 
 
 def is_enabled() -> bool:
@@ -134,24 +146,99 @@ def cost_for_slots(slots: list, rates: Optional[list[dict]]) -> Optional[float]:
     if not windows:
         return None
 
-    total = 0.0
+    total = Decimal("0")
     for slot in slots:
         span = (slot.end - slot.start).total_seconds()
         if span <= 0:
             continue  # zero-length slot carries no time-priced energy
         covered = 0.0
-        slot_cost = 0.0
+        slot_cost = Decimal("0")
         for w_start, w_end, price in windows:
             overlap = (min(slot.end, w_end) - max(slot.start, w_start)).total_seconds()
             if overlap > 0:
-                slot_cost += slot.energy * (overlap / span) * price
+                slot_cost += (
+                    Decimal(str(slot.energy))
+                    * (Decimal(str(overlap)) / Decimal(str(span)))
+                    * Decimal(str(price))
+                )
                 covered += overlap
         # A gap (uncovered time) means we can't price the whole slot — bail out
         # rather than under-report. 1s tolerance absorbs float/rounding error.
-        if covered < span - 1:
+        if abs(covered - span) > 1:
             return None
         total += slot_cost
-    return round(total, 2)
+    return float(total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+def price_energy_buckets(
+    car_by_slot: dict[str, float], rates: Optional[list[dict]]
+) -> PricedEnergy:
+    """Price measured half-hour energy buckets against tariff windows.
+
+    Monetary arithmetic is Decimal throughout and converted to integer minor
+    units (pence for GBP) only at the persistence boundary. A session gets an
+    actual total only when every delivered Wh is covered exactly once.
+    """
+    result = PricedEnergy()
+    windows: list[tuple[datetime.datetime, datetime.datetime, Decimal]] = []
+    for rate in rates or []:
+        start = _parse(rate.get("from"))
+        end = _parse(rate.get("to"))
+        price = rate.get("pricePerKwh")
+        if start and end and end > start and isinstance(price, (int, float)):
+            windows.append((start, end, Decimal(str(price)) * Decimal(100)))
+    windows.sort(key=lambda window: window[0])
+
+    covered_wh = 0
+    exact_cost_minor = Decimal("0")
+    for key, raw_kwh in sorted(car_by_slot.items()):
+        start = _parse(key)
+        energy_kwh = Decimal(str(max(0.0, raw_kwh)))
+        energy_wh = int((energy_kwh * 1000).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        if start is None or energy_wh <= 0:
+            continue
+        end = start + datetime.timedelta(minutes=30)
+        span = Decimal(str((end - start).total_seconds()))
+        covered_seconds = Decimal("0")
+        bucket_cost = Decimal("0")
+        weighted_rate = Decimal("0")
+        for rate_start, rate_end, price_minor in windows:
+            overlap_seconds = (min(end, rate_end) - max(start, rate_start)).total_seconds()
+            if overlap_seconds <= 0:
+                continue
+            overlap = Decimal(str(overlap_seconds))
+            fraction = overlap / span
+            covered_seconds += overlap
+            bucket_cost += energy_kwh * fraction * price_minor
+            weighted_rate += price_minor * fraction
+        fully_covered = abs(covered_seconds - span) <= Decimal("1")
+        cost_minor = (
+            int(bucket_cost.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+            if fully_covered
+            else None
+        )
+        if fully_covered:
+            covered_wh += energy_wh
+            exact_cost_minor += bucket_cost
+        result.energy_wh += energy_wh
+        result.intervals.append(
+            {
+                "start": start,
+                "end": end,
+                "energyWh": energy_wh,
+                "costMinor": cost_minor,
+                "rateMinorPerKwh": float(weighted_rate) if fully_covered else None,
+                "currency": "GBP" if fully_covered else None,
+                "quality": "priced" if fully_covered else "rate_gap_or_overlap",
+            }
+        )
+
+    result.coverage = covered_wh / result.energy_wh if result.energy_wh else 0.0
+    if result.energy_wh and covered_wh == result.energy_wh:
+        result.cost_minor = int(
+            exact_cost_minor.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        )
+    return result
 
 
 # --- household consumption (authenticated account API) -----------------------

@@ -536,7 +536,8 @@ def test_sessions_export_csv(client):
     lines = res.text.strip().splitlines()
     assert lines[0].split(",") == [
         "id", "pluggedInAt", "vehicleName", "socPercent", "targetPercent",
-        "topupPercent", "action", "odometerMiles", "sohPercent",
+        "topupPercent", "action", "odometerMiles", "sohPercent", "actualEnergyKwh",
+        "actualCost", "costCurrency", "costMethod", "tariffCoverage", "quality", "completedAt",
     ]
     assert lines[1].startswith("1,2026-06-01T21:42:00+00:00,IONIQ 5,62,80,18,configured")
 
@@ -682,7 +683,8 @@ async def test_notifies_when_charging_finishes():
     )
     with patch("ntfy.send", new=AsyncMock()) as mock_notify, \
          patch("db.complete_session", new=AsyncMock()) as complete, \
-         patch("db.record_session_event", new=AsyncMock()) as event:
+         patch("db.record_session_event", new=AsyncMock()) as event, \
+         patch("api._reconcile_finished_session", new=AsyncMock()) as reconcile:
         await api._maybe_notify_finished("charging", snap)
 
     mock_notify.assert_awaited_once()
@@ -696,6 +698,7 @@ async def test_notifies_when_charging_finishes():
     )
     event.assert_awaited_once()
     assert event.call_args.args[:2] == (42, "charging_finished")
+    reconcile.assert_awaited_once_with(snap)
 
 
 async def test_notifies_when_short_topup_finishes_from_plugged_in():
@@ -708,6 +711,34 @@ async def test_notifies_when_short_topup_finishes_from_plugged_in():
     with patch("ntfy.send", new=AsyncMock()) as mock_notify:
         await api._maybe_notify_finished("plugged_in", snap)
     mock_notify.assert_awaited_once()
+
+
+async def test_reconcile_finished_session_prices_measured_energy():
+    import datetime as dt
+
+    store.active_session_id = 42
+    t0 = dt.datetime(2026, 6, 1, tzinfo=dt.timezone.utc)
+    rows = [
+        (t0, 42, 0.0, 7400.0, "charging", True),
+        (t0 + dt.timedelta(minutes=5), 42, 500.0, 7400.0, "finished", True),
+    ]
+    rates = [{
+        "from": t0.isoformat(),
+        "to": (t0 + dt.timedelta(minutes=30)).isoformat(),
+        "pricePerKwh": 0.10,
+    }]
+    snap = StatusSnapshot(connected=True, charger_status="finished", session_energy_wh=500.0)
+    with patch("db.get_session_attribution_rows", new=AsyncMock(return_value=rows)), \
+         patch("db.get_tariff_rates", new=AsyncMock(return_value=rates)), \
+         patch("db.record_session_reconciliation", new=AsyncMock()) as record, \
+         patch("db.record_session_event", new=AsyncMock()) as event:
+        await api._reconcile_finished_session(snap)
+    priced = record.call_args.args[1]
+    assert priced.energy_wh == 500
+    assert priced.cost_minor == 5
+    assert priced.coverage == 1.0
+    assert record.call_args.kwargs == {"counter_energy_wh": 500.0}
+    assert event.call_args.args[1] == "session_reconciled"
 
 
 @pytest.mark.parametrize(
@@ -901,12 +932,15 @@ def test_tariff_returns_rates_and_cheapest(client):
         {"from": "2026-06-26T18:00:00Z", "to": "2026-06-26T18:30:00Z", "pricePerKwh": 0.15},
     ]
     with patch("octopus.is_enabled", return_value=True), \
-         patch("octopus.fetch_rates", new=AsyncMock(return_value=rates)):
+         patch("octopus.fetch_rates", new=AsyncMock(return_value=rates)), \
+         patch("db.upsert_tariff_rates", new=AsyncMock()) as persist:
         body = client.get("/api/tariff").json()
     assert body["enabled"] is True
     assert len(body["rates"]) == 3
     # Cheapest first, capped at 3.
     assert body["cheapest"][0]["pricePerKwh"] == 0.08
+    persist.assert_awaited_once_with(rates)
+    assert store.agile_rates == rates
 
 
 def test_tariff_caches_between_requests(client):
