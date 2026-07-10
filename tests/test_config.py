@@ -52,3 +52,19 @@ def test_empty_value_counts_as_missing(monkeypatch, reimport_config):
 def test_all_vars_present_imports_cleanly(reimport_config):
     config = reimport_config()
     assert config.OHME_EMAIL  # conftest stubs are in effect
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [("CHARGE_TARGET", "101"), ("POLL_INTERVAL", "0"), ("UPSTREAM_TIMEOUT", "nope")],
+)
+def test_invalid_numeric_settings_fail_fast(monkeypatch, reimport_config, name, value):
+    monkeypatch.setenv(name, value)
+    with pytest.raises(SystemExit, match=name):
+        reimport_config()
+
+
+def test_invalid_timezone_fails_fast(monkeypatch, reimport_config):
+    monkeypatch.setenv("TIMEZONE", "Not/A_Real_Zone")
+    with pytest.raises(SystemExit, match="TIMEZONE"):
+        reimport_config()

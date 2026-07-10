@@ -1,7 +1,22 @@
 import os
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def _int_setting(name: str, default: int, *, minimum: int, maximum: int | None = None) -> int:
+    """Read a bounded integer setting or stop startup with a useful message."""
+    raw = os.getenv(name, str(default))
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise SystemExit(f"{name} must be an integer (got {raw!r})") from exc
+    if value < minimum or (maximum is not None and value > maximum):
+        bounds = f"{minimum}..{maximum}" if maximum is not None else f">= {minimum}"
+        raise SystemExit(f"{name} must be {bounds} (got {value})")
+    return value
 
 # Validate all required vars up front so a missing one produces a single clear
 # message naming everything that needs fixing, instead of a KeyError traceback
@@ -32,8 +47,8 @@ OHME_PASSWORD = os.environ["OHME_PASSWORD"]
 # Empty in local/dev runs; surfaced via GET /api/version.
 APP_VERSION = os.getenv("APP_VERSION", "")
 
-CHARGE_TARGET = int(os.getenv("CHARGE_TARGET", "80"))
-POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "180"))
+CHARGE_TARGET = _int_setting("CHARGE_TARGET", 80, minimum=20, maximum=100)
+POLL_INTERVAL = _int_setting("POLL_INTERVAL", 180, minimum=10)
 
 # Maximum seconds to wait on a single upstream call (Hyundai Bluelink / Ohme)
 # before giving up and treating it as a failed read. Stops a hung or very slow
@@ -41,20 +56,25 @@ POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "180"))
 # a worker thread under a module lock), from holding that lock from the caller's
 # view. On timeout the loop keeps the last-known-good snapshot and retries next
 # interval. Default 30s.
-UPSTREAM_TIMEOUT = int(os.getenv("UPSTREAM_TIMEOUT", "30"))
+UPSTREAM_TIMEOUT = _int_setting("UPSTREAM_TIMEOUT", 30, minimum=1, maximum=300)
 
 # Upper bound (seconds) on the poll loop's back-off when upstreams are failing.
 # After a run of consecutive failed polls the loop waits POLL_INTERVAL * 2**(n-1),
 # capped here, so a sustained Ohme/Bluelink outage isn't hammered every interval;
 # it snaps back to POLL_INTERVAL on the first success. Default 30 min.
-MAX_POLL_BACKOFF = int(os.getenv("MAX_POLL_BACKOFF", str(30 * 60)))
+MAX_POLL_BACKOFF = _int_setting("MAX_POLL_BACKOFF", 30 * 60, minimum=POLL_INTERVAL)
 
 # How often (seconds) to re-read the live SOC from Bluelink while a charge is
 # actively running, so the dashboard battery ring climbs during the session
 # instead of sitting at the plug-in reading. Reads Hyundai's server-side cached
 # state (the car pushes updates while charging), so it never wakes/drains the
 # car. Default 30 min; 0 disables mid-charge refresh (SOC stays at plug-in).
-LIVE_SOC_INTERVAL = int(os.getenv("LIVE_SOC_INTERVAL", str(30 * 60)))
+LIVE_SOC_INTERVAL = _int_setting("LIVE_SOC_INTERVAL", 30 * 60, minimum=0)
+
+# Reject an old cached vehicle state before it can configure a charge. Hyundai's
+# cached-state response carries the time at which the car supplied the reading;
+# 0 disables this guard for installations whose vehicle does not expose it.
+MAX_SOC_AGE = _int_setting("MAX_SOC_AGE", 30 * 60, minimum=0)
 
 NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")
 NTFY_URL = os.getenv("NTFY_URL", "https://ntfy.sh")
@@ -101,3 +121,7 @@ TELEMETRY_RETENTION_DAYS = int(os.getenv("TELEMETRY_RETENTION_DAYS", "365"))
 # the host's (containers default to UTC). Defaults to the UK since this app is
 # GBP/UK-only. Respects TZ when set so one variable can drive logs and stats.
 TIMEZONE = os.getenv("TIMEZONE") or os.getenv("TZ") or "Europe/London"
+try:
+    ZoneInfo(TIMEZONE)
+except (ZoneInfoNotFoundError, ValueError) as exc:
+    raise SystemExit(f"TIMEZONE/TZ must be a valid IANA timezone (got {TIMEZONE!r})") from exc

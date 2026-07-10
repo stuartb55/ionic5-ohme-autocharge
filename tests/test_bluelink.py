@@ -1,3 +1,4 @@
+import datetime
 import time
 from unittest.mock import MagicMock, patch
 import pytest
@@ -16,6 +17,7 @@ def _mock_vehicle(soc, *, ev_range=None, ev_range_unit=None, odometer=None, odom
                   aux_battery=None, tyre_warn=None, washer_warn=None, key_warn=None,
                   open_items=None):
     v = MagicMock()
+    v.last_updated_at = datetime.datetime.now(datetime.timezone.utc)
     v.ev_battery_percentage = soc
     v.ev_driving_range = ev_range
     v.ev_driving_range_unit = ev_range_unit
@@ -66,6 +68,34 @@ def test_raises_runtime_error_when_soc_is_none():
     vm = _mock_manager({"vin1": _mock_vehicle(None)})
     with patch("bluelink._get_manager", return_value=vm):
         with pytest.raises(RuntimeError, match="battery percentage"):
+            bluelink.get_battery_percentage()
+
+
+@pytest.mark.parametrize("soc", [-1, 101, float("nan"), True, "62"])
+def test_rejects_invalid_soc(soc):
+    vm = _mock_manager({"vin1": _mock_vehicle(soc)})
+    with patch("bluelink._get_manager", return_value=vm):
+        with pytest.raises(RuntimeError, match="battery percentage"):
+            bluelink.get_battery_percentage()
+
+
+def test_rejects_stale_vehicle_state(monkeypatch):
+    monkeypatch.setattr(config, "MAX_SOC_AGE", 60)
+    vehicle = _mock_vehicle(62)
+    vehicle.last_updated_at = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=5)
+    vm = _mock_manager({"vin1": vehicle})
+    with patch("bluelink._get_manager", return_value=vm):
+        with pytest.raises(RuntimeError, match="stale"):
+            bluelink.get_battery_percentage()
+
+
+def test_rejects_missing_observation_time(monkeypatch):
+    monkeypatch.setattr(config, "MAX_SOC_AGE", 60)
+    vehicle = _mock_vehicle(62)
+    vehicle.last_updated_at = None
+    vm = _mock_manager({"vin1": vehicle})
+    with patch("bluelink._get_manager", return_value=vm):
+        with pytest.raises(RuntimeError, match="observation time"):
             bluelink.get_battery_percentage()
 
 
@@ -162,8 +192,20 @@ def test_get_vehicle_state_selects_by_id():
     vm = _mock_manager({"a": _mock_vehicle(60), "b": _mock_vehicle(90)})
     with patch("bluelink._get_manager", return_value=vm):
         assert bluelink.get_vehicle_state("b").soc == 90
-        assert bluelink.get_vehicle_state("missing").soc == 60  # unknown id -> first
+        with pytest.raises(RuntimeError, match="refusing to use a different vehicle"):
+            bluelink.get_vehicle_state("missing")
         assert bluelink.get_vehicle_state().soc == 60  # None -> first
+
+
+def test_vehicle_state_carries_stable_identity_and_observation_time():
+    vehicle = _mock_vehicle(62)
+    vehicle.VIN = "VIN123"
+    vm = _mock_manager({"vehicle-1": vehicle})
+    with patch("bluelink._get_manager", return_value=vm):
+        state = bluelink.get_vehicle_state("vehicle-1")
+    assert state.vehicle_id == "vehicle-1"
+    assert state.vin == "VIN123"
+    assert state.observed_at is not None
 
 
 def test_list_vehicles_maps_fields():
