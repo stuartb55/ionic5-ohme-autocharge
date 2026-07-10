@@ -78,7 +78,7 @@ describe('EnergyUsageSection', () => {
       totals: { importKwh: 1.2, carKwh: 0, houseKwh: 0, unattributedKwh: 1.2 },
     };
     render(<EnergyUsageSection data={uncertain} onDateChange={() => {}} />);
-    expect(screen.getByText('Unattributed')).toBeInTheDocument();
+    expect(screen.getAllByText('Unattributed')).toHaveLength(2); // total label + legend
     expect(screen.getAllByText('1.2 kWh')).toHaveLength(2);
   });
 });
