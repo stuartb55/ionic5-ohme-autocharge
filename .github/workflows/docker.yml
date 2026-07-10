@@ -22,6 +22,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
+      - name: Lint Python
+        run: ruff check .
+
       - name: Run tests
         run: python -m pytest tests/ -v
 
@@ -52,11 +55,47 @@ jobs:
       - name: Production build
         run: npm run build
 
+  migration-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: autocharge_test
+          POSTGRES_USER: autocharge
+          POSTGRES_PASSWORD: autocharge
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U autocharge -d autocharge_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CI_MIGRATION_TEST: "1"
+      DATABASE_URL: postgresql://autocharge:autocharge@localhost:5432/autocharge_test
+      HYUNDAI_USERNAME: ci
+      HYUNDAI_PASSWORD: ci
+      HYUNDAI_PIN: "0000"
+      OHME_EMAIL: ci@example.com
+      OHME_PASSWORD: ci
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install backend dependencies
+        run: pip install -r requirements.txt
+      - name: Upgrade legacy schema and verify exact-unit backfill
+        run: python tests/integration/check_migrations.py
+
   # Build both images and confirm the containers actually boot and serve their
   # health endpoints. Polling is disabled so this needs no Ohme/Hyundai
   # credentials and makes no external calls — it only proves the app runs.
   smoke:
-    needs: [test, frontend-test]
+    needs: [test, frontend-test, migration-test]
     runs-on: ubuntu-latest
 
     steps:

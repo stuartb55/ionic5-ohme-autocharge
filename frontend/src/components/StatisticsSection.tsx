@@ -150,6 +150,11 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
           </ul>
         </details>
       </div>
+      {stats.stale && (
+        <p className="stats-stale" role="status">
+          Ohme is temporarily unavailable. Showing the last validated statistics snapshot.
+        </p>
+      )}
 
       <div className="stat-cards">
         <StatCard

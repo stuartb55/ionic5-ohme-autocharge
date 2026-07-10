@@ -11,7 +11,7 @@ function prefersDark(): boolean {
 
 export function getStoredTheme(): Theme {
   try {
-    const v = localStorage.getItem(STORAGE_KEY);
+    const v = window.localStorage.getItem(STORAGE_KEY);
     if (v === 'light' || v === 'dark' || v === 'system') return v;
   } catch {
     /* localStorage unavailable (private mode etc.) — fall back to system */
@@ -50,7 +50,7 @@ export function useTheme(): [Theme, (theme: Theme) => void] {
   const setTheme = useCallback((next: Theme) => {
     setThemeState(next);
     try {
-      localStorage.setItem(STORAGE_KEY, next);
+      window.localStorage.setItem(STORAGE_KEY, next);
     } catch {
       /* ignore persistence failures */
     }

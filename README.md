@@ -111,6 +111,7 @@ All settings come from environment variables (or `.env`). Only the five credenti
 | `WEEKLY_DIGEST_DAY` / `WEEKLY_DIGEST_HOUR` | `0` / `8` | Weekday (0=Mon … 6=Sun) and local hour for the weekly digest. Day outside 0–6 disables it. Needs ntfy. |
 | `OCTOPUS_PRODUCT_CODE` / `OCTOPUS_REGION` | *(off)* | Octopus Agile product code + single-letter DNO region (A–P) to enable the tariff card. |
 | `OCTOPUS_API_KEY` / `OCTOPUS_ACCOUNT_NUMBER` | *(off)* | Octopus account API key + account number (e.g. `A-AAAA1111`) to enable the house-vs-car energy card. The import meter is auto-discovered. Needs `DATABASE_URL` too. |
+| `CONSUMPTION_BACKFILL_DAYS` | `90` | Initial Octopus consumption history to ingest. Later runs resume from a durable cursor with overlap for corrections. |
 | `DATABASE_URL` | *(off)* | Postgres connection string for charging history. Blank runs entirely in memory. The compose files default this to the bundled Postgres. |
 | `DAILY_STATS_INTERVAL` | `21600` | Seconds between background refreshes of Ohme's daily totals into Postgres (6h). |
 | `TELEMETRY_RETENTION_DAYS` | `365` | How long to keep per-poll telemetry rows. `0` keeps forever. |
@@ -165,6 +166,7 @@ The header has a live-freshness indicator, a manual **refresh**, a **theme** tog
 
 ```bash
 cd frontend
+nvm use           # Node 24, matching CI (see .nvmrc)
 npm install
 npm run dev      # Vite dev server on :5173, proxies /api to http://localhost:8000
 npm run test     # Vitest component + MSW integration tests
@@ -177,10 +179,11 @@ npm run build    # type-check + production build to dist/
 | Endpoint | Description |
 |---|---|
 | `GET /api/health` | Liveness probe (503 if the poll loop has died) |
+| `GET /api/data-quality` | Read-only persistence completeness counters, ingestion freshness, and statistics-cache age for monitoring |
 | `GET /api/version` | Build git SHA (`dev` when unset) |
 | `GET /api/status` | Vehicle SOC, range, SoH, lock/location, health (12V battery, tyre/washer/key warnings, anything left open), connection, charge rate, target, session energy + estimated cost, ready-by, per-day targets |
 | `GET /api/schedule` | Allocated charge slots + next slot times |
-| `GET /api/statistics?days=N` | Typed complete-calendar-day totals plus per-family source, method, observation/completeness timestamps, quality and matched coverage; includes scoped efficiency, actual running cost and prior comparison (N = 1–90) |
+| `GET /api/statistics?days=N` | Typed complete-calendar-day totals plus provenance and coverage; serves the last validated snapshot with explicit `stale` quality during a temporary Ohme outage (N = 1–90) |
 | `GET /api/sessions?limit=N` | Recent plug-in sessions from Postgres (N = 1–50; `enabled: false` when persistence is off) |
 | `GET /api/sessions/export?format=csv\|json` | Download the **full** plug-in history as a CSV or JSON attachment (404 when persistence is off) |
 | `GET /api/sessions/{id}/telemetry` | Per-poll charge curve (SOC + power over time) for one session (404 when the id is unknown; `enabled: false` when persistence is off) |
@@ -218,7 +221,7 @@ Set both `OCTOPUS_PRODUCT_CODE` (e.g. `AGILE-24-10-01`) and `OCTOPUS_REGION` (yo
 
 ## House vs car energy (optional)
 
-Set `OCTOPUS_API_KEY` (your account API key, from [octopus.energy/dashboard/developer](https://octopus.energy/dashboard/developer/)) and `OCTOPUS_ACCOUNT_NUMBER` (e.g. `A-AAAA1111`) to show a **House vs car** card: your whole-house grid import for a day, broken half-hour by half-hour into the car-charging share and the rest of the household. The car portion is reconstructed from the charge telemetry, so this also needs `DATABASE_URL`. The import meter (MPAN + serial) is discovered automatically from your account, and the data is also persisted to the `grid_consumption` table for Grafana. Because Octopus publishes consumption a day in arrears, the card defaults to **yesterday** (page back with the day selector). Leave either variable blank to hide the card.
+Set `OCTOPUS_API_KEY` (your account API key, from [octopus.energy/dashboard/developer](https://octopus.energy/dashboard/developer/)) and `OCTOPUS_ACCOUNT_NUMBER` (e.g. `A-AAAA1111`) to show a **House vs car** card: your whole-house grid import for a day, broken half-hour by half-hour into the car-charging share and the rest of the household. The car portion is reconstructed from charge telemetry, so this also needs `DATABASE_URL`. Every import serial on the current property is rediscovered daily, allowing history to span a meter exchange. The first successful run backfills `CONSUMPTION_BACKFILL_DAYS`; an `ingestion_cursors` row then makes later runs resumable while overlapping recent days for late corrections. Because Octopus publishes consumption in arrears, the card defaults to **yesterday**. Leave either credential blank to hide the card.
 
 ## Charging history & Grafana (optional)
 
@@ -227,6 +230,10 @@ the backend opens its connection pool. Existing installations are adopted
 idempotently. Physical plug-ins have durable session keys, lifecycle timestamps,
 vehicle/charger identity, quality state, schedule revisions and an event audit
 trail so retries cannot create duplicate sessions.
+
+GitHub CI upgrades a legacy revision against PostgreSQL 16, verifies exact-unit
+backfill and the current Alembic head, then repeats the upgrade to prove startup
+migrations remain idempotent. This database test runs remotely, not on the host.
 
 Set `DATABASE_URL` (the compose files default it to the bundled Postgres) to persist per-plug-in sessions, schedule snapshots, per-poll telemetry, and daily totals. Daily energy is stored exactly in Wh and money in integer minor units; legacy floating columns remain for compatibility. This powers the dashboard's recent-sessions card and lets you build Grafana panels (energy/cost/savings over time, driving efficiency, battery-health trend). See [`docs/grafana.md`](docs/grafana.md) for the schema and example queries. With `DATABASE_URL` blank, the app runs entirely in memory — every history feature simply switches off.
 

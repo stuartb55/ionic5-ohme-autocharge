@@ -106,15 +106,21 @@ OCTOPUS_REGION = os.getenv("OCTOPUS_REGION", "")
 # auth (key as username, empty password) against the authenticated consumption API.
 OCTOPUS_API_KEY = os.getenv("OCTOPUS_API_KEY", "")
 OCTOPUS_ACCOUNT_NUMBER = os.getenv("OCTOPUS_ACCOUNT_NUMBER", "")
+# On the first successful Postgres-backed ingestion, request this much Octopus
+# history. A durable cursor then resumes from the last stored interval with a
+# short overlap for late/corrected readings.
+CONSUMPTION_BACKFILL_DAYS = _int_setting(
+    "CONSUMPTION_BACKFILL_DAYS", 90, minimum=1, maximum=3650
+)
 
 # How often (seconds) the poll loop refreshes Ohme's daily totals into Postgres.
 # Independent of the dashboard being open. Default 6h.
-DAILY_STATS_INTERVAL = int(os.getenv("DAILY_STATS_INTERVAL", str(6 * 60 * 60)))
+DAILY_STATS_INTERVAL = _int_setting("DAILY_STATS_INTERVAL", 6 * 60 * 60, minimum=60)
 
 # How long (days) to keep per-poll telemetry rows in Postgres. One row per poll
 # is ~175k rows/year at the default POLL_INTERVAL, so without pruning the table
 # grows forever. Pruning runs on the daily-stats cadence; 0 keeps rows forever.
-TELEMETRY_RETENTION_DAYS = int(os.getenv("TELEMETRY_RETENTION_DAYS", "365"))
+TELEMETRY_RETENTION_DAYS = _int_setting("TELEMETRY_RETENTION_DAYS", 365, minimum=0)
 
 # Timezone used to bucket Ohme's per-day statistics: Ohme days start at local
 # midnight, so attributing a bucket to a calendar date must use this zone, not

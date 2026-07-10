@@ -35,10 +35,13 @@ In Grafana add a **PostgreSQL** datasource:
 | `session_events`     | target changes and other session lifecycle events | audit trail for each physical plug-in |
 | `tariff_rates`       | every 30 minutes when Agile is enabled | durable tariff windows used for actual cost |
 | `charging_intervals` | when a session finishes and reconciles | measured session Wh and integer-minor-unit cost by tariff interval |
+| `ingestion_cursors`  | after a successful external-data upsert | resumable source progress and last-ingestion metadata |
 
 Schema changes are versioned with Alembic and applied automatically at backend
 startup. `charge_sessions.session_key` is the durable idempotency key for a
 physical plug-in; new telemetry and event rows reference `charge_sessions.id`.
+`GET /api/data-quality` exposes non-sensitive aggregate completeness counters
+and cursor/cache freshness for a Grafana JSON/API datasource or external monitor.
 
 ## Ready-made dashboard
 

@@ -1,3 +1,5 @@
+import datetime as _dt
+from dataclasses import dataclass
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import config
@@ -45,7 +47,13 @@ def _enable(monkeypatch):
 def _enable_consumption(monkeypatch):
     monkeypatch.setattr(config, "OCTOPUS_API_KEY", "sk_test")
     monkeypatch.setattr(config, "OCTOPUS_ACCOUNT_NUMBER", "A-ABCD1234")
-    octopus._meter = None  # reset the discovery cache between tests
+    octopus._meters = []  # reset the discovery cache between tests
+    octopus._meters_discovered_at = 0.0
+
+
+def _cache_meter():
+    octopus._meters = [("1200012345678", "Z18")]
+    octopus._meters_discovered_at = octopus.time.monotonic()
 
 
 _ACCOUNT_PAYLOAD = {
@@ -150,10 +158,6 @@ async def test_fetch_rates_swallows_connection_error(monkeypatch):
 
 
 # --- cost_for_slots ---------------------------------------------------------
-
-import datetime as _dt
-from dataclasses import dataclass
-
 
 @dataclass
 class _Slot:
@@ -280,22 +284,40 @@ async def test_fetch_consumption_none_when_disabled(monkeypatch):
     mock_cls.assert_not_called()
 
 
-async def test_discover_meter_picks_import_point(monkeypatch):
+async def test_discover_meters_picks_import_points(monkeypatch):
     _enable_consumption(monkeypatch)
     with patch("aiohttp.ClientSession", return_value=_make_mock_session(_ACCOUNT_PAYLOAD)):
-        meter = await octopus._discover_meter()
+        meters = await octopus._discover_meters()
     # The export point is skipped; the import meter's mpan + serial are returned.
-    assert meter == ("1200012345678", "Z18")
+    assert meters == [("1200012345678", "Z18")]
 
 
-async def test_discover_meter_caches(monkeypatch):
+async def test_discover_meters_cache_is_bounded(monkeypatch):
     _enable_consumption(monkeypatch)
     session = _make_mock_session(_ACCOUNT_PAYLOAD)
     with patch("aiohttp.ClientSession", return_value=session) as mock_cls:
-        await octopus._discover_meter()
-        await octopus._discover_meter()
+        await octopus._discover_meters()
+        await octopus._discover_meters()
     # Second call is served from the module cache, not a fresh HTTP session.
     mock_cls.assert_called_once()
+
+
+async def test_discover_meters_refreshes_after_ttl(monkeypatch):
+    _enable_consumption(monkeypatch)
+    with patch("aiohttp.ClientSession", return_value=_make_mock_session(_ACCOUNT_PAYLOAD)):
+        assert await octopus._discover_meters() == [("1200012345678", "Z18")]
+    octopus._meters_discovered_at -= octopus._METER_CACHE_TTL + 1
+    replacement = {
+        "properties": [{
+            "electricity_meter_points": [{
+                "is_export": False,
+                "mpan": "1200012345678",
+                "meters": [{"serial_number": "Z19"}],
+            }]
+        }]
+    }
+    with patch("aiohttp.ClientSession", return_value=_make_mock_session(replacement)):
+        assert await octopus._discover_meters() == [("1200012345678", "Z19")]
 
 
 async def test_fetch_consumption_discovers_then_parses(monkeypatch):
@@ -318,7 +340,7 @@ async def test_fetch_consumption_discovers_then_parses(monkeypatch):
 
 async def test_fetch_consumption_follows_pagination(monkeypatch):
     _enable_consumption(monkeypatch)
-    octopus._meter = ("1200012345678", "Z18")  # skip discovery for this test
+    _cache_meter()  # skip discovery for this test
     page1 = {
         "next": "https://api.octopus.energy/v1/.../?page=2",
         "results": [{"interval_start": "2026-01-01T00:00:00Z", "interval_end": "2026-01-01T00:30:00Z", "consumption": 0.5}],
@@ -336,6 +358,85 @@ async def test_fetch_consumption_follows_pagination(monkeypatch):
 
 async def test_fetch_consumption_none_on_http_error(monkeypatch):
     _enable_consumption(monkeypatch)
-    octopus._meter = ("1200012345678", "Z18")
+    _cache_meter()
     with patch("aiohttp.ClientSession", return_value=_make_mock_session({}, status=500)):
         assert await octopus.fetch_consumption(*_window()) is None
+
+
+async def test_fetch_consumption_invalidates_missing_meter_for_rediscovery(monkeypatch):
+    _enable_consumption(monkeypatch)
+    _cache_meter()
+    with patch("aiohttp.ClientSession", return_value=_make_mock_session({}, status=404)):
+        assert await octopus.fetch_consumption(*_window()) == []
+    assert octopus._meters_discovered_at == 0.0
+
+
+async def test_fetch_consumption_spans_meter_replacement_without_double_rows(monkeypatch):
+    _enable_consumption(monkeypatch)
+    account = {
+        "properties": [{
+            "moved_out_at": None,
+            "electricity_meter_points": [{
+                "is_export": False,
+                "mpan": "1200012345678",
+                "meters": [{"serial_number": "OLD"}, {"serial_number": "NEW"}],
+            }],
+        }],
+    }
+    old = {
+        "next": None,
+        "results": [{
+            "interval_start": "2026-01-01T00:00:00Z",
+            "interval_end": "2026-01-01T00:30:00Z",
+            "consumption": 0.2,
+        }],
+    }
+    new = {
+        "next": None,
+        "results": [
+            {
+                "interval_start": "2026-01-01T00:00:00Z",
+                "interval_end": "2026-01-01T00:30:00Z",
+                "consumption": 0.3,
+            },
+            {
+                "interval_start": "2026-01-01T00:30:00Z",
+                "interval_end": "2026-01-01T01:00:00Z",
+                "consumption": 0.4,
+            },
+        ],
+    }
+    session = _make_mock_session_seq([account, old, new])
+    with patch("aiohttp.ClientSession", return_value=session):
+        rows = await octopus.fetch_consumption(*_window())
+
+    assert rows == [
+        {
+            "from": "2026-01-01T00:00:00Z",
+            "to": "2026-01-01T00:30:00Z",
+            "importKwh": 0.5,
+        },
+        {
+            "from": "2026-01-01T00:30:00Z",
+            "to": "2026-01-01T01:00:00Z",
+            "importKwh": 0.4,
+        },
+    ]
+
+
+async def test_discover_meters_ignores_previous_properties(monkeypatch):
+    _enable_consumption(monkeypatch)
+    payload = {
+        "properties": [
+            {
+                "moved_out_at": "2025-01-01T00:00:00Z",
+                "electricity_meter_points": [{
+                    "is_export": False, "mpan": "OLD", "meters": [{"serial_number": "OLD"}]
+                }],
+            },
+            _ACCOUNT_PAYLOAD["properties"][0],
+        ]
+    }
+    with patch("aiohttp.ClientSession", return_value=_make_mock_session(payload)):
+        meters = await octopus._discover_meters()
+    assert meters == [("1200012345678", "Z18")]

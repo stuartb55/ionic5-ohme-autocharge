@@ -11,6 +11,7 @@ import {
 
 const empty: StatisticsResponse = {
   rangeDays: 7,
+  stale: false,
   currency: 'GBP',
   window: statisticsFixture.window,
   scope: statisticsFixture.scope,

@@ -499,6 +499,89 @@ async def get_single_vehicle_id() -> Optional[str]:
         return None
 
 
+async def get_ingestion_cursor(source: str) -> Optional[datetime.datetime]:
+    """Last successfully ingested upstream instant for a resumable source."""
+    if _pool is None:
+        return None
+    try:
+        async with _pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT cursor_at FROM ingestion_cursors WHERE source = %s", (source,)
+            )
+            row = await cur.fetchone()
+        return row[0] if row else None
+    except Exception:
+        logger.warning("Failed to read ingestion cursor for %s", source, exc_info=True)
+        return None
+
+
+async def set_ingestion_cursor(
+    source: str, cursor_at: datetime.datetime, metadata: Optional[dict[str, Any]] = None
+) -> None:
+    """Advance an ingestion cursor only after its rows have been persisted."""
+    if _pool is None:
+        return
+    try:
+        async with _pool.connection() as conn:
+            await conn.execute(
+                "INSERT INTO ingestion_cursors (source, cursor_at, metadata) "
+                "VALUES (%s, %s, %s) ON CONFLICT (source) DO UPDATE SET "
+                "cursor_at = GREATEST(ingestion_cursors.cursor_at, EXCLUDED.cursor_at), "
+                "metadata = EXCLUDED.metadata, updated_at = now()",
+                (source, cursor_at, Jsonb(metadata or {})),
+            )
+    except Exception:
+        logger.warning("Failed to advance ingestion cursor for %s", source, exc_info=True)
+
+
+async def get_data_quality_summary() -> Optional[dict[str, Any]]:
+    """Aggregate persistence completeness without returning sensitive raw data."""
+    if _pool is None:
+        return None
+    try:
+        async with _pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT
+                  (SELECT COUNT(*) FROM charge_sessions),
+                  (SELECT COUNT(*) FROM charge_sessions WHERE completed_at IS NOT NULL),
+                  (SELECT COUNT(*) FROM charge_sessions
+                    WHERE completed_at IS NOT NULL AND action = 'configured'
+                      AND actual_energy_wh IS NULL),
+                  (SELECT COUNT(*) FROM charge_sessions
+                    WHERE completed_at IS NOT NULL AND action = 'configured'
+                      AND actual_energy_wh IS NOT NULL
+                      AND actual_cost_minor IS NULL),
+                  (SELECT COUNT(*) FROM telemetry
+                    WHERE recorded_at >= now() - interval '24 hours'
+                      AND connected IS TRUE AND session_id IS NULL),
+                  (SELECT COUNT(*) FROM grid_consumption
+                    WHERE interval_start >= now() - interval '30 days'
+                      AND quality_status NOT IN ('good', 'timing_adjusted')),
+                  (SELECT MAX(stat_date) FROM daily_stats WHERE is_complete),
+                  (SELECT MAX(cursor_at) FROM ingestion_cursors
+                    WHERE source = 'octopus_consumption')
+                """
+            )
+            row = await cur.fetchone()
+        if not row:
+            return None
+        return {
+            "sessions": {
+                "total": row[0],
+                "completed": row[1],
+                "missingActualEnergy": row[2],
+                "missingActualCost": row[3],
+            },
+            "telemetry": {"unlinkedLast24h": row[4]},
+            "consumption": {"uncertainLast30d": row[5], "ingestedThrough": row[7]},
+            "daily": {"completeThrough": row[6]},
+        }
+    except Exception:
+        logger.warning("Failed to aggregate data quality", exc_info=True)
+        return None
+
+
 async def get_vehicle_driving_metrics(
     start: datetime.datetime, end: datetime.datetime, vehicle_id: Optional[str]
 ) -> Optional[dict[str, Any]]:
@@ -771,7 +854,7 @@ async def get_session_telemetry(session_id: int) -> Optional[list[dict[str, Any]
         return None
 
 
-async def upsert_grid_consumption(rows: list[dict[str, Any]]) -> None:
+async def upsert_grid_consumption(rows: list[dict[str, Any]]) -> bool:
     """Upsert half-hourly grid-import rows keyed by ``start`` (interval start).
 
     ``rows`` is the list from :func:`energy.merge_usage`
@@ -779,7 +862,7 @@ async def upsert_grid_consumption(rows: list[dict[str, Any]]) -> None:
     window refreshes late-arriving Octopus data. Best-effort like every write here.
     """
     if _pool is None or not rows:
-        return
+        return False
     params = [
         (
             r["start"], r.get("end"), r.get("importKwh"), r.get("carKwh"),
@@ -789,7 +872,7 @@ async def upsert_grid_consumption(rows: list[dict[str, Any]]) -> None:
         if r.get("start")
     ]
     if not params:
-        return
+        return False
     try:
         async with _pool.connection() as conn:
             async with conn.cursor() as cur:
@@ -808,8 +891,10 @@ async def upsert_grid_consumption(rows: list[dict[str, Any]]) -> None:
                     "  updated_at   = now()",
                     params,
                 )
+        return True
     except Exception:
         logger.warning("Failed to upsert grid consumption to Postgres", exc_info=True)
+        return False
 
 
 async def get_grid_consumption(

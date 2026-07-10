@@ -378,6 +378,40 @@ async def test_get_single_vehicle_id_requires_exactly_one_distinct_vehicle():
             db._pool = None
 
 
+async def test_ingestion_cursor_round_trip_helpers():
+    cursor_at = dt.datetime(2026, 7, 9, tzinfo=dt.timezone.utc)
+    conn = _FakeConn(_FakeCursor(row=(cursor_at,)))
+    db._pool = _FakePool(conn)
+    try:
+        assert await db.get_ingestion_cursor("octopus_consumption") == cursor_at
+        await db.set_ingestion_cursor("octopus_consumption", cursor_at, {"rows": 48})
+    finally:
+        db._pool = None
+    assert "SELECT cursor_at FROM ingestion_cursors" in conn.executed[0][0]
+    sql, params = conn.executed[1]
+    assert "GREATEST" in sql
+    assert params[0:2] == ("octopus_consumption", cursor_at)
+    assert params[2].obj == {"rows": 48}
+
+
+async def test_data_quality_summary_maps_aggregate_counts():
+    row = (
+        10, 8, 1, 2, 3, 4, dt.date(2026, 7, 8),
+        dt.datetime(2026, 7, 9, tzinfo=dt.timezone.utc),
+    )
+    conn = _FakeConn(_FakeCursor(row=row))
+    db._pool = _FakePool(conn)
+    try:
+        result = await db.get_data_quality_summary()
+    finally:
+        db._pool = None
+    assert result["sessions"] == {
+        "total": 10, "completed": 8, "missingActualEnergy": 1, "missingActualCost": 2
+    }
+    assert result["telemetry"]["unlinkedLast24h"] == 3
+    assert result["consumption"]["uncertainLast30d"] == 4
+
+
 async def test_vehicle_driving_metrics_pairs_only_valid_complete_intervals():
     start = dt.datetime(2026, 6, 1, tzinfo=dt.timezone.utc)
     end = dt.datetime(2026, 6, 8, tzinfo=dt.timezone.utc)
@@ -653,7 +687,7 @@ async def test_upsert_grid_consumption_inserts_dated_rows(fake_pool):
          "importKwh": 1.5, "carKwh": 1.0, "houseKwh": 0.5},
         {"start": None, "importKwh": 9},  # skipped (no interval start)
     ]
-    await db.upsert_grid_consumption(rows)
+    assert await db.upsert_grid_consumption(rows) is True
     assert len(cursor.executemany_calls) == 1
     sql, params = cursor.executemany_calls[0]
     assert "INSERT INTO grid_consumption" in sql
@@ -665,7 +699,7 @@ async def test_upsert_grid_consumption_inserts_dated_rows(fake_pool):
 
 async def test_upsert_grid_consumption_empty_is_noop(fake_pool):
     _, cursor = fake_pool
-    await db.upsert_grid_consumption([])
+    assert await db.upsert_grid_consumption([]) is False
     assert cursor.executemany_calls == []
 
 
