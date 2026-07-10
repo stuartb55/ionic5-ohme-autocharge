@@ -1,5 +1,7 @@
 import asyncio
+import datetime
 import logging
+import math
 import threading
 from dataclasses import dataclass, field
 from typing import Optional
@@ -28,6 +30,9 @@ class VehicleState:
     """
 
     soc: int
+    vehicle_id: Optional[str] = None
+    vin: Optional[str] = None
+    observed_at: Optional[datetime.datetime] = None
     range_miles: Optional[int] = None
     odometer_miles: Optional[int] = None
     # Battery state of health (%). None when the vehicle doesn't report it.
@@ -114,10 +119,43 @@ def _get_manager() -> VehicleManager:
 
 
 def _select_vehicle(vm: VehicleManager, vehicle_id: Optional[str]):
-    """Pick the configured vehicle by id, falling back to the first one."""
-    if vehicle_id and vehicle_id in vm.vehicles:
+    """Pick the configured vehicle, failing closed when an explicit id is invalid."""
+    if vehicle_id:
+        if vehicle_id not in vm.vehicles:
+            raise RuntimeError(
+                f"Configured Hyundai vehicle {vehicle_id!r} was not found; "
+                "refusing to use a different vehicle"
+            )
         return vm.vehicles[vehicle_id]
     return next(iter(vm.vehicles.values()))
+
+
+def _validated_soc(value) -> int:
+    """Return a trustworthy whole-percent SOC, rejecting malformed SDK values."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RuntimeError("Vehicle reported an invalid battery percentage")
+    numeric = float(value)
+    if not math.isfinite(numeric) or not 0 <= numeric <= 100:
+        raise RuntimeError(f"Vehicle reported an out-of-range battery percentage: {value!r}")
+    return round(numeric)
+
+
+def _validated_observed_at(value) -> Optional[datetime.datetime]:
+    """Normalise and freshness-check the vehicle snapshot timestamp."""
+    if config.MAX_SOC_AGE == 0:
+        return value if isinstance(value, datetime.datetime) else None
+    if not isinstance(value, datetime.datetime) or value.tzinfo is None:
+        raise RuntimeError("Vehicle state did not include a trustworthy observation time")
+    observed = value.astimezone(datetime.timezone.utc)
+    age = (datetime.datetime.now(datetime.timezone.utc) - observed).total_seconds()
+    if age < -300:
+        raise RuntimeError("Vehicle state observation time is unexpectedly in the future")
+    if age > config.MAX_SOC_AGE:
+        raise RuntimeError(
+            f"Vehicle state is stale ({age / 60:.0f} minutes old; "
+            f"maximum is {config.MAX_SOC_AGE / 60:.0f})"
+        )
+    return observed
 
 
 def list_vehicles() -> list[dict]:
@@ -149,7 +187,11 @@ def get_vehicle_state(vehicle_id: Optional[str] = None) -> VehicleState:
             raise RuntimeError("No vehicles found on this Hyundai account")
 
         vehicle = _select_vehicle(vm, vehicle_id)
-        soc = vehicle.ev_battery_percentage
+        selected_vehicle_id = next(
+            (key for key, candidate in vm.vehicles.items() if candidate is vehicle), None
+        )
+        soc = _validated_soc(vehicle.ev_battery_percentage)
+        observed_at = _validated_observed_at(getattr(vehicle, "last_updated_at", None))
         range_miles = _to_miles(vehicle.ev_driving_range, vehicle.ev_driving_range_unit)
         odometer_miles = _to_miles(vehicle.odometer, vehicle.odometer_unit)
         raw_soh = vehicle.ev_battery_soh_percentage
@@ -170,15 +212,18 @@ def get_vehicle_state(vehicle_id: Optional[str] = None) -> VehicleState:
         key_battery_warning = _as_bool(getattr(vehicle, "smart_key_battery_warning_is_on", None))
         open_items = _open_items(vehicle)
 
-    if soc is None:
-        raise RuntimeError("Vehicle did not report a battery percentage — try again shortly")
-
     logger.info(
-        "Hyundai SOC: %s%%, range: %s mi, odometer: %s mi, SoH: %s%%, locked: %s, 12V: %s%%",
-        soc, range_miles, odometer_miles, soh_percent, is_locked, aux_battery_percent,
+        "Hyundai vehicle=%s SOC=%s%% observed_at=%s, range=%s mi, odometer=%s mi, "
+        "SoH=%s%%, locked=%s, 12V=%s%%",
+        selected_vehicle_id, soc, observed_at, range_miles, odometer_miles,
+        soh_percent, is_locked, aux_battery_percent,
     )
     return VehicleState(
-        soc=soc, range_miles=range_miles, odometer_miles=odometer_miles, soh_percent=soh_percent,
+        soc=soc,
+        vehicle_id=str(selected_vehicle_id) if selected_vehicle_id is not None else None,
+        vin=vehicle.VIN if isinstance(getattr(vehicle, "VIN", None), str) else None,
+        observed_at=observed_at,
+        range_miles=range_miles, odometer_miles=odometer_miles, soh_percent=soh_percent,
         is_locked=is_locked, latitude=latitude, longitude=longitude,
         aux_battery_percent=aux_battery_percent, tyre_pressure_warning=tyre_pressure_warning,
         washer_fluid_warning=washer_fluid_warning, key_battery_warning=key_battery_warning,

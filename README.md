@@ -102,6 +102,7 @@ All settings come from environment variables (or `.env`). Only the five credenti
 | `CHARGE_TARGET` | `80` | Initial/fallback target %. The dashboard can change it at runtime (persisted). |
 | `POLL_INTERVAL` | `180` | Seconds between Ohme polls. |
 | `LIVE_SOC_INTERVAL` | `1800` | Seconds between mid-charge SOC re-reads (so the ring climbs). `0` disables. |
+| `MAX_SOC_AGE` | `1800` | Maximum age in seconds of a cached Bluelink SOC accepted for target-setting. `0` disables the freshness guard. |
 | `HYUNDAI_VEHICLE_ID` | *(first)* | Pin a specific vehicle when the account has more than one (id from `GET /api/vehicles`). The dashboard can override this. |
 | `TIMEZONE` / `TZ` | `Europe/London` | Zone for log timestamps, daily-stats bucketing, and per-weekday targets. |
 | `SETTINGS_PATH` | `/app/data/settings.json` | Where runtime settings (target, ready-by, per-day targets, selected vehicle) persist. A named volume is mounted here. |
