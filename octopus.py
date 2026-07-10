@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import datetime
 import logging
+import time
 from dataclasses import dataclass, field
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
@@ -24,10 +25,12 @@ logger = logging.getLogger(__name__)
 
 _BASE = "https://api.octopus.energy/v1"
 
-# Cached (mpan, serial) of the electricity import meter, discovered once from the
-# account endpoint (it never changes for a given home). None until the first
-# successful lookup — mirrors the singleton pattern in bluelink._manager.
-_meter: Optional[tuple[str, str]] = None
+# The account endpoint can retain multiple serials after a meter exchange. Cache
+# all current-property import identities for a bounded period so ingestion spans
+# replacements and eventually notices account changes.
+_meters: list[tuple[str, str]] = []
+_meters_discovered_at = 0.0
+_METER_CACHE_TTL = 24 * 60 * 60
 
 
 @dataclass
@@ -244,16 +247,12 @@ def price_energy_buckets(
 # --- household consumption (authenticated account API) -----------------------
 
 
-async def _discover_meter() -> Optional[tuple[str, str]]:
-    """Return the electricity import meter ``(mpan, serial)`` for the account.
-
-    Cached after the first success — a home's meter doesn't change. Reads the
-    account endpoint and picks the first non-export electricity meter point.
-    None when disabled or on any failure (so the feature degrades to off).
-    """
-    global _meter
-    if _meter is not None:
-        return _meter
+async def _discover_meters() -> Optional[list[tuple[str, str]]]:
+    """Return all current-property import meter identities, refreshed daily."""
+    global _meters, _meters_discovered_at
+    now = time.monotonic()
+    if _meters and now - _meters_discovered_at < _METER_CACHE_TTL:
+        return list(_meters)
     if not consumption_is_enabled():
         return None
     url = f"{_BASE}/accounts/{config.OCTOPUS_ACCOUNT_NUMBER}/"
@@ -266,22 +265,29 @@ async def _discover_meter() -> Optional[tuple[str, str]]:
                     logger.warning("Octopus account API returned HTTP %s", resp.status)
                     return None
                 data = await resp.json()
+        discovered: list[tuple[str, str]] = []
         for prop in data.get("properties") or []:
+            if prop.get("moved_out_at"):
+                continue
             for point in prop.get("electricity_meter_points") or []:
                 # Skip export (solar feed-in) meter points — we want grid import.
                 if point.get("is_export"):
                     continue
                 mpan = point.get("mpan")
-                meters = point.get("meters") or []
-                serial = meters[0].get("serial_number") if meters else None
-                if mpan and serial:
-                    _meter = (mpan, serial)
-                    logger.info("Discovered Octopus import meter %s/%s", mpan, serial)
-                    return _meter
+                for meter in point.get("meters") or []:
+                    serial = meter.get("serial_number")
+                    identity = (mpan, serial)
+                    if mpan and serial and identity not in discovered:
+                        discovered.append(identity)
+        if discovered:
+            _meters = discovered
+            _meters_discovered_at = now
+            logger.info("Discovered %s Octopus import meter serial(s)", len(discovered))
+            return list(discovered)
     except Exception:
         logger.warning("Failed to discover Octopus meter", exc_info=True)
         return None
-    logger.warning("No electricity import meter found on the Octopus account")
+    logger.warning("No electricity import meters found on the current Octopus property")
     return None
 
 
@@ -294,47 +300,55 @@ async def fetch_consumption(
     pagination. None when disabled, the meter can't be discovered, or on any
     failure (so the energy-usage feature degrades to off, like the tariff card).
     """
+    global _meters_discovered_at
     if not consumption_is_enabled():
         return None
-    meter = await _discover_meter()
-    if meter is None:
+    meters = await _discover_meters()
+    if not meters:
         return None
-    mpan, serial = meter
     headers = _auth_headers()
     timeout = aiohttp.ClientTimeout(total=15)
-    url: Optional[str] = (
-        f"{_BASE}/electricity-meter-points/{mpan}/meters/{serial}/consumption/"
-    )
-    params: Optional[dict] = {
-        "period_from": period_from.isoformat(),
-        "period_to": period_to.isoformat(),
-        "order_by": "period",  # chronological
-        "page_size": 25000,  # one request covers any realistic window
-    }
-    out: list[dict] = []
+    by_start: dict[str, dict] = {}
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            # Follow `next` links until exhausted. The first request carries the
-            # params; subsequent `next` URLs already embed them.
-            while url:
-                async with session.get(url, params=params, headers=headers) as resp:
-                    if resp.status != 200:
-                        logger.warning("Octopus consumption API returned HTTP %s", resp.status)
-                        return None
-                    data = await resp.json()
-                for row in data.get("results") or []:
-                    start = row.get("interval_start")
-                    end = row.get("interval_end")
-                    kwh = row.get("consumption")
-                    if start and isinstance(kwh, (int, float)):
-                        out.append(
-                            {"from": start, "to": end, "importKwh": round(float(kwh), 4)}
-                        )
-                url = data.get("next")
-                params = None  # the `next` URL already includes the query string
+            for mpan, serial in meters:
+                url: Optional[str] = (
+                    f"{_BASE}/electricity-meter-points/{mpan}/meters/{serial}/consumption/"
+                )
+                params: Optional[dict] = {
+                    "period_from": period_from.isoformat(),
+                    "period_to": period_to.isoformat(),
+                    "order_by": "period",
+                    "page_size": 25000,
+                }
+                while url:
+                    async with session.get(url, params=params, headers=headers) as resp:
+                        if resp.status == 404:
+                            # Metadata can change between discovery and reading.
+                            # Retry discovery next cycle but preserve other serials.
+                            _meters_discovered_at = 0.0
+                            logger.warning("Octopus meter %s/%s is no longer readable", mpan, serial)
+                            break
+                        if resp.status != 200:
+                            logger.warning("Octopus consumption API returned HTTP %s", resp.status)
+                            return None
+                        data = await resp.json()
+                    for row in data.get("results") or []:
+                        start = row.get("interval_start")
+                        end = row.get("interval_end")
+                        kwh = row.get("consumption")
+                        if start and isinstance(kwh, (int, float)):
+                            existing = by_start.get(start)
+                            prior = existing["importKwh"] if existing else 0.0
+                            by_start[start] = {
+                                "from": start,
+                                "to": end,
+                                "importKwh": round(prior + float(kwh), 6),
+                            }
+                    url = data.get("next")
+                    params = None
     except Exception:
         logger.warning("Failed to fetch Octopus consumption", exc_info=True)
         return None
 
-    out.sort(key=lambda r: r["from"])
-    return out
+    return sorted(by_start.values(), key=lambda row: row["from"])

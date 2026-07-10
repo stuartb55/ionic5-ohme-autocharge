@@ -32,6 +32,11 @@ describe('StatisticsSection insights', () => {
     expect(screen.getByText(/reconciled tariff-interval cost/)).toBeInTheDocument();
   });
 
+  it('labels a cached snapshot when the upstream is unavailable', () => {
+    renderSection({ ...statisticsFixture, stale: true });
+    expect(screen.getByRole('status')).toHaveTextContent('last validated statistics snapshot');
+  });
+
   it('hides the Efficiency insight when none is measured', () => {
     renderSection(); // fixture efficiency: null
     expect(screen.queryByText('Home-energy efficiency')).not.toBeInTheDocument();

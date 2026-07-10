@@ -825,6 +825,15 @@ body {
   width: min(34rem, calc(100vw - 3rem));
   z-index: 3;
 }
+.stats-stale {
+  background: var(--warning-soft);
+  border: 1px solid var(--warning);
+  border-radius: 0.65rem;
+  color: var(--text);
+  font-size: 0.82rem;
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.8rem;
+}
 .stat-card {
   background: var(--surface-2);
   border: 1px solid var(--border);

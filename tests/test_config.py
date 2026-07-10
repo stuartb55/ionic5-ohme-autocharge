@@ -56,7 +56,14 @@ def test_all_vars_present_imports_cleanly(reimport_config):
 
 @pytest.mark.parametrize(
     ("name", "value"),
-    [("CHARGE_TARGET", "101"), ("POLL_INTERVAL", "0"), ("UPSTREAM_TIMEOUT", "nope")],
+    [
+        ("CHARGE_TARGET", "101"),
+        ("POLL_INTERVAL", "0"),
+        ("UPSTREAM_TIMEOUT", "nope"),
+        ("CONSUMPTION_BACKFILL_DAYS", "0"),
+        ("DAILY_STATS_INTERVAL", "30"),
+        ("TELEMETRY_RETENTION_DAYS", "-1"),
+    ],
 )
 def test_invalid_numeric_settings_fail_fast(monkeypatch, reimport_config, name, value):
     monkeypatch.setenv(name, value)

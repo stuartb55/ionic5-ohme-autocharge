@@ -17,6 +17,7 @@ Run:  uvicorn api:app --host 0.0.0.0 --port 8000
 from __future__ import annotations
 
 import asyncio
+import copy
 import csv
 import datetime
 import io
@@ -62,6 +63,7 @@ _QUIET_ACCESS_PATHS = frozenset(
         "/api/sessions",
         "/api/tariff",
         "/api/energy-usage",
+        "/api/data-quality",
     }
 )
 
@@ -880,7 +882,7 @@ class MetricProvenanceModel(BaseModel):
     calculationType: str
     observedAt: Optional[datetime.datetime]
     completeThrough: datetime.datetime
-    quality: Literal["complete", "measured", "actual", "unavailable"]
+    quality: Literal["complete", "measured", "actual", "unavailable", "stale"]
     coverage: dict[str, Any]
 
 
@@ -894,6 +896,7 @@ class StatisticsMetadataModel(BaseModel):
 
 class StatisticsResponseModel(BaseModel):
     rangeDays: int
+    stale: bool = False
     currency: Optional[str]
     window: StatisticsWindowModel
     scope: StatisticsScopeModel
@@ -903,6 +906,43 @@ class StatisticsResponseModel(BaseModel):
     runningCost: Optional[RunningCostModel]
     comparison: Optional[ComparisonModel]
     metadata: StatisticsMetadataModel
+
+
+class SessionQualityModel(BaseModel):
+    total: int
+    completed: int
+    missingActualEnergy: int
+    missingActualCost: int
+
+
+class TelemetryQualityModel(BaseModel):
+    unlinkedLast24h: int
+
+
+class ConsumptionQualityModel(BaseModel):
+    uncertainLast30d: int
+    ingestedThrough: Optional[datetime.datetime]
+
+
+class DailyQualityModel(BaseModel):
+    completeThrough: Optional[datetime.date]
+
+
+class StatisticsCacheQualityModel(BaseModel):
+    available: bool
+    ageSeconds: Optional[int]
+
+
+class DataQualityResponseModel(BaseModel):
+    status: Literal["ok", "attention", "unavailable"]
+    generatedAt: datetime.datetime
+    persistenceAvailable: bool
+    actualCostExpected: bool
+    sessions: Optional[SessionQualityModel]
+    telemetry: Optional[TelemetryQualityModel]
+    consumption: Optional[ConsumptionQualityModel]
+    daily: Optional[DailyQualityModel]
+    statisticsCache: StatisticsCacheQualityModel
 
 
 async def _reapply_target_if_connected() -> bool:
@@ -989,6 +1029,44 @@ async def health() -> JSONResponse:
             "lastError": store.last_poll_error,
         },
         status_code=200 if poll_alive else 503,
+    )
+
+
+@app.get("/api/data-quality", response_model=DataQualityResponseModel)
+async def get_data_quality() -> DataQualityResponseModel:
+    """Read-only completeness counters for operations and alerting."""
+    generated_at = datetime.datetime.now(datetime.timezone.utc)
+    cache_available = _summary_cache["value"] is not None
+    cache_age = max(0, round(time.time() - _summary_cache["at"])) if cache_available else None
+    summary = await db.get_data_quality_summary()
+    if summary is None:
+        return DataQualityResponseModel(
+            status="unavailable",
+            generatedAt=generated_at,
+            persistenceAvailable=db.is_available(),
+            actualCostExpected=octopus.is_enabled(),
+            sessions=None,
+            telemetry=None,
+            consumption=None,
+            daily=None,
+            statisticsCache={"available": cache_available, "ageSeconds": cache_age},
+        )
+    needs_attention = (
+        summary["sessions"]["missingActualEnergy"] > 0
+        or (octopus.is_enabled() and summary["sessions"]["missingActualCost"] > 0)
+        or summary["telemetry"]["unlinkedLast24h"] > 0
+        or summary["consumption"]["uncertainLast30d"] > 0
+    )
+    return DataQualityResponseModel(
+        status="attention" if needs_attention else "ok",
+        generatedAt=generated_at,
+        persistenceAvailable=True,
+        actualCostExpected=octopus.is_enabled(),
+        sessions=summary["sessions"],
+        telemetry=summary["telemetry"],
+        consumption=summary["consumption"],
+        daily=summary["daily"],
+        statisticsCache={"available": cache_available, "ageSeconds": cache_age},
     )
 
 
@@ -1374,17 +1452,22 @@ async def _persist_daily_stats(client: Any, days: int = 90) -> None:
 async def _persist_grid_consumption(days: int = 3) -> None:
     """Fetch recent Octopus household consumption and upsert the car/house split.
 
-    Pulls the last ``days`` of half-hourly grid import, reconstructs the car's
-    per-slot share from the telemetry history, and upserts both (plus the
-    rest-of-house remainder) into ``grid_consumption`` for the dashboard and
-    Grafana. Best-effort and a no-op unless consumption is configured *and*
-    persistence is enabled (the car share comes from the telemetry table). A
-    short window re-ingested each cycle backfills late-arriving Octopus data.
+    Resumes from a durable cursor (or the configured initial backfill), while
+    always overlapping at least the last ``days`` for corrected readings. It
+    reconstructs the car's per-slot share from telemetry and upserts the split
+    into ``grid_consumption``. Best-effort and a no-op unless consumption and
+    persistence are enabled. The cursor advances only after rows commit.
     """
     if not octopus.consumption_is_enabled() or not db.is_enabled():
         return
     now = datetime.datetime.now(datetime.timezone.utc)
-    period_from = now - datetime.timedelta(days=days)
+    cursor = await db.get_ingestion_cursor("octopus_consumption")
+    if cursor is None:
+        period_from = now - datetime.timedelta(days=config.CONSUMPTION_BACKFILL_DAYS)
+    else:
+        period_from = min(
+            cursor - datetime.timedelta(days=1), now - datetime.timedelta(days=days)
+        )
     consumption = await octopus.fetch_consumption(period_from, now)
     if not consumption:
         return
@@ -1396,7 +1479,17 @@ async def _persist_grid_consumption(days: int = 3) -> None:
         telemetry or [], max_gap_seconds=max(config.POLL_INTERVAL * 3, 15 * 60)
     )
     rows = energy.merge_usage(consumption, attribution)
-    await db.upsert_grid_consumption(rows)
+    if not await db.upsert_grid_consumption(rows):
+        return
+    ends = [
+        datetime.datetime.fromisoformat(row["to"].replace("Z", "+00:00"))
+        for row in consumption
+        if row.get("to")
+    ]
+    if ends:
+        await db.set_ingestion_cursor(
+            "octopus_consumption", max(ends), {"rows": len(rows), "overlapDays": days}
+        )
 
 
 def _cache_avg_price(parsed: dict[str, Any]) -> None:
@@ -1558,6 +1651,7 @@ def _statistics_metadata(
         "toExclusive": complete_through,
         "scope": "ohme_account",
     }
+
     return {
         "summary": {
             "source": "ohme_charge_summary",
@@ -1617,6 +1711,18 @@ def _statistics_metadata(
     }
 
 
+def _stale_statistics(cache_age_seconds: float, reason: str) -> StatisticsResponseModel:
+    """Serve the last validated snapshot with explicit staleness during an outage."""
+    stale = copy.deepcopy(_summary_cache["value"])
+    stale["stale"] = True
+    for provenance in stale["metadata"].values():
+        if provenance["quality"] != "unavailable":
+            provenance["quality"] = "stale"
+        provenance["coverage"]["cacheAgeSeconds"] = round(cache_age_seconds)
+        provenance["coverage"]["staleReason"] = reason
+    return StatisticsResponseModel.model_validate(stale)
+
+
 @app.get("/api/statistics", response_model=StatisticsResponseModel)
 async def get_statistics(
     days: int = Query(default=7, ge=1, le=90),
@@ -1642,10 +1748,13 @@ async def get_statistics(
             )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to fetch charge summary", exc_info=True)
+        if _summary_cache["key"] == cache_key and _summary_cache["value"] is not None:
+            return _stale_statistics(now - _summary_cache["at"], type(exc).__name__)
         raise HTTPException(status_code=502, detail="Could not fetch statistics from Ohme") from exc
 
     # async_get_charge_summary returns granularity as an enum; drop it before serialising.
     parsed = parse_summary({k: v for k, v in summary.items() if k != "granularity"}, days)
+    parsed["stale"] = False
     parsed["daily"] = _complete_daily_series(parsed["daily"], window)
     parsed["window"] = {
         "from": window["start"].isoformat(),

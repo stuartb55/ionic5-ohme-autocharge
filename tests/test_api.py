@@ -139,6 +139,33 @@ def test_health_reports_last_error(client):
     assert body["lastSuccessfulPoll"] == "2026-06-02T00:00:00+01:00"
 
 
+def test_data_quality_reports_unavailable_without_persistence(client):
+    with patch("db.get_data_quality_summary", new=AsyncMock(return_value=None)), \
+         patch("db.is_available", return_value=False):
+        body = client.get("/api/data-quality").json()
+    assert body["status"] == "unavailable"
+    assert body["persistenceAvailable"] is False
+    assert body["sessions"] is None
+
+
+def test_data_quality_flags_only_applicable_completeness_problems(client):
+    summary = {
+        "sessions": {
+            "total": 10, "completed": 8, "missingActualEnergy": 1, "missingActualCost": 2
+        },
+        "telemetry": {"unlinkedLast24h": 0},
+        "consumption": {"uncertainLast30d": 3, "ingestedThrough": None},
+        "daily": {"completeThrough": dt.date(2026, 7, 9)},
+    }
+    with patch("db.get_data_quality_summary", new=AsyncMock(return_value=summary)), \
+         patch("octopus.is_enabled", return_value=False):
+        body = client.get("/api/data-quality").json()
+    assert body["status"] == "attention"
+    assert body["actualCostExpected"] is False
+    assert body["sessions"]["missingActualEnergy"] == 1
+    assert body["consumption"]["uncertainLast30d"] == 3
+
+
 def test_status_reflects_snapshot(client):
     _populate_snapshot()
     body = client.get("/api/status").json()
@@ -519,6 +546,34 @@ def test_statistics_502_on_upstream_error(client):
     assert client.get("/api/statistics").status_code == 502
 
 
+def test_statistics_serves_explicitly_stale_validated_cache_on_upstream_error(client):
+    current = {
+        "granularity": "DAY",
+        "totalStats": {"energyChargedTotalWh": 42000},
+        "stats": [],
+    }
+    previous = {"granularity": "DAY", "totalStats": {}, "stats": []}
+    mock_client = MagicMock()
+    mock_client.async_get_charge_summary = AsyncMock(
+        side_effect=[current, previous, RuntimeError("temporary outage")]
+    )
+    store.client = mock_client
+
+    fresh = client.get("/api/statistics?days=7")
+    assert fresh.status_code == 200
+    assert fresh.json()["stale"] is False
+    api._summary_cache["at"] = 0.0  # expire it without discarding the validated value
+
+    stale = client.get("/api/statistics?days=7")
+    assert stale.status_code == 200
+    body = stale.json()
+    assert body["stale"] is True
+    assert body["totals"]["energyKwh"] == 42.0
+    assert body["metadata"]["summary"]["quality"] == "stale"
+    assert body["metadata"]["summary"]["coverage"]["staleReason"] == "RuntimeError"
+    assert body["metadata"]["efficiency"]["quality"] == "unavailable"
+
+
 # --- force refresh -------------------------------------------------------------
 
 
@@ -721,6 +776,32 @@ def test_energy_usage_returns_slots_and_totals(client):
     assert body["totals"] == {
         "importKwh": 1.9, "carKwh": 1.0, "houseKwh": 0.9, "unattributedKwh": 0.0,
     }
+
+
+async def test_consumption_backfill_advances_cursor_only_after_success(monkeypatch):
+    monkeypatch.setattr(config, "CONSUMPTION_BACKFILL_DAYS", 30)
+    consumption = [{
+        "from": "2026-07-09T00:00:00Z",
+        "to": "2026-07-09T00:30:00Z",
+        "importKwh": 1.0,
+    }]
+    with patch("octopus.consumption_is_enabled", return_value=True), \
+         patch("db.is_enabled", return_value=True), \
+         patch("db.get_ingestion_cursor", new=AsyncMock(return_value=None)), \
+         patch("octopus.fetch_consumption", new=AsyncMock(return_value=consumption)) as fetch, \
+         patch("db.get_telemetry_between", new=AsyncMock(return_value=[])), \
+         patch("db.upsert_grid_consumption", new=AsyncMock(return_value=True)), \
+         patch("db.set_ingestion_cursor", new=AsyncMock()) as advance:
+        await api._persist_grid_consumption()
+
+    period_from, period_to = fetch.await_args.args
+    assert dt.timedelta(days=29, hours=23) < period_to - period_from
+    assert period_to - period_from < dt.timedelta(days=30, hours=1)
+    advance.assert_awaited_once()
+    assert advance.await_args.args[0] == "octopus_consumption"
+    assert advance.await_args.args[1] == dt.datetime(
+        2026, 7, 9, 0, 30, tzinfo=dt.timezone.utc
+    )
 
 
 def test_energy_usage_defaults_to_yesterday(client):

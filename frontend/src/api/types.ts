@@ -267,6 +267,8 @@ export interface DailyStat {
 
 export interface StatisticsResponse {
   rangeDays: number;
+  /** True when a validated cached snapshot is shown because Ohme is unavailable. */
+  stale: boolean;
   currency: string | null;
   window: {
     from: string;
@@ -339,6 +341,6 @@ export interface MetricProvenance {
   calculationType: string;
   observedAt: string | null;
   completeThrough: string;
-  quality: 'complete' | 'measured' | 'actual' | 'unavailable';
+  quality: 'complete' | 'measured' | 'actual' | 'unavailable' | 'stale';
   coverage: Record<string, unknown>;
 }
