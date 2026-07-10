@@ -56,6 +56,8 @@ def reset_state():
     store.last_poll_error = None
     store.consecutive_poll_failures = 0
     store.plugin_failure_notified = False
+    store.active_session_id = None
+    store.active_session_key = None
     store.last_digest_date = None
     api._last_telemetry_sig = None
     api._summary_cache.update(key=None, value=None, at=0.0)
@@ -627,7 +629,9 @@ def test_energy_usage_returns_slots_and_totals(client):
     assert body["enabled"] is True
     assert body["date"] == "2026-06-01"
     assert body["slots"] == slots
-    assert body["totals"] == {"importKwh": 1.9, "carKwh": 1.0, "houseKwh": 0.9}
+    assert body["totals"] == {
+        "importKwh": 1.9, "carKwh": 1.0, "houseKwh": 0.9, "unattributedKwh": 0.0,
+    }
 
 
 def test_energy_usage_defaults_to_yesterday(client):
@@ -670,11 +674,15 @@ def test_soh_history_validates_limit(client):
 
 
 async def test_notifies_when_charging_finishes():
+    store.active_session_key = "session-1"
+    store.active_session_id = 42
     snap = StatusSnapshot(
         vehicle_name="IONIQ 5", charger_status="finished", connected=True,
         session_energy_wh=18500.0,
     )
-    with patch("ntfy.send", new=AsyncMock()) as mock_notify:
+    with patch("ntfy.send", new=AsyncMock()) as mock_notify, \
+         patch("db.complete_session", new=AsyncMock()) as complete, \
+         patch("db.record_session_event", new=AsyncMock()) as event:
         await api._maybe_notify_finished("charging", snap)
 
     mock_notify.assert_awaited_once()
@@ -683,6 +691,11 @@ async def test_notifies_when_charging_finishes():
     assert "18.5 kWh" in msg
     assert mock_notify.call_args.kwargs["title"] == "Charging finished"
     assert mock_notify.call_args.kwargs["tags"] == "white_check_mark"
+    complete.assert_awaited_once_with(
+        "session-1", actual_energy_wh=18500.0, end_soc_percent=None
+    )
+    event.assert_awaited_once()
+    assert event.call_args.args[:2] == (42, "charging_finished")
 
 
 async def test_notifies_when_short_topup_finishes_from_plugged_in():
@@ -986,6 +999,19 @@ async def test_telemetry_always_records_while_connected():
         await api._maybe_record_telemetry(snap)
         await api._maybe_record_telemetry(snap)  # identical but connected -> still recorded
     assert mock_rec.await_count == 2
+
+
+async def test_telemetry_resolves_durable_session_after_restart():
+    store.active_session_key = "session-1"
+    snap = StatusSnapshot(connected=True, charger_status="charging", session_energy_wh=1000.0)
+    with patch("db.get_session_id_by_key", new=AsyncMock(return_value=42)) as lookup, \
+         patch("db.record_telemetry", new=AsyncMock()) as record:
+        await api._maybe_record_telemetry(snap)
+        await api._maybe_record_telemetry(snap)
+    lookup.assert_awaited_once_with("session-1")
+    assert store.active_session_id == 42
+    assert record.await_count == 2
+    assert all(call.kwargs["session_id"] == 42 for call in record.await_args_list)
 
 
 # --- weekly digest --------------------------------------------------------------

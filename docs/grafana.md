@@ -145,7 +145,10 @@ share is reconstructed from the `telemetry` history, so `DATABASE_URL` is
 required too:
 
 ```sql
-SELECT interval_start AS time, car_kwh AS "Car", house_kwh AS "Rest of house"
+SELECT interval_start AS time,
+       car_kwh AS "Car",
+       house_kwh AS "Rest of house",
+       unattributed_kwh AS "Unattributed"
 FROM grid_consumption
 WHERE $__timeFilter(interval_start)
 ORDER BY interval_start;
@@ -157,7 +160,8 @@ Daily totals — car vs rest-of-house energy per day (bar chart):
 SELECT
   date_trunc('day', interval_start) AS time,
   SUM(car_kwh)   AS "Car",
-  SUM(house_kwh) AS "Rest of house"
+  SUM(house_kwh) AS "Rest of house",
+  SUM(unattributed_kwh) AS "Unattributed"
 FROM grid_consumption
 WHERE $__timeFilter(interval_start)
 GROUP BY 1

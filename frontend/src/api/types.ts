@@ -231,6 +231,10 @@ export interface EnergyUsageSlot {
   carKwh: number | null;
   /** Rest-of-house usage = import − car (kWh). */
   houseKwh: number | null;
+  /** Import that could not be split confidently because telemetry was incomplete. */
+  unattributedKwh: number | null;
+  /** Attribution quality for this interval. */
+  quality: 'good' | 'timing_adjusted' | 'uncertain_gap' | 'inconsistent' | string;
 }
 
 export interface EnergyUsageResponse {
@@ -242,7 +246,7 @@ export interface EnergyUsageResponse {
   /** Half-hourly slots for the day, chronological. */
   slots: EnergyUsageSlot[];
   /** Day totals, or null when disabled. */
-  totals: { importKwh: number; carKwh: number; houseKwh: number } | null;
+  totals: { importKwh: number; carKwh: number; houseKwh: number; unattributedKwh: number } | null;
 }
 
 export interface DailyStat {
