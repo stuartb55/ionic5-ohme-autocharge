@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Optional
 
@@ -34,6 +34,11 @@ logger = logging.getLogger(__name__)
 # Created in init() when DATABASE_URL is set and reachable; stays None otherwise,
 # which is the signal every write helper checks to decide whether it is a no-op.
 _pool: Optional[AsyncConnectionPool] = None
+
+
+def _minor_factor(currency: Optional[str]) -> int:
+    return {"JPY": 1, "KWD": 1000}.get((currency or "GBP").upper(), 100)
+
 
 def is_enabled() -> bool:
     """True when history persistence is configured (``DATABASE_URL`` set)."""
@@ -351,31 +356,6 @@ async def get_soh_history(limit: int) -> Optional[list[dict[str, Any]]]:
     return history
 
 
-async def get_miles_driven(since: datetime.datetime) -> Optional[int]:
-    """Miles driven since ``since``, from the odometer span across charge sessions.
-
-    Returns the difference between the highest and lowest odometer reading among
-    sessions plugged in on/after ``since``. None when persistence is disabled,
-    the read fails, or there aren't at least two odometer readings to span (so
-    we never report a bogus "0 miles driven" from a single data point).
-    """
-    if _pool is None:
-        return None
-    try:
-        async with _pool.connection() as conn:
-            cur = await conn.execute(
-                "SELECT MAX(odometer_miles) - MIN(odometer_miles) FROM charge_sessions "
-                "WHERE plugged_in_at >= %s AND odometer_miles IS NOT NULL "
-                "HAVING COUNT(odometer_miles) >= 2",
-                (since,),
-            )
-            row = await cur.fetchone()
-        return row[0] if row else None
-    except Exception:
-        logger.warning("Failed to read odometer span from Postgres", exc_info=True)
-        return None
-
-
 async def record_schedule(
     *,
     session_id: Optional[int],
@@ -459,11 +439,23 @@ async def record_daily_stats(daily: list[dict[str, Any]], currency: Optional[str
     """
     if _pool is None or not daily:
         return
-    rows = [
-        (day["date"], day.get("energyKwh"), day.get("savings"), day.get("cost"), currency)
-        for day in daily
-        if day.get("date")
-    ]
+    factor = _minor_factor(currency)
+    rows = []
+    for day in daily:
+        if not day.get("date"):
+            continue
+        energy_kwh = Decimal(str(day.get("energyKwh") or 0))
+        savings = Decimal(str(day.get("savings") or 0))
+        cost = Decimal(str(day.get("cost") or 0))
+        rows.append(
+            (
+                day["date"], float(energy_kwh), float(savings), float(cost), currency,
+                int((energy_kwh * 1000).quantize(Decimal("1"), rounding=ROUND_HALF_UP)),
+                int((savings * factor).quantize(Decimal("1"), rounding=ROUND_HALF_UP)),
+                int((cost * factor).quantize(Decimal("1"), rounding=ROUND_HALF_UP)),
+                bool(day.get("isComplete", False)),
+            )
+        )
     if not rows:
         return
     try:
@@ -471,18 +463,107 @@ async def record_daily_stats(daily: list[dict[str, Any]], currency: Optional[str
             async with conn.cursor() as cur:
                 await cur.executemany(
                     "INSERT INTO daily_stats "
-                    "(stat_date, energy_kwh, savings, cost, currency) "
-                    "VALUES (%s, %s, %s, %s, %s) "
+                    "(stat_date, energy_kwh, savings, cost, currency, energy_wh, "
+                    "savings_minor, cost_minor, is_complete) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
                     "ON CONFLICT (stat_date) DO UPDATE SET "
                     "  energy_kwh = EXCLUDED.energy_kwh, "
                     "  savings    = EXCLUDED.savings, "
                     "  cost       = EXCLUDED.cost, "
                     "  currency   = EXCLUDED.currency, "
+                    "  energy_wh = EXCLUDED.energy_wh, "
+                    "  savings_minor = EXCLUDED.savings_minor, "
+                    "  cost_minor = EXCLUDED.cost_minor, "
+                    "  is_complete = EXCLUDED.is_complete, "
                     "  updated_at = now()",
                     rows,
                 )
     except Exception:
         logger.warning("Failed to record daily stats to Postgres", exc_info=True)
+
+
+async def get_single_vehicle_id() -> Optional[str]:
+    """Return the sole persisted vehicle id, or None when ambiguous/unavailable."""
+    if _pool is None:
+        return None
+    try:
+        async with _pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT MIN(vehicle_id), COUNT(DISTINCT vehicle_id) FROM charge_sessions "
+                "WHERE vehicle_id IS NOT NULL"
+            )
+            row = await cur.fetchone()
+        return row[0] if row and row[1] == 1 else None
+    except Exception:
+        logger.warning("Failed to resolve persisted vehicle identity", exc_info=True)
+        return None
+
+
+async def get_vehicle_driving_metrics(
+    start: datetime.datetime, end: datetime.datetime, vehicle_id: Optional[str]
+) -> Optional[dict[str, Any]]:
+    """Pair each home-charge session with distance driven before the next plug-in.
+
+    Only intervals fully contained in ``[start, end)`` and carrying a final
+    charger energy counter are included. Cost-per-mile uses the stricter subset
+    whose session has a reconciled actual cost.
+    """
+    if _pool is None or not vehicle_id:
+        return None
+    try:
+        async with _pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT plugged_in_at, odometer_miles, actual_energy_wh, "
+                "actual_cost_minor, cost_currency FROM charge_sessions "
+                "WHERE vehicle_id = %s AND plugged_in_at >= %s AND plugged_in_at <= %s "
+                "ORDER BY plugged_in_at",
+                (vehicle_id, start, end),
+            )
+            rows = await cur.fetchall()
+    except Exception:
+        logger.warning("Failed to read vehicle driving intervals", exc_info=True)
+        return None
+
+    energy_miles = energy_wh = interval_count = 0
+    cost_miles = cost_minor = cost_interval_count = 0
+    cost_currency: Optional[str] = None
+    first_at = last_at = None
+    for current, nxt in zip(rows, rows[1:]):
+        at, odometer, session_wh, session_cost, currency = current
+        next_at, next_odometer = nxt[0], nxt[1]
+        if at is None or next_at is None or at < start or next_at > end:
+            continue
+        if odometer is None or next_odometer is None or next_odometer <= odometer:
+            continue
+        if session_wh is None or session_wh <= 0:
+            continue
+        miles = next_odometer - odometer
+        energy_miles += miles
+        energy_wh += session_wh
+        interval_count += 1
+        first_at = first_at or at
+        last_at = next_at
+        if session_cost is not None and currency:
+            if cost_currency is None:
+                cost_currency = currency
+            if currency == cost_currency:
+                cost_miles += miles
+                cost_minor += session_cost
+                cost_interval_count += 1
+    if interval_count == 0:
+        return None
+    return {
+        "vehicleId": vehicle_id,
+        "milesDriven": energy_miles,
+        "energyWh": energy_wh,
+        "intervalCount": interval_count,
+        "from": first_at,
+        "to": last_at,
+        "costMilesDriven": cost_miles,
+        "costMinor": cost_minor if cost_interval_count else None,
+        "costIntervalCount": cost_interval_count,
+        "costCurrency": cost_currency if cost_interval_count else None,
+    }
 
 
 async def get_telemetry_between(

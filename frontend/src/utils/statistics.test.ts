@@ -12,6 +12,8 @@ import {
 const empty: StatisticsResponse = {
   rangeDays: 7,
   currency: 'GBP',
+  window: statisticsFixture.window,
+  scope: statisticsFixture.scope,
   totals: {
     energyKwh: 0,
     savingsVsStandard: 0,
@@ -20,8 +22,8 @@ const empty: StatisticsResponse = {
     carbonSavedKgVsGasCar: 0,
   },
   daily: [
-    { date: '2026-05-27', energyKwh: 0, savings: 0, cost: 0 },
-    { date: '2026-05-28', energyKwh: 0, savings: 0, cost: 0 },
+    { date: '2026-05-27', energyKwh: 0, savings: 0, cost: 0, isComplete: true },
+    { date: '2026-05-28', energyKwh: 0, savings: 0, cost: 0, isComplete: true },
   ],
   efficiency: null,
   runningCost: null,
@@ -58,7 +60,7 @@ describe('deriveInsights', () => {
   it('surfaces running cost (and miles) when present without efficiency', () => {
     const withCost: StatisticsResponse = {
       ...statisticsFixture,
-      runningCost: { costPerMile: 0.083, milesDriven: 210, costTotal: 17.4 },
+      runningCost: { costPerMile: 0.083, milesDriven: 210, costTotal: 17.4, currency: 'GBP', intervalCount: 4, scope: 'matched_actual_home_charging' },
     };
     const insights = deriveInsights(withCost);
     expect(insights.costPerMile).toBe(0.083);
@@ -66,17 +68,16 @@ describe('deriveInsights', () => {
     expect(insights.milesDriven).toBe(210);
   });
 
-  it('uses the measured efficiency for the range estimate when present', () => {
+  it('does not apply a scoped measured efficiency to the account-wide total', () => {
     const withEff: StatisticsResponse = {
       ...statisticsFixture,
-      efficiency: { milesDriven: 168, milesPerKwh: 4 },
+      efficiency: { milesDriven: 168, milesPerKwh: 4, energyKwh: 42, intervalCount: 3, vehicleId: 'car-1', from: null, to: null, scope: 'matched_home_charging' },
     };
     const insights = deriveInsights(withEff);
     expect(insights.efficiencyIsReal).toBe(true);
     expect(insights.milesPerKwh).toBe(4);
     expect(insights.milesDriven).toBe(168);
-    // 42 kWh charged * 4 mi/kWh
-    expect(insights.estimatedMiles).toBeCloseTo(42 * 4, 5);
+    expect(insights.estimatedMiles).toBe(168);
   });
 });
 
@@ -108,7 +109,9 @@ describe('dailyToCsv', () => {
   });
 
   it('renders a null date as an empty cell', () => {
-    const csv = dailyToCsv([{ date: null, energyKwh: 1, savings: 0, cost: 0 }]);
+    const csv = dailyToCsv([
+      { date: null, energyKwh: 1, savings: 0, cost: 0, isComplete: true },
+    ]);
     expect(csv.split('\n')[1]).toBe(',1,0,0');
   });
 });

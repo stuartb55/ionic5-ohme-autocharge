@@ -24,29 +24,29 @@ describe('StatisticsSection insights', () => {
 
   it('hides the Efficiency insight when none is measured', () => {
     renderSection(); // fixture efficiency: null
-    expect(screen.queryByText('Efficiency')).not.toBeInTheDocument();
+    expect(screen.queryByText('Home-energy efficiency')).not.toBeInTheDocument();
   });
 
   it('shows the measured Efficiency insight when present', () => {
-    renderSection({ ...statisticsFixture, efficiency: { milesDriven: 168, milesPerKwh: 4 } });
-    expect(screen.getByText('Efficiency')).toBeInTheDocument();
+    renderSection({ ...statisticsFixture, efficiency: { milesDriven: 168, milesPerKwh: 4, energyKwh: 42, intervalCount: 3, vehicleId: 'car-1', from: null, to: null, scope: 'matched_home_charging' } });
+    expect(screen.getByText('Home-energy efficiency')).toBeInTheDocument();
     expect(screen.getByText('4 mi/kWh')).toBeInTheDocument();
-    expect(screen.getByText('over 168 mi')).toBeInTheDocument();
-    // The range estimate uses the measured rate, not the assumed 3.5.
-    expect(screen.getByText('@ 4 mi/kWh')).toBeInTheDocument();
+    expect(screen.getByText('42 kWh across 3 matched intervals')).toBeInTheDocument();
+    expect(screen.getByText('Matched distance')).toBeInTheDocument();
+    expect(screen.getByText('168 mi')).toBeInTheDocument();
   });
 
   it('hides the Running cost insight when none is available', () => {
     renderSection(); // fixture runningCost: null
-    expect(screen.queryByText('Running cost')).not.toBeInTheDocument();
+    expect(screen.queryByText('Actual home running cost')).not.toBeInTheDocument();
   });
 
   it('shows the Running cost insight when present', () => {
     renderSection({
       ...statisticsFixture,
-      runningCost: { costPerMile: 0.083, milesDriven: 210, costTotal: 17.4 },
+      runningCost: { costPerMile: 0.083, milesDriven: 210, costTotal: 17.4, currency: 'GBP', intervalCount: 4, scope: 'matched_actual_home_charging' },
     });
-    expect(screen.getByText('Running cost')).toBeInTheDocument();
+    expect(screen.getByText('Actual home running cost')).toBeInTheDocument();
     expect(screen.getByText('8.3p / mi')).toBeInTheDocument();
   });
 

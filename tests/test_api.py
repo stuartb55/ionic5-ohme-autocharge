@@ -5,6 +5,7 @@ drive the read endpoints by injecting a snapshot into ``state.store`` and the
 statistics endpoint by mocking the client's ``async_get_charge_summary``.
 """
 
+import datetime as dt
 import logging
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -243,6 +244,7 @@ def test_statistics_503_when_no_client(client):
 def test_statistics_parses_summary(client):
     # Ohme returns Money amounts in minor units (pence for GBP); the backend
     # converts to pounds.
+    window = api._statistics_window(7)
     mock_client = MagicMock()
     mock_client.async_get_charge_summary = AsyncMock(
         return_value={
@@ -258,7 +260,7 @@ def test_statistics_parses_summary(client):
             },
             "stats": [
                 {
-                    "startTime": 1748822400000,
+                    "startTime": window["startMs"],
                     "energyChargedTotalWh": 18500,
                     "costStats": {
                         "moneyCostTotal": {"currencyCode": "GBP", "amount": "230"},
@@ -280,10 +282,12 @@ def test_statistics_parses_summary(client):
     # 7.284p/kWh -> £0.07284, rounded to 4dp. The frontend renders this as "7.3p".
     assert body["totals"]["averageKwhPrice"] == 0.0728
     assert body["totals"]["carbonSavedKgVsGasCar"] == 12.0
-    assert len(body["daily"]) == 1
-    assert body["daily"][0]["energyKwh"] == 18.5
-    assert body["daily"][0]["cost"] == 2.3  # 230p -> £2.30
-    assert body["daily"][0]["savings"] == 3.7  # 370p -> £3.70
+    assert len(body["daily"]) == 7
+    charged_day = next(day for day in body["daily"] if day["energyKwh"] > 0)
+    assert charged_day["energyKwh"] == 18.5
+    assert charged_day["cost"] == 2.3
+    assert charged_day["savings"] == 3.7
+    assert all(day["isComplete"] for day in body["daily"])
 
 
 def _summary_client(energy_wh=42000):
@@ -297,13 +301,23 @@ def _summary_client(energy_wh=42000):
 
 def test_statistics_includes_efficiency_when_data_available(client):
     store.client = _summary_client(energy_wh=42000)  # 42 kWh charged
+    store.set_vehicle_id("car-1")
+    metrics = {
+        "vehicleId": "car-1", "milesDriven": 168, "energyWh": 42000,
+        "intervalCount": 3, "from": dt.datetime(2026, 5, 1, tzinfo=dt.timezone.utc),
+        "to": dt.datetime(2026, 5, 20, tzinfo=dt.timezone.utc),
+        "costMilesDriven": 0, "costMinor": None, "costIntervalCount": 0,
+        "costCurrency": None,
+    }
     with patch("db.is_enabled", return_value=True), \
-         patch("db.get_miles_driven", new=AsyncMock(return_value=168)) as mock_miles:
+         patch("db.get_vehicle_driving_metrics", new=AsyncMock(return_value=metrics)):
         body = client.get("/api/statistics?days=30").json()
 
-    # 168 miles driven / 42 kWh charged = 4.0 mi/kWh
-    assert body["efficiency"] == {"milesDriven": 168, "milesPerKwh": 4.0}
-    mock_miles.assert_awaited_once()
+    assert body["efficiency"]["milesDriven"] == 168
+    assert body["efficiency"]["milesPerKwh"] == 4.0
+    assert body["efficiency"]["energyKwh"] == 42.0
+    assert body["efficiency"]["vehicleId"] == "car-1"
+    assert body["efficiency"]["scope"] == "matched_home_charging"
 
 
 def test_statistics_efficiency_null_when_persistence_disabled(client):
@@ -353,7 +367,7 @@ def test_statistics_comparison_null_when_previous_fetch_fails(client):
 def test_statistics_efficiency_null_when_no_odometer_span(client):
     store.client = _summary_client()
     with patch("db.is_enabled", return_value=True), \
-         patch("db.get_miles_driven", new=AsyncMock(return_value=None)):
+         patch("db.get_single_vehicle_id", new=AsyncMock(return_value=None)):
         body = client.get("/api/statistics?days=90").json()
     assert body["efficiency"] is None
 
@@ -376,25 +390,42 @@ def _summary_client_with_cost(energy_wh=42000, cost_minor="5250"):
 
 def test_statistics_includes_running_cost_when_data_available(client):
     store.client = _summary_client_with_cost(cost_minor="5250")  # £52.50 spent
+    store.set_vehicle_id("car-1")
+    metrics = {
+        "vehicleId": "car-1", "milesDriven": 210, "energyWh": 42000,
+        "intervalCount": 4, "from": dt.datetime(2026, 5, 1, tzinfo=dt.timezone.utc),
+        "to": dt.datetime(2026, 5, 20, tzinfo=dt.timezone.utc),
+        "costMilesDriven": 210, "costMinor": 5250, "costIntervalCount": 4,
+        "costCurrency": "GBP",
+    }
     with patch("db.is_enabled", return_value=True), \
-         patch("db.get_miles_driven", new=AsyncMock(return_value=210)):
+         patch("db.get_vehicle_driving_metrics", new=AsyncMock(return_value=metrics)):
         body = client.get("/api/statistics?days=30").json()
-    # £52.50 / 210 miles = £0.25 per mile
-    assert body["runningCost"] == {"costPerMile": 0.25, "milesDriven": 210, "costTotal": 52.5}
+    assert body["runningCost"]["costPerMile"] == 0.25
+    assert body["runningCost"]["milesDriven"] == 210
+    assert body["runningCost"]["costTotal"] == 52.5
+    assert body["runningCost"]["scope"] == "matched_actual_home_charging"
 
 
 def test_statistics_running_cost_null_without_miles(client):
     store.client = _summary_client_with_cost()
     with patch("db.is_enabled", return_value=True), \
-         patch("db.get_miles_driven", new=AsyncMock(return_value=None)):
+         patch("db.get_single_vehicle_id", new=AsyncMock(return_value=None)):
         body = client.get("/api/statistics?days=30").json()
     assert body["runningCost"] is None
 
 
 def test_statistics_running_cost_null_without_cost(client):
     store.client = _summary_client()  # no costStats -> costTotal 0
+    metrics = {
+        "vehicleId": "car-1", "milesDriven": 210, "energyWh": 42000,
+        "intervalCount": 4, "from": None, "to": None,
+        "costMilesDriven": 0, "costMinor": None, "costIntervalCount": 0,
+        "costCurrency": None,
+    }
+    store.set_vehicle_id("car-1")
     with patch("db.is_enabled", return_value=True), \
-         patch("db.get_miles_driven", new=AsyncMock(return_value=210)):
+         patch("db.get_vehicle_driving_metrics", new=AsyncMock(return_value=metrics)):
         body = client.get("/api/statistics?days=30").json()
     assert body["runningCost"] is None
 
@@ -416,6 +447,42 @@ def test_parse_summary_buckets_days_in_account_timezone():
         parsed = api.parse_summary(summary, 7)
 
     assert parsed["daily"][0]["date"] == "2025-06-02"
+
+
+@pytest.mark.parametrize(
+    ("now", "expected_hours"),
+    [
+        (dt.datetime(2026, 4, 1, 12, tzinfo=dt.timezone.utc), 167),
+        (dt.datetime(2026, 10, 28, 12, tzinfo=dt.timezone.utc), 169),
+    ],
+)
+def test_statistics_window_uses_complete_local_days_across_dst(now, expected_hours):
+    from zoneinfo import ZoneInfo
+
+    with patch.object(api, "_STATS_TZ", ZoneInfo("Europe/London")):
+        window = api._statistics_window(7, now)
+
+    assert window["end"].date() - window["start"].date() == dt.timedelta(days=7)
+    assert window["start"].hour == window["end"].hour == 0
+    elapsed = window["end"].astimezone(dt.timezone.utc) - window["start"].astimezone(dt.timezone.utc)
+    assert elapsed == dt.timedelta(hours=expected_hours)
+
+
+def test_complete_daily_series_fills_only_the_requested_complete_days():
+    from zoneinfo import ZoneInfo
+
+    with patch.object(api, "_STATS_TZ", ZoneInfo("Europe/London")):
+        window = api._statistics_window(
+            3, dt.datetime(2026, 6, 10, 14, tzinfo=dt.timezone.utc)
+        )
+    rows = api._complete_daily_series(
+        [{"date": "2026-06-08", "energyKwh": 2.5, "savings": 1, "cost": 0.5}],
+        window,
+    )
+
+    assert [row["date"] for row in rows] == ["2026-06-07", "2026-06-08", "2026-06-09"]
+    assert [row["energyKwh"] for row in rows] == [0.0, 2.5, 0.0]
+    assert all(row["isComplete"] is True for row in rows)
 
 
 def test_statistics_validates_days_range(client):
