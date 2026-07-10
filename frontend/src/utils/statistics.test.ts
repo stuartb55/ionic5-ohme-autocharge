@@ -28,6 +28,7 @@ const empty: StatisticsResponse = {
   efficiency: null,
   runningCost: null,
   comparison: null,
+  metadata: statisticsFixture.metadata,
 };
 
 describe('deriveInsights', () => {

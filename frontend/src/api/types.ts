@@ -325,4 +325,20 @@ export interface StatisticsResponse {
       savingsVsStandard: number;
     };
   } | null;
+  metadata: {
+    summary: MetricProvenance;
+    daily: MetricProvenance;
+    efficiency: MetricProvenance;
+    runningCost: MetricProvenance;
+    comparison: MetricProvenance;
+  };
+}
+
+export interface MetricProvenance {
+  source: string;
+  calculationType: string;
+  observedAt: string | null;
+  completeThrough: string;
+  quality: 'complete' | 'measured' | 'actual' | 'unavailable';
+  coverage: Record<string, unknown>;
 }

@@ -26,13 +26,13 @@ import os
 import time
 from decimal import Decimal, ROUND_HALF_UP
 from contextlib import asynccontextmanager
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.middleware.base import BaseHTTPMiddleware
 
 import bluelink
@@ -810,6 +810,101 @@ class VehicleUpdate(BaseModel):
     vehicleId: Optional[str] = None
 
 
+class StatisticsWindowModel(BaseModel):
+    """Exact, half-open local-calendar window represented by the response."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    from_: datetime.datetime = Field(alias="from")
+    toExclusive: datetime.datetime
+    completeThrough: datetime.datetime
+    timezone: str
+
+
+class StatisticsTotalsModel(BaseModel):
+    energyKwh: float
+    savingsVsStandard: float
+    costTotal: float
+    averageKwhPrice: float
+    carbonSavedKgVsGasCar: float
+
+
+class DailyStatModel(BaseModel):
+    date: datetime.date
+    energyKwh: float
+    savings: float
+    cost: float
+    isComplete: bool
+
+
+class EfficiencyModel(BaseModel):
+    milesDriven: int
+    milesPerKwh: float
+    energyKwh: float
+    intervalCount: int
+    vehicleId: str
+    model_config = ConfigDict(populate_by_name=True)
+    from_: Optional[datetime.datetime] = Field(alias="from")
+    to: Optional[datetime.datetime]
+    scope: Literal["matched_home_charging"]
+
+
+class RunningCostModel(BaseModel):
+    costPerMile: float
+    milesDriven: int
+    costTotal: float
+    currency: str
+    intervalCount: int
+    scope: Literal["matched_actual_home_charging"]
+
+
+class PreviousTotalsModel(BaseModel):
+    energyKwh: float
+    costTotal: float
+    savingsVsStandard: float
+
+
+class ComparisonModel(BaseModel):
+    previous: PreviousTotalsModel
+
+
+class StatisticsScopeModel(BaseModel):
+    summary: Literal["ohme_account"]
+    vehicleId: Optional[str]
+
+
+class MetricProvenanceModel(BaseModel):
+    """Where a metric came from and how much evidence supports it."""
+
+    source: str
+    calculationType: str
+    observedAt: Optional[datetime.datetime]
+    completeThrough: datetime.datetime
+    quality: Literal["complete", "measured", "actual", "unavailable"]
+    coverage: dict[str, Any]
+
+
+class StatisticsMetadataModel(BaseModel):
+    summary: MetricProvenanceModel
+    daily: MetricProvenanceModel
+    efficiency: MetricProvenanceModel
+    runningCost: MetricProvenanceModel
+    comparison: MetricProvenanceModel
+
+
+class StatisticsResponseModel(BaseModel):
+    rangeDays: int
+    currency: Optional[str]
+    window: StatisticsWindowModel
+    scope: StatisticsScopeModel
+    totals: StatisticsTotalsModel
+    daily: list[DailyStatModel]
+    efficiency: Optional[EfficiencyModel]
+    runningCost: Optional[RunningCostModel]
+    comparison: Optional[ComparisonModel]
+    metadata: StatisticsMetadataModel
+
+
 async def _reapply_target_if_connected() -> bool:
     """Push the current effective target/ready-by to Ohme if the car is plugged in.
 
@@ -1445,8 +1540,87 @@ def _running_cost(metrics: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]
     }
 
 
-@app.get("/api/statistics")
-async def get_statistics(days: int = Query(default=7, ge=1, le=90)) -> JSONResponse:
+def _statistics_metadata(
+    parsed: dict[str, Any],
+    window: dict[str, Any],
+    metrics: Optional[dict[str, Any]],
+    fetched_at: datetime.datetime,
+) -> dict[str, Any]:
+    """Attach auditable source, method, freshness and coverage to each metric family."""
+    complete_through = window["end"].isoformat()
+    efficiency = parsed.get("efficiency")
+    running_cost = parsed.get("runningCost")
+    comparison = parsed.get("comparison")
+    summary_coverage = {
+        "requestedDays": window["days"],
+        "completeDays": len(parsed["daily"]),
+        "from": window["start"].isoformat(),
+        "toExclusive": complete_through,
+        "scope": "ohme_account",
+    }
+    return {
+        "summary": {
+            "source": "ohme_charge_summary",
+            "calculationType": "upstream_reported_totals",
+            "observedAt": fetched_at.isoformat(),
+            "completeThrough": complete_through,
+            "quality": "complete",
+            "coverage": summary_coverage,
+        },
+        "daily": {
+            "source": "ohme_charge_summary",
+            "calculationType": "complete_local_calendar_days",
+            "observedAt": fetched_at.isoformat(),
+            "completeThrough": complete_through,
+            "quality": "complete",
+            "coverage": summary_coverage,
+        },
+        "efficiency": {
+            "source": "charge_sessions.actual_energy_wh+bluelink_odometer",
+            "calculationType": "same_vehicle_charge_to_next_plugin",
+            "observedAt": metrics["to"].isoformat() if metrics and metrics.get("to") else None,
+            "completeThrough": complete_through,
+            "quality": "measured" if efficiency else "unavailable",
+            "coverage": {
+                "vehicleId": metrics.get("vehicleId") if metrics else None,
+                "matchedIntervals": efficiency["intervalCount"] if efficiency else 0,
+                "matchedEnergyKwh": efficiency["energyKwh"] if efficiency else 0,
+                "matchedMiles": efficiency["milesDriven"] if efficiency else 0,
+                "boundaryPolicy": "fully_contained",
+            },
+        },
+        "runningCost": {
+            "source": "charge_sessions.reconciled_actual_cost+bluelink_odometer",
+            "calculationType": "same_vehicle_actual_cost_to_next_plugin",
+            "observedAt": metrics["to"].isoformat() if metrics and metrics.get("to") else None,
+            "completeThrough": complete_through,
+            "quality": "actual" if running_cost else "unavailable",
+            "coverage": {
+                "vehicleId": metrics.get("vehicleId") if metrics else None,
+                "matchedIntervals": running_cost["intervalCount"] if running_cost else 0,
+                "matchedMiles": running_cost["milesDriven"] if running_cost else 0,
+                "costMethod": "tariff_interval_reconciliation",
+            },
+        },
+        "comparison": {
+            "source": "ohme_charge_summary",
+            "calculationType": "previous_equal_calendar_window",
+            "observedAt": fetched_at.isoformat() if comparison else None,
+            "completeThrough": window["start"].isoformat(),
+            "quality": "complete" if comparison else "unavailable",
+            "coverage": {
+                "requestedDays": window["days"],
+                "from": window["previousStart"].isoformat(),
+                "toExclusive": window["start"].isoformat(),
+            },
+        },
+    }
+
+
+@app.get("/api/statistics", response_model=StatisticsResponseModel)
+async def get_statistics(
+    days: int = Query(default=7, ge=1, le=90),
+) -> StatisticsResponseModel:
     client = store.client
     if client is None:
         raise HTTPException(status_code=503, detail="Backend not connected to Ohme yet")
@@ -1459,7 +1633,7 @@ async def get_statistics(days: int = Query(default=7, ge=1, le=90)) -> JSONRespo
         and _summary_cache["value"] is not None
         and now - _summary_cache["at"] < SUMMARY_CACHE_TTL
     ):
-        return JSONResponse(_summary_cache["value"])
+        return StatisticsResponseModel.model_validate(_summary_cache["value"])
 
     try:
         async with store.client_lock:
@@ -1490,10 +1664,12 @@ async def get_statistics(days: int = Query(default=7, ge=1, le=90)) -> JSONRespo
     # Period-over-period comparison: the previous equal-length window (best-effort).
     previous = await _previous_period_totals(client, window)
     parsed["comparison"] = {"previous": previous} if previous is not None else None
+    fetched_at = datetime.datetime.now(datetime.timezone.utc)
+    parsed["metadata"] = _statistics_metadata(parsed, window, metrics, fetched_at)
     _summary_cache.update(key=cache_key, value=parsed, at=now)
     # Opportunistically persist the day totals we just fetched (no-op when disabled).
     await db.record_daily_stats(parsed["daily"], parsed["currency"])
-    return JSONResponse(parsed)
+    return StatisticsResponseModel.model_validate(parsed)
 
 
 # --- charge controls -------------------------------------------------------------

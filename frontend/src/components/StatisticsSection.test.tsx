@@ -20,6 +20,16 @@ describe('StatisticsSection insights', () => {
     expect(screen.getByText('Best day')).toBeInTheDocument();
     expect(screen.getByText('Est. range added')).toBeInTheDocument();
     expect(screen.getByText('Total cost')).toBeInTheDocument();
+    expect(screen.getByText(/Complete through/)).toHaveTextContent(/2/);
+    expect(screen.getByText('Sources & methods')).toBeInTheDocument();
+  });
+
+  it('discloses source methods and matched coverage', async () => {
+    renderSection();
+    await userEvent.click(screen.getByText('Sources & methods'));
+    expect(screen.getByText(/Ohme charge summary/)).toBeInTheDocument();
+    expect(screen.getByText(/0 matched home charges/)).toBeInTheDocument();
+    expect(screen.getByText(/reconciled tariff-interval cost/)).toBeInTheDocument();
   });
 
   it('hides the Efficiency insight when none is measured', () => {

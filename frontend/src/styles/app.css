@@ -799,6 +799,32 @@ body {
   gap: var(--space-4);
   margin-bottom: var(--space-5);
 }
+
+.stats-context {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  gap: 0.5rem 1rem;
+  margin: -0.25rem 0 1rem;
+}
+
+.stats-context details { position: relative; }
+.stats-context summary { cursor: pointer; }
+.stats-context ul {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  box-shadow: var(--shadow);
+  line-height: 1.45;
+  margin: 0.45rem 0 0;
+  max-width: 34rem;
+  padding: 0.75rem 0.75rem 0.75rem 1.75rem;
+  position: absolute;
+  width: min(34rem, calc(100vw - 3rem));
+  z-index: 3;
+}
 .stat-card {
   background: var(--surface-2);
   border: 1px solid var(--border);
