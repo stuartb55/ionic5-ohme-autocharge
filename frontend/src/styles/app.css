@@ -632,6 +632,60 @@ body {
 .trip-mode-actions .cancel { color: var(--text-muted); background: transparent; }
 .trip-mode-actions button:disabled { opacity: 0.6; cursor: not-allowed; }
 
+.notification-settings { width: 100%; }
+.notification-settings summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.notification-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-4);
+  margin: var(--space-3) 0;
+}
+.notification-options label,
+.notification-thresholds label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+.notification-options input { accent-color: var(--brand); }
+.notification-thresholds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-5);
+  margin-bottom: var(--space-3);
+}
+.notification-thresholds input {
+  width: 4.5rem;
+  min-height: 40px;
+  padding: 6px 8px;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
+.notification-settings > .save {
+  min-height: 42px;
+  margin-top: var(--space-3);
+  padding: 7px 14px;
+  color: #fff;
+  background: var(--brand);
+  border: 1px solid var(--brand);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+@media (max-width: 620px) {
+  .notification-options { grid-template-columns: 1fr; }
+}
+
 .tiles {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

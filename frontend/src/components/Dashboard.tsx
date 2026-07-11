@@ -14,7 +14,7 @@ import { StatusSection } from './StatusSection';
 import { TariffSection } from './TariffSection';
 import { ThemeToggle } from './ThemeToggle';
 import { VehiclePicker } from './VehiclePicker';
-import type { VehiclesResponse } from '../api/types';
+import type { NotificationPreferences, VehiclesResponse } from '../api/types';
 
 const STATUS_INTERVAL = 15_000;
 const SCHEDULE_INTERVAL = 30_000;
@@ -189,6 +189,14 @@ export function Dashboard() {
     [refetchStatus, refetchSchedule],
   );
 
+  const handleSetNotifications = useCallback(
+    async (preferences: Omit<NotificationPreferences, 'configured'>) => {
+      await api.setNotificationPreferences(preferences);
+      refetchStatus();
+    },
+    [refetchStatus],
+  );
+
   // Switch the tracked Hyundai vehicle, then refresh vehicles + status.
   const handleSelectVehicle = useCallback(
     async (id: string) => {
@@ -271,6 +279,7 @@ export function Dashboard() {
             onSetReadyBy={handleSetReadyBy}
             onSetDayTargets={handleSetDayTargets}
             onSetTripMode={handleSetTripMode}
+            onSetNotifications={handleSetNotifications}
             onChargeChanged={refetchStatus}
           />
         ) : (

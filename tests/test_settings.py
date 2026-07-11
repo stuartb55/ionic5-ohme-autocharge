@@ -131,6 +131,35 @@ def test_load_trip_mode_rejects_invalid_values(settings_path, raw):
     assert settings.load_trip_mode() is None
 
 
+# --- notification preferences --------------------------------------------
+
+def test_notification_preferences_round_trip(settings_path):
+    preferences = settings.NotificationPreferences(
+        plug_in=False,
+        failure_polls=3,
+        minimum_charge_kwh=2.5,
+        aux_battery_below_percent=35,
+    )
+    assert settings.save_notification_preferences(preferences) is True
+    assert settings.load_notification_preferences() == preferences
+
+
+def test_notification_preferences_validate_each_persisted_field(settings_path):
+    _write_raw(settings_path, {"notificationPreferences": {
+        "plugIn": "yes",
+        "chargeComplete": False,
+        "failurePolls": 99,
+        "minimumChargeKwh": -1,
+        "auxBatteryBelowPercent": 0,
+    }})
+    loaded = settings.load_notification_preferences()
+    assert loaded.plug_in is True
+    assert loaded.charge_complete is False
+    assert loaded.failure_polls == 5
+    assert loaded.minimum_charge_kwh == 0.1
+    assert loaded.aux_battery_below_percent is None
+
+
 # --- vehicle id ------------------------------------------------------------
 
 def test_vehicle_id_set_and_clear(settings_path):
@@ -177,12 +206,16 @@ def test_setters_preserve_other_keys(settings_path):
     settings.save_day_targets({0: 90})
     settings.save_vehicle_id("v1")
     settings.save_trip_mode(95, None)
+    settings.save_notification_preferences(
+        settings.NotificationPreferences(weekly_digest=False)
+    )
     settings.save_session_active(True)
     assert settings.load_target() == 70
     assert settings.load_ready_by() == "06:30"
     assert settings.load_day_targets() == {0: 90}
     assert settings.load_vehicle_id() == "v1"
     assert settings.load_trip_mode() == (95, None)
+    assert settings.load_notification_preferences().weekly_digest is False
     assert settings.load_session_active() is True
 
 

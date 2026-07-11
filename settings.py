@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import tempfile
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,32 @@ TARGET_MAX = 100
 SETTINGS_PATH = os.getenv("SETTINGS_PATH", "/app/data/settings.json")
 
 _HHMM_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
+
+
+@dataclass(frozen=True)
+class NotificationPreferences:
+    """User-adjustable ntfy categories and evidence-based thresholds."""
+
+    plug_in: bool = True
+    charge_complete: bool = True
+    problems: bool = True
+    vehicle_health: bool = True
+    weekly_digest: bool = True
+    failure_polls: int = 5
+    minimum_charge_kwh: float = 0.1
+    aux_battery_below_percent: int | None = None
+
+    def to_json(self) -> dict:
+        return {
+            "plugIn": self.plug_in,
+            "chargeComplete": self.charge_complete,
+            "problems": self.problems,
+            "vehicleHealth": self.vehicle_health,
+            "weeklyDigest": self.weekly_digest,
+            "failurePolls": self.failure_polls,
+            "minimumChargeKwh": self.minimum_charge_kwh,
+            "auxBatteryBelowPercent": self.aux_battery_below_percent,
+        }
 
 
 def parse_hhmm(value: object) -> tuple[int, int] | None:
@@ -175,6 +202,50 @@ def clear_trip_mode() -> bool:
     """Consume or cancel the pending trip override."""
     data = _load()
     data.pop("tripMode", None)
+    return _save(data)
+
+
+def load_notification_preferences() -> NotificationPreferences:
+    """Load validated notification controls, defaulting each malformed field."""
+    raw = _load().get("notificationPreferences")
+    if not isinstance(raw, dict):
+        return NotificationPreferences()
+    defaults = NotificationPreferences()
+
+    def boolean(key: str, default: bool) -> bool:
+        value = raw.get(key)
+        return value if isinstance(value, bool) else default
+
+    def integer(key: str, default: int, low: int, high: int) -> int:
+        value = raw.get(key)
+        return (
+            value
+            if isinstance(value, int) and not isinstance(value, bool) and low <= value <= high
+            else default
+        )
+
+    minimum = raw.get("minimumChargeKwh")
+    if not isinstance(minimum, (int, float)) or isinstance(minimum, bool) or not 0 <= minimum <= 100:
+        minimum = defaults.minimum_charge_kwh
+    aux = raw.get("auxBatteryBelowPercent")
+    if aux is not None and (not isinstance(aux, int) or isinstance(aux, bool) or not 1 <= aux <= 100):
+        aux = None
+    return NotificationPreferences(
+        plug_in=boolean("plugIn", defaults.plug_in),
+        charge_complete=boolean("chargeComplete", defaults.charge_complete),
+        problems=boolean("problems", defaults.problems),
+        vehicle_health=boolean("vehicleHealth", defaults.vehicle_health),
+        weekly_digest=boolean("weeklyDigest", defaults.weekly_digest),
+        failure_polls=integer("failurePolls", defaults.failure_polls, 1, 20),
+        minimum_charge_kwh=float(minimum),
+        aux_battery_below_percent=aux,
+    )
+
+
+def save_notification_preferences(value: NotificationPreferences) -> bool:
+    """Persist the complete notification preference set."""
+    data = _load()
+    data["notificationPreferences"] = value.to_json()
     return _save(data)
 
 

@@ -5,6 +5,7 @@ import pytest
 import bluelink
 import config
 import settings
+import main
 from main import PlugInDetector, handle_plugin_event, load_persisted_settings, run_loop, run_once
 from state import store
 
@@ -28,11 +29,13 @@ def _reset_session_state():
     marker; keep tests independent."""
     store.clear_soc()
     store.clear_trip_mode()
+    store.notification_preferences = settings.NotificationPreferences()
     settings.clear_trip_mode()
     settings.save_session_active(False)
     yield
     store.clear_soc()
     store.clear_trip_mode()
+    store.notification_preferences = settings.NotificationPreferences()
     settings.clear_trip_mode()
     settings.save_session_active(False)
 
@@ -91,6 +94,23 @@ async def test_sets_ohme_target_and_sends_notification_when_below_target(monkeyp
     assert "80%" in msg
     assert "Schedule" not in msg  # no slots on this client
     assert mock_notify.call_args.kwargs["tags"] == "electric_plug"
+
+
+async def test_plug_in_notification_can_be_disabled(monkeypatch):
+    monkeypatch.setattr(config, "CHARGE_TARGET", 80)
+    store.notification_preferences = settings.NotificationPreferences(plug_in=False)
+    with patch("bluelink.get_vehicle_state", return_value=_vstate(62)), \
+         patch("ohme_client.set_target", new=AsyncMock()), \
+         patch("ntfy.send", new=AsyncMock()) as notify:
+        assert await handle_plugin_event(_mock_ohme_client()) is True
+    notify.assert_not_called()
+
+
+async def test_problem_notification_can_be_disabled():
+    store.notification_preferences = settings.NotificationPreferences(problems=False)
+    with patch("ntfy.send", new=AsyncMock()) as notify:
+        await main._notify_plugin_failure("problem")
+    notify.assert_not_called()
 
 
 async def test_notification_includes_charge_schedule_when_slots_available(monkeypatch):

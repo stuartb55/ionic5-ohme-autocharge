@@ -47,6 +47,7 @@ def load_persisted_settings() -> None:
     if trip_mode is not None:
         store.set_trip_mode(*trip_mode)
         logger.info("Loaded pending trip mode: target=%s%% ready_by=%s", *trip_mode)
+    store.set_notification_preferences(settings.load_notification_preferences())
     vehicle_id = settings.load_vehicle_id()
     if vehicle_id is not None:
         store.set_vehicle_id(vehicle_id)
@@ -149,9 +150,10 @@ async def handle_plugin_event(
         schedule = ", ".join(str(s) for s in slots)
         if schedule:
             lines.append(f"Schedule: {schedule}")
-        await ntfy.send(
-            "\n".join(lines), title=f"{vehicle_name} plugged in", tags="electric_plug"
-        )
+        if store.notification_preferences.plug_in:
+            await ntfy.send(
+                "\n".join(lines), title=f"{vehicle_name} plugged in", tags="electric_plug"
+            )
         if db.is_enabled():
             session_id = await db.record_session(
                 vehicle_name=vehicle_name,
@@ -201,7 +203,8 @@ async def _notify_plugin_failure(message: str) -> None:
     if store.plugin_failure_notified:
         return
     store.plugin_failure_notified = True
-    await ntfy.send(message, title="Autocharge problem", priority="high", tags="warning")
+    if store.notification_preferences.problems:
+        await ntfy.send(message, title="Autocharge problem", priority="high", tags="warning")
 
 
 class PlugInDetector:

@@ -16,6 +16,7 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 import config
+from settings import NotificationPreferences
 
 
 def _today_weekday() -> int:
@@ -144,6 +145,7 @@ class AppState:
         # precedence over permanent/day targets and is cleared on unplug.
         self.trip_target: Optional[int] = None
         self.trip_ready_by: Optional[str] = None
+        self.notification_preferences = NotificationPreferences()
         # Runtime-selected Hyundai vehicle id (when the account has more than
         # one). None means "use config.HYUNDAI_VEHICLE_ID, else the first".
         self.vehicle_id_override: Optional[str] = None
@@ -165,6 +167,9 @@ class AppState:
         # How many polls in a row have failed. Drives the "can't reach Ohme"
         # alert (sent once when a threshold is crossed) and its recovery notice.
         self.consecutive_poll_failures: int = 0
+        # True only after the outage notification was emitted, so a recovery
+        # message cannot appear when problem alerts were disabled mid-outage.
+        self.poll_failure_notified: bool = False
         # True once the user has been alerted that handling the current plug-in
         # is failing, so the per-poll retries don't re-notify. Cleared when a
         # plug-in is handled successfully and when the car unplugs.
@@ -202,6 +207,9 @@ class AppState:
     def clear_trip_mode(self) -> None:
         self.trip_target = None
         self.trip_ready_by = None
+
+    def set_notification_preferences(self, value: NotificationPreferences) -> None:
+        self.notification_preferences = value
 
     @property
     def trip_mode_enabled(self) -> bool:
