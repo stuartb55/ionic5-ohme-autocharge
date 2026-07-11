@@ -3,6 +3,8 @@ import type {
   DayTargetsUpdateResponse,
   DataQualityResponse,
   EnergyUsageResponse,
+  NotificationPreferences,
+  NotificationPreferencesUpdateResponse,
   ReadyByUpdateResponse,
   ScheduleResponse,
   SessionsResponse,
@@ -145,6 +147,14 @@ export const api = {
   ) => putJson<TripModeUpdateResponse>(
     '/api/settings/trip-mode',
     { enabled, targetPercent, readyBy },
+    signal,
+  ),
+  setNotificationPreferences: (
+    preferences: Omit<NotificationPreferences, 'configured'>,
+    signal?: AbortSignal,
+  ) => putJson<NotificationPreferencesUpdateResponse>(
+    '/api/settings/notifications',
+    preferences,
     signal,
   ),
   // Ask the backend to pull a fresh live reading from Ohme, then the caller

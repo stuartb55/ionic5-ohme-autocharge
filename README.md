@@ -20,7 +20,7 @@ When the car is plugged in, the app reads the real battery state-of-charge from 
 - **Live SOC while charging** — the ring climbs through the session (re-reads Bluelink on a slow cadence; never wakes the car).
 - **Multi-vehicle** — pick which car on the Hyundai account to track.
 - **Vehicle health** — read-only 12V auxiliary battery level plus the car's own tyre-pressure, washer-fluid and key-fob-battery warnings and anything left open (door/bonnet/boot), shown on the dashboard with an optional ntfy when a warning first appears.
-- **Notifications** — optional [ntfy](https://ntfy.sh) alerts (plug-in, charge finished, problems, vehicle-health warnings) plus a weekly summary digest.
+- **Configurable notifications** — optional [ntfy](https://ntfy.sh) alerts with dashboard controls for plug-in, completion, problems/recovery, vehicle health and weekly summaries; tune failure, minimum-energy and optional 12V-battery thresholds.
 - **Octopus Agile** *(optional)* — upcoming half-hourly prices and the cheapest slots, plus an Agile-accurate session cost (each charge slot priced against the rate it falls in, not a flat average).
 - **Reconciled actual cost** *(Octopus Agile + Postgres)* — persists tariff windows in the background and prices measured session-energy intervals after charging finishes; incomplete tariff or telemetry coverage is reported instead of guessed.
 - **House vs car energy** *(optional, needs Postgres)* — splits Octopus import into car, household and explicitly unattributed energy; telemetry gaps and inconsistencies remain visible instead of being silently forced into a plausible split.
@@ -153,7 +153,7 @@ uvicorn api:app --host 0.0.0.0 --port 8000   # web API + poll loop (docs at /doc
 
 A React + TypeScript single-page app (in `frontend/`) served by a hardened, non-root nginx image. It polls the backend and renders:
 
-1. **Vehicle & charger status** — a state-of-charge ring with target marker; driving range, battery health (SoH), lock status + a "view location" link, and vehicle-health chips (12V battery, tyre/washer/key warnings, anything left open); connection state; live charge rate (kW / A); energy added and an estimated session cost. Controls: **target** stepper, **ready-by** time, **per-day targets** (in a collapsible), a one-session **trip charge**, **pause/resume**, and **max-charge (boost)**.
+1. **Vehicle & charger status** — a state-of-charge ring with target marker; driving range, battery health (SoH), lock status + a "view location" link, and vehicle-health chips (12V battery, tyre/washer/key warnings, anything left open); connection state; live charge rate (kW / A); energy added and an estimated session cost. Controls: **target** stepper, **ready-by** time, **per-day targets**, a one-session **trip charge**, configurable **notifications**, **pause/resume**, and **max-charge (boost)**.
 2. **Schedule** — a timeline of the allocated charging slots (active vs paused / off-peak windows) plus a slot-by-slot breakdown.
 3. **Statistics & savings** — account-wide Ohme energy, savings and CO₂ for the last 7/30/90 **complete local calendar days**, plus vehicle-scoped home-energy efficiency and actual home running cost from complete charge-to-next-plug-in intervals. The UI shows the matched energy and interval count so these narrower metrics are not confused with whole-account totals. Daily charts include period-over-period deltas and CSV export; DST days follow `TIMEZONE` rather than assuming every day is 24 hours.
 4. **Recent sessions** *(when Postgres is enabled)* — the last plug-ins with SOC, target, top-up and odometer, with a CSV/JSON export of the full history.
@@ -202,11 +202,12 @@ npm run build    # type-check + production build to dist/
 | `PUT /api/settings/ready-by` | Set/clear the ready-by time — `{"readyBy": "HH:MM"\|null}` |
 | `PUT /api/settings/day-targets` | Replace per-weekday overrides — `{"dayTargets": {"4": 100}}` |
 | `PUT /api/settings/trip-mode` | Enable/update or cancel the durable one-session override — `{"enabled": true, "targetPercent": 100, "readyBy": "06:30"}` |
+| `PUT /api/settings/notifications` | Replace ntfy category choices and validated alert thresholds; persisted in runtime settings |
 | `PUT /api/settings/vehicle` | Select the tracked vehicle — `{"vehicleId": "…"\|null}` |
 
 ## Notifications (ntfy)
 
-The app can send push notifications via [ntfy](https://ntfy.sh) — plug-in / charge-target-set, charge finished, and problem alerts (Bluelink/Ohme unreachable, with recovery). Set `NTFY_TOPIC` to enable; blank disables silently.
+The app can send push notifications via [ntfy](https://ntfy.sh) — plug-in / charge-target-set, charge finished, problem/recovery, vehicle-health, and weekly-summary alerts. Set `NTFY_TOPIC` to enable delivery; blank disables it silently. The dashboard’s **Notifications** settings can independently enable each category and configure the number of failed polls before a problem alert, the minimum delivered kWh for a completion alert, and an optional user-chosen 12V battery threshold. Preferences persist across restarts even when delivery is not configured yet.
 
 ```env
 NTFY_TOPIC=your-topic-name
@@ -278,7 +279,7 @@ docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compo
 ├── main.py                        # Async poll loop, plug-in handler, PlugInDetector (CLI + shared)
 ├── api.py                         # FastAPI app: runs the poll loop + serves /api
 ├── state.py                       # In-memory snapshot + runtime settings shared by loop and API
-├── settings.py                    # Persisted runtime settings (target, ready-by, day-targets, vehicle)
+├── settings.py                    # Persisted runtime settings (charging, alerts, vehicle, session marker)
 ├── bluelink.py                    # Hyundai Bluelink wrapper (SOC, range, odometer, SoH, lock/location)
 ├── ohme_client.py                 # Ohme charger wrapper (ohme)
 ├── ntfy.py                        # Ntfy notification client + weekly digest

@@ -5,6 +5,7 @@ import { BatteryRing } from './BatteryRing';
 import { ChargeControls } from './ChargeControls';
 import { ConnectionBadge } from './ConnectionBadge';
 import { DayTargetsEditor } from './DayTargetsEditor';
+import { NotificationSettings } from './NotificationSettings';
 import { ReadyByEditor } from './ReadyByEditor';
 import { TargetEditor } from './TargetEditor';
 import { TripModeEditor } from './TripModeEditor';
@@ -28,6 +29,7 @@ export function StatusSection({
   onSetReadyBy,
   onSetDayTargets,
   onSetTripMode,
+  onSetNotifications,
   onChargeChanged,
 }: {
   status: StatusResponse;
@@ -38,6 +40,9 @@ export function StatusSection({
   onSetDayTargets?: (map: Record<number, number>) => Promise<void>;
   /** Set or cancel a one-session target/departure override. */
   onSetTripMode?: (enabled: boolean, target: number, readyBy: string | null) => Promise<void>;
+  onSetNotifications?: (
+    preferences: Omit<StatusResponse['config']['notifications'], 'configured'>,
+  ) => Promise<void>;
   /** Refetch status after a charge-control action; controls hidden when omitted. */
   onChargeChanged?: () => void;
 }) {
@@ -58,7 +63,7 @@ export function StatusSection({
     charger.projectedFinish != null &&
     new Date(charger.projectedFinish).getTime() > now;
 
-  const hasSettings = onSetTarget || onSetReadyBy || onSetDayTargets || onSetTripMode;
+  const hasSettings = onSetTarget || onSetReadyBy || onSetDayTargets || onSetTripMode || onSetNotifications;
 
   return (
     <section className="card" aria-labelledby="status-heading">
@@ -185,6 +190,14 @@ export function StatusSection({
                   min={status.config.targetMin}
                   max={status.config.targetMax}
                   onSave={onSetTripMode}
+                />
+              </div>
+            )}
+            {onSetNotifications && (
+              <div className="settings-row settings-row--full">
+                <NotificationSettings
+                  value={status.config.notifications}
+                  onSave={onSetNotifications}
                 />
               </div>
             )}

@@ -68,6 +68,10 @@ export const handlers = [
       applied: false,
     });
   }),
+  http.put('*/api/settings/notifications', async ({ request }) => {
+    const body = await request.json() as Record<string, unknown>;
+    return HttpResponse.json({ ...body, configured: true, persisted: true });
+  }),
   http.post('*/api/refresh', () =>
     HttpResponse.json({ ok: true, updatedAt: statusFixture.updatedAt, ready: true }),
   ),

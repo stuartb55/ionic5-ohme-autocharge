@@ -81,6 +81,7 @@ export interface StatusResponse {
       targetPercent: number | null;
       readyBy: string | null;
     };
+    notifications: NotificationPreferences;
   };
   updatedAt: string | null;
   ready: boolean;
@@ -128,6 +129,22 @@ export interface TripModeUpdateResponse {
   readyBy: string | null;
   persisted: boolean;
   applied: boolean;
+}
+
+export interface NotificationPreferences {
+  plugIn: boolean;
+  chargeComplete: boolean;
+  problems: boolean;
+  vehicleHealth: boolean;
+  weeklyDigest: boolean;
+  failurePolls: number;
+  minimumChargeKwh: number;
+  auxBatteryBelowPercent: number | null;
+  configured: boolean;
+}
+
+export interface NotificationPreferencesUpdateResponse extends NotificationPreferences {
+  persisted: boolean;
 }
 
 export interface Vehicle {

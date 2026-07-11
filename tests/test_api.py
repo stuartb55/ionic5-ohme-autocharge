@@ -52,12 +52,14 @@ def reset_state():
     store.day_targets = {}
     store.trip_target = None
     store.trip_ready_by = None
+    store.notification_preferences = settings.NotificationPreferences()
     store.vehicle_id_override = None
     store.avg_price_per_kwh = None
     store.price_currency = None
     store.agile_rates = None
     store.last_poll_error = None
     store.consecutive_poll_failures = 0
+    store.poll_failure_notified = False
     store.plugin_failure_notified = False
     store.active_session_id = None
     store.active_session_key = None
@@ -1005,6 +1007,50 @@ async def test_no_health_notification_when_warning_clears_on_unplug():
     mock_notify.assert_not_called()
 
 
+async def test_notification_preferences_suppress_delivery_but_not_session_completion():
+    store.notification_preferences = settings.NotificationPreferences(charge_complete=False)
+    store.active_session_key = "session-1"
+    snap = StatusSnapshot(
+        vehicle_name="IONIQ 5", charger_status="finished", connected=True,
+        session_energy_wh=18500.0,
+    )
+    with patch("ntfy.send", new=AsyncMock()) as notify, \
+         patch("db.complete_session", new=AsyncMock()) as complete, \
+         patch("db.record_session_event", new=AsyncMock()), \
+         patch("api._reconcile_finished_session", new=AsyncMock()):
+        await api._maybe_notify_finished("charging", snap)
+    notify.assert_not_called()
+    complete.assert_awaited_once()
+
+
+async def test_completion_minimum_suppresses_only_small_charge_alert():
+    store.notification_preferences = settings.NotificationPreferences(minimum_charge_kwh=2.0)
+    snap = StatusSnapshot(charger_status="finished", connected=True, session_energy_wh=1500.0)
+    with patch("ntfy.send", new=AsyncMock()) as notify, \
+         patch("db.complete_session", new=AsyncMock()), \
+         patch("db.record_session_event", new=AsyncMock()), \
+         patch("api._reconcile_finished_session", new=AsyncMock()):
+        await api._maybe_notify_finished("charging", snap)
+    notify.assert_not_called()
+
+
+async def test_aux_battery_threshold_is_edge_triggered():
+    store.notification_preferences = settings.NotificationPreferences(
+        aux_battery_below_percent=40
+    )
+    with patch("ntfy.send", new=AsyncMock()) as notify:
+        await api._maybe_notify_vehicle_health(
+            StatusSnapshot(aux_battery_percent=55),
+            StatusSnapshot(aux_battery_percent=38),
+        )
+        await api._maybe_notify_vehicle_health(
+            StatusSnapshot(aux_battery_percent=38),
+            StatusSnapshot(aux_battery_percent=35),
+        )
+    notify.assert_awaited_once()
+    assert "12V battery at 38%" in notify.await_args.args[0]
+
+
 def test_consecutive_failures_count_and_reset():
     store.record_poll_failure("poll_failed")
     store.record_poll_failure("poll_failed")
@@ -1343,6 +1389,15 @@ async def test_weekly_digest_disabled_without_ntfy(monkeypatch):
     mock_notify.assert_not_called()
 
 
+async def test_weekly_digest_can_be_disabled_by_preference(monkeypatch):
+    monkeypatch.setattr(config, "NTFY_TOPIC", "topic")
+    monkeypatch.setattr(api, "_now_local", lambda: dt.datetime(2026, 6, 1, 8, 0))
+    store.notification_preferences = settings.NotificationPreferences(weekly_digest=False)
+    with patch("ntfy.send", new=AsyncMock()) as notify:
+        await api._maybe_send_weekly_digest(_summary_client())
+    notify.assert_not_called()
+
+
 # --- charge controls -------------------------------------------------------------
 
 
@@ -1622,6 +1677,44 @@ def test_trip_mode_rejects_invalid_target(client, target):
         json={"enabled": True, "targetPercent": target, "readyBy": None},
     )
     assert response.status_code == 422
+
+
+# --- configurable notifications ------------------------------------------
+
+def _notification_payload(**overrides):
+    payload = settings.NotificationPreferences().to_json()
+    payload.update(overrides)
+    return payload
+
+
+def test_notification_preferences_persist_and_appear_in_status(client, monkeypatch):
+    monkeypatch.setattr(config, "NTFY_TOPIC", "alerts")
+    payload = _notification_payload(
+        plugIn=False,
+        failurePolls=3,
+        minimumChargeKwh=2.5,
+        auxBatteryBelowPercent=35,
+    )
+    response = client.put("/api/settings/notifications", json=payload)
+    assert response.status_code == 200
+    assert response.json()["persisted"] is True
+    assert response.json()["configured"] is True
+    assert settings.load_notification_preferences().plug_in is False
+    config_body = client.get("/api/status").json()["config"]["notifications"]
+    assert config_body["failurePolls"] == 3
+    assert config_body["auxBatteryBelowPercent"] == 35
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("failurePolls", 0), ("failurePolls", 21), ("minimumChargeKwh", -1),
+     ("auxBatteryBelowPercent", 101)],
+)
+def test_notification_preferences_reject_invalid_thresholds(client, field, value):
+    assert client.put(
+        "/api/settings/notifications",
+        json=_notification_payload(**{field: value}),
+    ).status_code == 422
 
 
 def test_effective_target_prefers_todays_override(client, monkeypatch):

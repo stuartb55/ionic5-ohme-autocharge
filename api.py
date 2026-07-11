@@ -114,12 +114,6 @@ _last_refresh_at: Optional[float] = None  # monotonic time of the last attempt
 LOGIN_RETRY_INITIAL = 5.0
 LOGIN_RETRY_MAX = 300.0
 
-# Alert via ntfy once this many polls in a row have failed (~15 minutes at the
-# default POLL_INTERVAL) — long enough to skip transient blips, short enough to
-# hear about a real outage while it still matters. A recovery notice follows
-# when polling succeeds again.
-POLL_FAILURE_ALERT_AFTER = 5
-
 # The running poll task, so /api/health can report whether it is still alive.
 _poll_task: Optional[asyncio.Task] = None
 
@@ -335,18 +329,20 @@ async def _maybe_notify_finished(prev_status: str, snap: StatusSnapshot) -> None
         {"energyWh": round(snap.session_energy_wh), "soc": snap.battery_percent},
     )
     await _reconcile_finished_session(snap)
-    name = snap.vehicle_name or "EV"
     kwh = snap.session_energy_wh / 1000
-    await ntfy.send(
-        f"{name} added {kwh:.1f} kWh this session.",
-        title="Charging finished",
-        tags="white_check_mark",
-    )
+    preferences = store.notification_preferences
+    if preferences.charge_complete and kwh >= preferences.minimum_charge_kwh:
+        name = snap.vehicle_name or "EV"
+        await ntfy.send(
+            f"{name} added {kwh:.1f} kWh this session.",
+            title="Charging finished",
+            tags="white_check_mark",
+        )
 
 
-# Health warnings we alert on — only the SDK's own asserted boolean flags (not
-# the 12V %, which has no vendor threshold to judge against). Edge-triggered, so
-# a warning present at plug-in notifies once and a steady one across polls doesn't.
+# Health warnings from the SDK plus an optional user-defined 12V percentage
+# threshold. Edge-triggered, so a warning present at plug-in notifies once and a
+# steady one across polls doesn't.
 _HEALTH_WARNINGS = (
     ("tyre_pressure_warning", "Tyre pressure low"),
     ("washer_fluid_warning", "Washer fluid low"),
@@ -362,6 +358,9 @@ async def _maybe_notify_vehicle_health(prev: StatusSnapshot, snap: StatusSnapsho
     across polls won't re-notify, and an unplug (which clears the fields) can't
     masquerade as a new warning.
     """
+    preferences = store.notification_preferences
+    if not preferences.vehicle_health:
+        return
     raised = [
         label
         for attr, label in _HEALTH_WARNINGS
@@ -369,6 +368,14 @@ async def _maybe_notify_vehicle_health(prev: StatusSnapshot, snap: StatusSnapsho
     ]
     # Anything newly reported open that wasn't open before.
     raised.extend(f"{item} open" for item in snap.open_items if item not in prev.open_items)
+    threshold = preferences.aux_battery_below_percent
+    if (
+        threshold is not None
+        and snap.aux_battery_percent is not None
+        and snap.aux_battery_percent <= threshold
+        and (prev.aux_battery_percent is None or prev.aux_battery_percent > threshold)
+    ):
+        raised.append(f"12V battery at {snap.aux_battery_percent}%")
     if not raised:
         return
     name = snap.vehicle_name or "EV"
@@ -504,15 +511,17 @@ async def poll_loop() -> None:
 
                 prev_snapshot = store.status
                 prev_status = prev_snapshot.charger_status
-                recovered = store.consecutive_poll_failures >= POLL_FAILURE_ALERT_AFTER
+                preferences = store.notification_preferences
+                recovered = store.poll_failure_notified
                 async with store.client_lock:
                     store.update(build_snapshot(client, connected=now_connected))
-                if recovered:
+                if recovered and preferences.problems:
                     await ntfy.send(
                         "Back in touch with Ohme — live data restored.",
                         title="Autocharge reconnected",
                         tags="white_check_mark",
                     )
+                store.poll_failure_notified = False
                 # Append a telemetry point for Grafana (best-effort, no-op when
                 # persistence is disabled). Outside the lock: it doesn't touch the
                 # Ohme client. Identical idle rows are de-duplicated.
@@ -554,14 +563,19 @@ async def poll_loop() -> None:
                 # Alert exactly once when the failure streak crosses the
                 # threshold; ntfy.send swallows its own errors, so this can
                 # never make the poll failure worse.
-                if store.consecutive_poll_failures == POLL_FAILURE_ALERT_AFTER:
+                preferences = store.notification_preferences
+                if (
+                    preferences.problems
+                    and store.consecutive_poll_failures == preferences.failure_polls
+                ):
                     await ntfy.send(
-                        f"{POLL_FAILURE_ALERT_AFTER} polls in a row have failed. "
+                        f"{preferences.failure_polls} polls in a row have failed. "
                         "Plug-in detection and dashboard data are stale until it recovers.",
                         title="Can't reach Ohme",
                         priority="high",
                         tags="warning",
                     )
+                    store.poll_failure_notified = True
 
             # Back off when upstreams are failing; normal cadence when healthy.
             await asyncio.sleep(_next_poll_delay(store.consecutive_poll_failures))
@@ -812,6 +826,31 @@ class TripModeUpdate(BaseModel):
     enabled: bool
     targetPercent: int = Field(default=100, ge=settings.TARGET_MIN, le=settings.TARGET_MAX)
     readyBy: Optional[str] = Field(default=None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
+
+
+class NotificationPreferencesUpdate(BaseModel):
+    """Full replacement of ntfy categories and alert thresholds."""
+
+    plugIn: bool
+    chargeComplete: bool
+    problems: bool
+    vehicleHealth: bool
+    weeklyDigest: bool
+    failurePolls: int = Field(ge=1, le=20)
+    minimumChargeKwh: float = Field(ge=0, le=100)
+    auxBatteryBelowPercent: Optional[int] = Field(default=None, ge=1, le=100)
+
+    def to_settings(self) -> settings.NotificationPreferences:
+        return settings.NotificationPreferences(
+            plug_in=self.plugIn,
+            charge_complete=self.chargeComplete,
+            problems=self.problems,
+            vehicle_health=self.vehicleHealth,
+            weekly_digest=self.weeklyDigest,
+            failure_polls=self.failurePolls,
+            minimum_charge_kwh=self.minimumChargeKwh,
+            aux_battery_below_percent=self.auxBatteryBelowPercent,
+        )
 
 
 class VehicleUpdate(BaseModel):
@@ -1238,6 +1277,19 @@ async def set_trip_mode(update: TripModeUpdate) -> JSONResponse:
     )
 
 
+@app.put("/api/settings/notifications")
+async def set_notification_preferences(
+    update: NotificationPreferencesUpdate,
+) -> JSONResponse:
+    """Persist ntfy categories and thresholds used by the poll loop."""
+    preferences = update.to_settings()
+    store.set_notification_preferences(preferences)
+    persisted = settings.save_notification_preferences(preferences)
+    return JSONResponse(
+        {**preferences.to_json(), "configured": bool(config.NTFY_TOPIC), "persisted": persisted}
+    )
+
+
 @app.get("/api/vehicles")
 async def get_vehicles() -> JSONResponse:
     """List the Hyundai vehicles on the account, with the selected one flagged.
@@ -1332,6 +1384,10 @@ async def get_status() -> JSONResponse:
                 "enabled": store.trip_mode_enabled,
                 "targetPercent": store.trip_target,
                 "readyBy": store.trip_ready_by,
+            },
+            "notifications": {
+                **store.notification_preferences.to_json(),
+                "configured": bool(config.NTFY_TOPIC),
             },
         },
         "updatedAt": store.status.updated_at,
@@ -1658,7 +1714,11 @@ async def _maybe_send_weekly_digest(client: Any) -> None:
     configured weekday + hour in the local timezone. ``store.last_digest_date``
     guards against re-sending across the polls within that hour.
     """
-    if not config.NTFY_TOPIC or not (0 <= config.WEEKLY_DIGEST_DAY <= 6):
+    if (
+        not config.NTFY_TOPIC
+        or not store.notification_preferences.weekly_digest
+        or not (0 <= config.WEEKLY_DIGEST_DAY <= 6)
+    ):
         return
     now_local = _now_local()
     if now_local.weekday() != config.WEEKLY_DIGEST_DAY or now_local.hour != config.WEEKLY_DIGEST_HOUR:
