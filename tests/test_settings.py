@@ -176,6 +176,29 @@ def test_load_vehicle_id_none_for_empty_or_non_string(settings_path):
     assert settings.load_vehicle_id() is None
 
 
+def test_vehicle_profiles_round_trip_and_clear(settings_path):
+    profiles = {
+        "car-1": settings.VehicleProfile(80, "07:30"),
+        "car-2": settings.VehicleProfile(100, None),
+    }
+    assert settings.save_vehicle_profiles(profiles) is True
+    assert settings.load_vehicle_profiles() == profiles
+    assert settings.save_vehicle_profiles({}) is True
+    assert settings.load_vehicle_profiles() == {}
+
+
+def test_vehicle_profiles_skip_invalid_entries(settings_path):
+    _write_raw(settings_path, {"vehicleProfiles": {
+        "good": {"targetPercent": 90, "readyBy": "06:15"},
+        "low": {"targetPercent": 5, "readyBy": None},
+        "bad-time": {"targetPercent": 80, "readyBy": "25:00"},
+        "bad-shape": "profile",
+    }})
+    assert settings.load_vehicle_profiles() == {
+        "good": settings.VehicleProfile(90, "06:15")
+    }
+
+
 # --- session-active marker -------------------------------------------------
 
 def test_session_active_round_trip(settings_path):
@@ -205,6 +228,7 @@ def test_setters_preserve_other_keys(settings_path):
     settings.save_ready_by("06:30")
     settings.save_day_targets({0: 90})
     settings.save_vehicle_id("v1")
+    settings.save_vehicle_profiles({"v1": settings.VehicleProfile(85, None)})
     settings.save_trip_mode(95, None)
     settings.save_notification_preferences(
         settings.NotificationPreferences(weekly_digest=False)
@@ -214,6 +238,9 @@ def test_setters_preserve_other_keys(settings_path):
     assert settings.load_ready_by() == "06:30"
     assert settings.load_day_targets() == {0: 90}
     assert settings.load_vehicle_id() == "v1"
+    assert settings.load_vehicle_profiles() == {
+        "v1": settings.VehicleProfile(85, None)
+    }
     assert settings.load_trip_mode() == (95, None)
     assert settings.load_notification_preferences().weekly_digest is False
     assert settings.load_session_active() is True

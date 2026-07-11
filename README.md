@@ -19,6 +19,7 @@ When the car is plugged in, the app reads the real battery state-of-charge from 
 - **One-time trip charge** — temporarily raise the target and optionally set a departure time for the current or next session; the override survives restarts and clears automatically on unplug.
 - **Live SOC while charging** — the ring climbs through the session (re-reads Bluelink on a slow cadence; never wakes the car).
 - **Multi-vehicle** — pick which car on the Hyundai account to track.
+- **Per-vehicle profiles** — persist a target and optional ready-by default for each Hyundai vehicle; profiles resolve from Bluelink’s stable vehicle ID and trip mode still takes precedence.
 - **Vehicle health** — read-only 12V auxiliary battery level plus the car's own tyre-pressure, washer-fluid and key-fob-battery warnings and anything left open (door/bonnet/boot), shown on the dashboard with an optional ntfy when a warning first appears.
 - **Configurable notifications** — optional [ntfy](https://ntfy.sh) alerts with dashboard controls for plug-in, completion, problems/recovery, vehicle health and weekly summaries; tune failure, minimum-energy and optional 12V-battery thresholds.
 - **Octopus Agile** *(optional)* — upcoming half-hourly prices and the cheapest slots, plus an Agile-accurate session cost (each charge slot priced against the rate it falls in, not a flat average).
@@ -206,6 +207,7 @@ npm run build    # type-check + production build to dist/
 | `PUT /api/settings/trip-mode` | Enable/update or cancel the durable one-session override — `{"enabled": true, "targetPercent": 100, "readyBy": "06:30"}` |
 | `PUT /api/settings/notifications` | Replace ntfy category choices and validated alert thresholds; persisted in runtime settings |
 | `PUT /api/settings/vehicle` | Select the tracked vehicle — `{"vehicleId": "…"\|null}` |
+| `PUT /api/settings/vehicle-profile` | Create/update or remove target and ready-by defaults for a stable Hyundai vehicle ID |
 
 ## Notifications (ntfy)
 

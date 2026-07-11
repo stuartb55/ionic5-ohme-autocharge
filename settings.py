@@ -59,6 +59,17 @@ class NotificationPreferences:
         }
 
 
+@dataclass(frozen=True)
+class VehicleProfile:
+    """Charging defaults bound to one stable Hyundai vehicle id."""
+
+    target_percent: int
+    ready_by: str | None = None
+
+    def to_json(self) -> dict:
+        return {"targetPercent": self.target_percent, "readyBy": self.ready_by}
+
+
 def parse_hhmm(value: object) -> tuple[int, int] | None:
     """Parse a 24h ``HH:MM`` string into an (hour, minute) tuple, or None."""
     if not isinstance(value, str):
@@ -262,6 +273,40 @@ def save_vehicle_id(value: str | None) -> bool:
         data["vehicleId"] = value
     else:
         data.pop("vehicleId", None)
+    return _save(data)
+
+
+def load_vehicle_profiles() -> dict[str, VehicleProfile]:
+    """Return every valid per-vehicle profile; skip malformed entries."""
+    raw = _load().get("vehicleProfiles")
+    if not isinstance(raw, dict):
+        return {}
+    profiles: dict[str, VehicleProfile] = {}
+    for vehicle_id, value in raw.items():
+        if not isinstance(vehicle_id, str) or not vehicle_id or not isinstance(value, dict):
+            continue
+        try:
+            target = int(value["targetPercent"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        ready_by = value.get("readyBy")
+        if not TARGET_MIN <= target <= TARGET_MAX:
+            continue
+        if ready_by is not None and parse_hhmm(ready_by) is None:
+            continue
+        profiles[vehicle_id] = VehicleProfile(target, ready_by)
+    return profiles
+
+
+def save_vehicle_profiles(profiles: dict[str, VehicleProfile]) -> bool:
+    """Persist the complete vehicle-profile mapping."""
+    data = _load()
+    if profiles:
+        data["vehicleProfiles"] = {
+            vehicle_id: profile.to_json() for vehicle_id, profile in profiles.items()
+        }
+    else:
+        data.pop("vehicleProfiles", None)
     return _save(data)
 
 

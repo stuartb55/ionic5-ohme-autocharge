@@ -859,6 +859,15 @@ class VehicleUpdate(BaseModel):
     vehicleId: Optional[str] = None
 
 
+class VehicleProfileUpdate(BaseModel):
+    """Create/update or remove charging defaults for one Hyundai vehicle."""
+
+    vehicleId: str = Field(min_length=1, max_length=200)
+    enabled: bool
+    targetPercent: int = Field(default=80, ge=settings.TARGET_MIN, le=settings.TARGET_MAX)
+    readyBy: Optional[str] = Field(default=None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
+
+
 class StatisticsWindowModel(BaseModel):
     """Exact, half-open local-calendar window represented by the response."""
 
@@ -1280,22 +1289,25 @@ async def _reapply_target_if_connected(*, allow_zero_topup: bool = False) -> boo
     client = store.client
     if client is None or not store.status.connected:
         return False
-    target = store.effective_target
     # The SOC recorded at plug-in goes stale as the session charges, and the
     # top-up sent to Ohme is computed from it — so re-read the real SOC first.
     # Target changes are rare (someone clicking save), so the extra Bluelink
     # round-trip is fine; fall back to the plug-in reading if it fails. The full
     # vehicle read also refreshes the displayed range/odometer.
+    vehicle_id = store.selected_vehicle_id or store.last_vehicle_id
     try:
         vehicle = await bluelink.get_vehicle_state_async(store.selected_vehicle_id)
         store.record_vehicle_state(vehicle)
         soc = vehicle.soc
+        vehicle_id = vehicle.vehicle_id
     except Exception:  # noqa: BLE001
         logger.warning(
             "Could not refresh SOC from Bluelink — using the plug-in reading",
             exc_info=True,
         )
         soc = store.last_soc
+    target = store.effective_target_for(vehicle_id)
+    ready_by = store.effective_ready_by_for(vehicle_id)
     if soc is None or (soc >= target and not allow_zero_topup):
         await db.record_session_event(
             store.active_session_id,
@@ -1306,7 +1318,10 @@ async def _reapply_target_if_connected(*, allow_zero_topup: bool = False) -> boo
     try:
         async with store.client_lock:
             await ohme_client.set_target(
-                client, current_soc=soc, target_percent=target, target_time=store.ready_by_tuple
+                client,
+                current_soc=soc,
+                target_percent=target,
+                target_time=store.ready_by_tuple_for(vehicle_id),
             )
             slots = list(client.slots)
             next_slot_start = client.next_slot_start
@@ -1317,7 +1332,7 @@ async def _reapply_target_if_connected(*, allow_zero_topup: bool = False) -> boo
             {
                 "soc": soc,
                 "target": target,
-                "readyBy": store.effective_ready_by,
+                "readyBy": ready_by,
                 "tripMode": store.trip_mode_enabled,
             },
         )
@@ -1552,6 +1567,37 @@ async def set_vehicle(update: VehicleUpdate) -> JSONResponse:
     return JSONResponse({"vehicleId": vehicle_id, "persisted": persisted, "applied": applied})
 
 
+@app.put("/api/settings/vehicle-profile")
+async def set_vehicle_profile(update: VehicleProfileUpdate) -> JSONResponse:
+    """Create/update or remove charging defaults for one vehicle."""
+    profiles = dict(store.vehicle_profiles)
+    if update.enabled:
+        profiles[update.vehicleId] = settings.VehicleProfile(
+            update.targetPercent, update.readyBy
+        )
+    else:
+        profiles.pop(update.vehicleId, None)
+    store.set_vehicle_profiles(profiles)
+    persisted = settings.save_vehicle_profiles(profiles)
+    active_vehicle_id = store.selected_vehicle_id or store.last_vehicle_id
+    applied = (
+        await _reapply_target_if_connected(allow_zero_topup=True)
+        if active_vehicle_id == update.vehicleId else False
+    )
+    _reflect_effective_target()
+    profile = profiles.get(update.vehicleId)
+    return JSONResponse(
+        {
+            "vehicleId": update.vehicleId,
+            "enabled": profile is not None,
+            "targetPercent": profile.target_percent if profile else None,
+            "readyBy": profile.ready_by if profile else None,
+            "persisted": persisted,
+            "applied": applied,
+        }
+    )
+
+
 @app.get("/api/status")
 async def get_status() -> JSONResponse:
     payload = {
@@ -1623,6 +1669,10 @@ async def get_status() -> JSONResponse:
             "notifications": {
                 **store.notification_preferences.to_json(),
                 "configured": bool(config.NTFY_TOPIC),
+            },
+            "vehicleProfiles": {
+                vehicle_id: profile.to_json()
+                for vehicle_id, profile in store.vehicle_profiles.items()
             },
         },
         "updatedAt": store.status.updated_at,

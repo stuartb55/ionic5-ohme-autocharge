@@ -10,10 +10,13 @@ from main import PlugInDetector, handle_plugin_event, load_persisted_settings, r
 from state import store
 
 
-def _vstate(soc, *, range_miles=150, odometer_miles=10000, soh_percent=None):
+def _vstate(
+    soc, *, range_miles=150, odometer_miles=10000, soh_percent=None, vehicle_id=None
+):
     """Build a Bluelink VehicleState for patching bluelink.get_vehicle_state."""
     return bluelink.VehicleState(
-        soc=soc, range_miles=range_miles, odometer_miles=odometer_miles, soh_percent=soh_percent
+        soc=soc, range_miles=range_miles, odometer_miles=odometer_miles,
+        soh_percent=soh_percent, vehicle_id=vehicle_id,
     )
 
 
@@ -30,12 +33,14 @@ def _reset_session_state():
     store.clear_soc()
     store.clear_trip_mode()
     store.notification_preferences = settings.NotificationPreferences()
+    store.vehicle_profiles = {}
     settings.clear_trip_mode()
     settings.save_session_active(False)
     yield
     store.clear_soc()
     store.clear_trip_mode()
     store.notification_preferences = settings.NotificationPreferences()
+    store.vehicle_profiles = {}
     settings.clear_trip_mode()
     settings.save_session_active(False)
 
@@ -104,6 +109,21 @@ async def test_plug_in_notification_can_be_disabled(monkeypatch):
          patch("ntfy.send", new=AsyncMock()) as notify:
         assert await handle_plugin_event(_mock_ohme_client()) is True
     notify.assert_not_called()
+
+
+async def test_plug_in_uses_profile_for_vehicle_returned_by_bluelink(monkeypatch):
+    monkeypatch.setattr(config, "CHARGE_TARGET", 80)
+    store.set_vehicle_profiles({"car-2": settings.VehicleProfile(95, "05:45")})
+    client = _mock_ohme_client()
+    with patch(
+        "bluelink.get_vehicle_state", return_value=_vstate(60, vehicle_id="car-2")
+    ), patch("ohme_client.set_target", new=AsyncMock()) as set_target, patch(
+        "ntfy.send", new=AsyncMock()
+    ):
+        assert await handle_plugin_event(client) is True
+    set_target.assert_awaited_once_with(
+        client, current_soc=60, target_percent=95, target_time=(5, 45)
+    )
 
 
 async def test_problem_notification_can_be_disabled():

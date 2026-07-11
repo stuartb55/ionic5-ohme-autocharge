@@ -82,6 +82,7 @@ export interface StatusResponse {
       readyBy: string | null;
     };
     notifications: NotificationPreferences;
+    vehicleProfiles: Record<string, { targetPercent: number; readyBy: string | null }>;
   };
   updatedAt: string | null;
   ready: boolean;
@@ -162,6 +163,15 @@ export interface VehiclesResponse {
 
 export interface VehicleUpdateResponse {
   vehicleId: string | null;
+  persisted: boolean;
+  applied: boolean;
+}
+
+export interface VehicleProfileUpdateResponse {
+  vehicleId: string;
+  enabled: boolean;
+  targetPercent: number | null;
+  readyBy: string | null;
   persisted: boolean;
   applied: boolean;
 }

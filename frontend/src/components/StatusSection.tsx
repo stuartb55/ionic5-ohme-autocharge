@@ -10,6 +10,7 @@ import { ReadyByEditor } from './ReadyByEditor';
 import { TargetEditor } from './TargetEditor';
 import { TripModeEditor } from './TripModeEditor';
 import { VehicleHealth } from './VehicleHealth';
+import { VehicleProfileEditor } from './VehicleProfileEditor';
 
 function Tile({ label, value, unit }: { label: string; value: string; unit?: string }) {
   return (
@@ -30,6 +31,8 @@ export function StatusSection({
   onSetDayTargets,
   onSetTripMode,
   onSetNotifications,
+  activeVehicle,
+  onSetVehicleProfile,
   onChargeChanged,
 }: {
   status: StatusResponse;
@@ -43,6 +46,10 @@ export function StatusSection({
   onSetNotifications?: (
     preferences: Omit<StatusResponse['config']['notifications'], 'configured'>,
   ) => Promise<void>;
+  activeVehicle?: { id: string; name: string | null };
+  onSetVehicleProfile?: (
+    vehicleId: string, enabled: boolean, target: number, readyBy: string | null,
+  ) => Promise<void>;
   /** Refetch status after a charge-control action; controls hidden when omitted. */
   onChargeChanged?: () => void;
 }) {
@@ -51,7 +58,11 @@ export function StatusSection({
   // today's per-weekday override) is what the ring and Ohme actually use.
   const baseTarget = status.config.chargeTarget;
   const target = charger.targetPercent ?? baseTarget;
-  const effectiveTargetLabel = status.config.tripMode.enabled ? 'Trip' : 'Today';
+  const effectiveTargetLabel = status.config.tripMode.enabled
+    ? 'Trip'
+    : activeVehicle && status.config.vehicleProfiles[activeVehicle.id]
+      ? 'Vehicle profile'
+      : 'Today';
   // Tick once a minute so the projection hides itself when the finish time
   // passes, without reading the impure Date.now() during render.
   const now = useNow(60_000);
@@ -63,7 +74,8 @@ export function StatusSection({
     charger.projectedFinish != null &&
     new Date(charger.projectedFinish).getTime() > now;
 
-  const hasSettings = onSetTarget || onSetReadyBy || onSetDayTargets || onSetTripMode || onSetNotifications;
+  const hasSettings = onSetTarget || onSetReadyBy || onSetDayTargets || onSetTripMode
+    || onSetNotifications || (activeVehicle && onSetVehicleProfile);
 
   return (
     <section className="card" aria-labelledby="status-heading">
@@ -198,6 +210,19 @@ export function StatusSection({
                 <NotificationSettings
                   value={status.config.notifications}
                   onSave={onSetNotifications}
+                />
+              </div>
+            )}
+            {activeVehicle && onSetVehicleProfile && (
+              <div className="settings-row settings-row--full">
+                <VehicleProfileEditor
+                  key={activeVehicle.id}
+                  vehicleId={activeVehicle.id}
+                  vehicleName={activeVehicle.name ?? vehicle.name ?? 'Vehicle'}
+                  value={status.config.vehicleProfiles[activeVehicle.id] ?? null}
+                  min={status.config.targetMin}
+                  max={status.config.targetMax}
+                  onSave={onSetVehicleProfile}
                 />
               </div>
             )}

@@ -16,7 +16,7 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 import config
-from settings import NotificationPreferences
+from settings import NotificationPreferences, VehicleProfile
 
 
 def _today_weekday() -> int:
@@ -114,6 +114,7 @@ class AppState:
         # persisted per session so efficiency (mi/kWh) can be derived later.
         self.last_range_miles: Optional[int] = None
         self.last_odometer_miles: Optional[int] = None
+        self.last_vehicle_id: Optional[str] = None
         # Battery state of health (%) captured at the last plug-in. Logged per
         # session for a degradation trend; also shown on the dashboard.
         self.last_soh_percent: Optional[int] = None
@@ -146,6 +147,7 @@ class AppState:
         self.trip_target: Optional[int] = None
         self.trip_ready_by: Optional[str] = None
         self.notification_preferences = NotificationPreferences()
+        self.vehicle_profiles: dict[str, VehicleProfile] = {}
         # Runtime-selected Hyundai vehicle id (when the account has more than
         # one). None means "use config.HYUNDAI_VEHICLE_ID, else the first".
         self.vehicle_id_override: Optional[str] = None
@@ -211,6 +213,9 @@ class AppState:
     def set_notification_preferences(self, value: NotificationPreferences) -> None:
         self.notification_preferences = value
 
+    def set_vehicle_profiles(self, value: dict[str, VehicleProfile]) -> None:
+        self.vehicle_profiles = dict(value)
+
     @property
     def trip_mode_enabled(self) -> bool:
         return self.trip_target is not None
@@ -228,15 +233,28 @@ class AppState:
 
     @property
     def effective_target(self) -> int:
-        """Trip override, then today's per-weekday override, then the base."""
+        """Effective target for the selected or most recently observed vehicle."""
+        return self.effective_target_for(self.selected_vehicle_id or self.last_vehicle_id)
+
+    def effective_target_for(self, vehicle_id: Optional[str]) -> int:
+        """Trip override, vehicle profile, weekday override, then global base."""
         if self.trip_target is not None:
             return self.trip_target
+        if vehicle_id and vehicle_id in self.vehicle_profiles:
+            return self.vehicle_profiles[vehicle_id].target_percent
         return self.day_targets.get(_today_weekday(), self.charge_target)
 
     @property
     def effective_ready_by(self) -> Optional[str]:
-        """The one-session departure time when active, else the permanent one."""
-        return self.trip_ready_by if self.trip_target is not None else self.ready_by
+        return self.effective_ready_by_for(self.selected_vehicle_id or self.last_vehicle_id)
+
+    def effective_ready_by_for(self, vehicle_id: Optional[str]) -> Optional[str]:
+        """Trip departure, vehicle profile departure, then permanent departure."""
+        if self.trip_target is not None:
+            return self.trip_ready_by
+        if vehicle_id and vehicle_id in self.vehicle_profiles:
+            return self.vehicle_profiles[vehicle_id].ready_by
+        return self.ready_by
 
     @property
     def ready_by_tuple(self) -> Optional[tuple[int, int]]:
@@ -244,6 +262,12 @@ class AppState:
         import settings  # local import to avoid a cycle at module load
 
         value = self.effective_ready_by
+        return settings.parse_hhmm(value) if value else None
+
+    def ready_by_tuple_for(self, vehicle_id: Optional[str]) -> Optional[tuple[int, int]]:
+        import settings
+
+        value = self.effective_ready_by_for(vehicle_id)
         return settings.parse_hhmm(value) if value else None
 
     def update(self, snapshot: StatusSnapshot) -> None:
@@ -266,6 +290,7 @@ class AppState:
     def record_vehicle_state(self, state: Any) -> None:
         """Remember the SOC plus driving range, odometer and SoH from a Bluelink read."""
         self.last_soc = state.soc
+        self.last_vehicle_id = getattr(state, "vehicle_id", None) or self.last_vehicle_id
         self.last_range_miles = state.range_miles
         self.last_odometer_miles = state.odometer_miles
         self.last_soh_percent = state.soh_percent
