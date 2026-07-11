@@ -91,8 +91,16 @@ describe('StatisticsSection chart metric toggle', () => {
     await userEvent.click(cost);
 
     expect(cost).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByText('Daily cost')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Daily cost' })).toBeInTheDocument();
     expect(screen.getByRole('img', { name: /daily cost bar chart/i })).toBeInTheDocument();
+  });
+
+  it('offers the chart values as an accessible data table', async () => {
+    renderSection();
+    await userEvent.click(screen.getByText('View chart data'));
+    const table = screen.getByRole('table', { name: 'Daily energy' });
+    expect(within(table).getAllByRole('row')).toHaveLength(statisticsFixture.daily.length + 1);
+    expect(within(table).getByText('6.2 kWh')).toBeInTheDocument();
   });
 });
 

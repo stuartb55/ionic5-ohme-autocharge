@@ -38,7 +38,9 @@ describe('DayTargetsEditor', () => {
   });
 
   it('has no override badge when none are set', () => {
-    render(<DayTargetsEditor value={{}} base={80} min={10} max={100} onSave={vi.fn()} />);
-    expect(screen.queryByText(/override/i)).not.toBeInTheDocument();
+    const { container } = render(
+      <DayTargetsEditor value={{}} base={80} min={10} max={100} onSave={vi.fn()} />,
+    );
+    expect(container.querySelector('.day-targets-count')).not.toBeInTheDocument();
   });
 });

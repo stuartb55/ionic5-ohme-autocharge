@@ -4,6 +4,7 @@ import { usePolling } from '../api/usePolling';
 import { useNow } from '../hooks/useNow';
 import { relativeTime } from '../utils/format';
 import { Banner } from './Banner';
+import { ChargeSettingsSection } from './ChargeSettingsSection';
 import { DataQualitySection } from './DataQualitySection';
 import { EnergyUsageSection } from './EnergyUsageSection';
 import { ScheduleSection } from './ScheduleSection';
@@ -30,7 +31,13 @@ const QUALITY_INTERVAL = 300_000;
 const SOH_INTERVAL = 1_800_000; // 30 min
 
 function SectionSkeleton({ height }: { height: number }) {
-  return <div className="card"><div className="skeleton" style={{ height }} /></div>;
+  return (
+    <div className="card section-skeleton" aria-hidden="true">
+      <div className="skeleton skeleton-title" />
+      <div className="skeleton skeleton-copy" />
+      <div className="skeleton skeleton-body" style={{ height }} />
+    </div>
+  );
 }
 
 /**
@@ -66,7 +73,7 @@ function HeaderMeta({
   return (
     <div className="app-meta">
       <span className={`live-dot ${fresh ? '' : 'stale'}`} aria-hidden="true" />
-      <span>{refreshing ? 'Refreshing…' : `Updated ${relativeTime(lastPolled, new Date(now))}`}</span>
+      <span aria-live="polite">{refreshing ? 'Refreshing…' : `Updated ${relativeTime(lastPolled, new Date(now))}`}</span>
       <button
         type="button"
         className={`refresh-btn ${refreshing ? 'spinning' : ''}`}
@@ -84,7 +91,7 @@ function HeaderMeta({
 
 function SectionError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
-    <div className="card section-error" role="alert">
+    <div className="card section-error" role="status">
       <span>{message}</span>
       <button type="button" className="ghost-button" onClick={onRetry}>
         Retry
@@ -152,6 +159,9 @@ export function Dashboard() {
   const { refetch: refetchStats } = stats;
   const { refetch: refetchSessions } = sessions;
   const { refetch: refetchQuality } = quality;
+  const { refetch: refetchTariff } = tariff;
+  const { refetch: refetchSoh } = soh;
+  const { refetch: refetchEnergy } = energy;
 
   // Persist a new charge target, then refetch status so the UI reflects it.
   const handleSetTarget = useCallback(
@@ -248,7 +258,7 @@ export function Dashboard() {
       <header className="app-header">
         <div>
           <h1>Autocharge</h1>
-          <div className="subtitle">EV charging scheduler · IONIQ&nbsp;5 + Ohme</div>
+          <div className="subtitle">Smart EV charging · Hyundai Bluelink + Ohme</div>
         </div>
         <HeaderMeta
           lastPolled={lastPolled}
@@ -282,9 +292,25 @@ export function Dashboard() {
         </div>
       )}
 
-      <div className="sections">
-        {status.data ? (
-          <StatusSection
+      <main className="sections" aria-busy={status.loading && !status.data}>
+        <div className="dashboard-overview">
+          {status.data ? (
+            <StatusSection status={status.data} onChargeChanged={refetchStatus} />
+          ) : status.error ? (
+            <SectionError message="Couldn’t load live charging status." onRetry={refetchStatus} />
+          ) : (
+            <SectionSkeleton height={420} />
+          )}
+          {schedule.data ? (
+            <ScheduleSection schedule={schedule.data} />
+          ) : schedule.error ? (
+            <SectionError message="Couldn’t load the charge schedule." onRetry={refetchSchedule} />
+          ) : (
+            <SectionSkeleton height={320} />
+          )}
+        </div>
+        {status.data && (
+          <ChargeSettingsSection
             status={status.data}
             onSetTarget={handleSetTarget}
             onSetReadyBy={handleSetReadyBy}
@@ -293,17 +319,7 @@ export function Dashboard() {
             onSetNotifications={handleSetNotifications}
             activeVehicle={activeVehicle}
             onSetVehicleProfile={handleSetVehicleProfile}
-            onChargeChanged={refetchStatus}
           />
-        ) : (
-          <SectionSkeleton height={260} />
-        )}
-        {schedule.data ? (
-          <ScheduleSection schedule={schedule.data} />
-        ) : schedule.error ? (
-          <SectionError message="Couldn’t load the charge schedule." onRetry={refetchSchedule} />
-        ) : (
-          <SectionSkeleton height={180} />
         )}
         {stats.data ? (
           <StatisticsSection stats={stats.data} days={days} onDaysChange={setDays} />
@@ -312,18 +328,26 @@ export function Dashboard() {
         ) : (
           <SectionSkeleton height={320} />
         )}
-        {quality.data && <DataQualitySection data={quality.data} />}
-        {/* No skeleton: these cards may legitimately never appear (history disabled). */}
-        {sessions.data && <SessionsSection data={sessions.data} />}
-        {/* Battery health trend — only when persistence has readings to plot. */}
-        {soh.data?.enabled && <SohTrendSection data={soh.data} />}
-        {/* Agile tariff card — only shown when the feature is configured. */}
-        {tariff.data?.enabled && <TariffSection data={tariff.data} />}
-        {/* Household-vs-car energy — only when Octopus consumption is configured. */}
-        {energy.data?.enabled && (
-          <EnergyUsageSection data={energy.data} onDateChange={setEnergyDate} />
-        )}
-      </div>
+        <div className="dashboard-secondary">
+          {sessions.data ? <SessionsSection data={sessions.data} /> : sessions.error ? (
+            <SectionError message="Couldn’t load recent sessions." onRetry={refetchSessions} />
+          ) : null}
+          {soh.data?.enabled ? <SohTrendSection data={soh.data} /> : soh.error ? (
+            <SectionError message="Couldn’t load battery health." onRetry={refetchSoh} />
+          ) : null}
+          {tariff.data?.enabled ? <TariffSection data={tariff.data} /> : tariff.error ? (
+            <SectionError message="Couldn’t load tariff prices." onRetry={refetchTariff} />
+          ) : null}
+          {energy.data?.enabled ? (
+            <EnergyUsageSection data={energy.data} onDateChange={setEnergyDate} />
+          ) : energy.error ? (
+            <SectionError message="Couldn’t load household energy." onRetry={refetchEnergy} />
+          ) : null}
+          {quality.data ? <DataQualitySection data={quality.data} /> : quality.error ? (
+            <SectionError message="Couldn’t load data quality." onRetry={refetchQuality} />
+          ) : null}
+        </div>
+      </main>
 
       <footer className="app-footer">
         Data from Ohme &amp; Hyundai Bluelink · refreshed automatically

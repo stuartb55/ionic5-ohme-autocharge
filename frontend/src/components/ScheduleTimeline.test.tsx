@@ -15,4 +15,12 @@ describe('ScheduleTimeline', () => {
     const { container } = render(<ScheduleTimeline slots={[]} />);
     expect(container.querySelector('svg')).toBeNull();
   });
+
+  it('marks the current position and active charging window', () => {
+    const { container } = render(
+      <ScheduleTimeline slots={scheduleFixture.slots} now={new Date('2026-06-02T02:00:00+01:00')} />,
+    );
+    expect(container.querySelector('.timeline-now')).not.toBeNull();
+    expect(container.querySelector('.timeline-segment.current')).not.toBeNull();
+  });
 });

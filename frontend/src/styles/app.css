@@ -32,7 +32,8 @@ body {
 .app {
   max-width: var(--maxw);
   margin: 0 auto;
-  padding: var(--space-6) var(--space-5) var(--space-7);
+  padding: max(var(--space-6), env(safe-area-inset-top)) max(var(--space-5), env(safe-area-inset-right))
+    max(var(--space-7), env(safe-area-inset-bottom)) max(var(--space-5), env(safe-area-inset-left));
 }
 
 /* --- header --- */
@@ -106,7 +107,7 @@ body {
 }
 .theme-option {
   min-width: 36px;
-  height: 36px;
+  height: 38px;
   border: none;
   background: transparent;
   border-radius: 999px;
@@ -157,6 +158,20 @@ body {
   display: grid;
   gap: var(--space-5);
 }
+.dashboard-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(340px, 0.8fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+.dashboard-secondary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-5);
+  align-items: start;
+}
+.dashboard-secondary:empty { display: none; }
+.dashboard-secondary > .card:only-child { grid-column: 1 / -1; }
 
 .card {
   background: var(--surface);
@@ -164,6 +179,18 @@ body {
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: var(--space-5);
+}
+.status-card {
+  border-radius: var(--radius-lg);
+  border-color: color-mix(in srgb, var(--brand) 20%, var(--border));
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 18px 44px rgba(37, 99, 235, 0.08);
+}
+.status-message {
+  color: var(--text);
+  font-size: 1.12rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  margin: calc(var(--space-2) * -1) 0 var(--space-5);
 }
 .card > header {
   display: flex;
@@ -190,9 +217,14 @@ body {
 /* --- status section --- */
 .status-grid {
   display: grid;
-  grid-template-columns: minmax(220px, 280px) 1fr;
-  gap: var(--space-6);
+  grid-template-columns: minmax(190px, 220px) 1fr;
+  gap: var(--space-5);
   align-items: center;
+}
+.status-card .battery-wrap svg {
+  height: auto;
+  max-width: 190px;
+  width: 100%;
 }
 .battery-wrap {
   display: flex;
@@ -560,28 +592,47 @@ body {
   max-width: 40ch;
 }
 
-/* --- charge settings panel (Zone B) --- */
-.charge-settings {
-  margin-top: var(--space-5);
-  padding-top: var(--space-5);
-  border-top: 1px solid var(--border);
-}
-.charge-settings > .eyebrow {
-  margin-bottom: var(--space-4);
-}
-.settings-rows {
+/* --- charge settings --- */
+.settings-card > header { align-items: flex-start; }
+.settings-summary {
+  align-items: flex-end;
   display: flex;
   flex-direction: column;
+  line-height: 1.25;
+  text-align: right;
+}
+.settings-summary strong { font-size: 1.35rem; }
+.settings-summary span { color: var(--text-muted); font-size: 0.78rem; }
+.settings-context {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: calc(var(--space-2) * -1) 0 var(--space-5);
+}
+.settings-primary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-4);
 }
-.settings-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-3);
+.setting-block {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-4);
 }
-.settings-row--full {
-  align-items: flex-start;
+.setting-label {
+  color: var(--text-subtle);
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  margin-bottom: var(--space-3);
+  text-transform: uppercase;
+}
+.settings-advanced {
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  padding-top: var(--space-3);
 }
 
 .trip-mode-editor {
@@ -798,6 +849,11 @@ body {
   width: 100%;
 }
 .timeline svg { width: 100%; height: auto; display: block; }
+.timeline-segment { fill: var(--brand); }
+.timeline-segment.complete { fill: color-mix(in srgb, var(--brand) 52%, var(--charge-track)); }
+.timeline-segment.current { fill: var(--success); }
+.timeline-now line { stroke: var(--text); stroke-width: 2; }
+.timeline-now circle { fill: var(--text); }
 .timeline-legend {
   display: flex;
   gap: var(--space-4);
@@ -819,6 +875,33 @@ body {
 }
 .swatch.active { background: var(--brand); }
 .swatch.idle { background: var(--charge-track); }
+.swatch.now { background: var(--text); border-radius: 999px; width: 4px; }
+.schedule-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: calc(var(--space-2) * -1) 0 var(--space-5);
+}
+.schedule-summary > div {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-3);
+}
+.schedule-summary span,
+.schedule-summary small { color: var(--text-muted); font-size: 0.7rem; }
+.schedule-summary strong { font-size: 1rem; font-variant-numeric: tabular-nums; }
+.slot-details { margin-top: var(--space-4); }
+.slot-details summary {
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+  min-height: 44px;
+  padding: var(--space-3) 0;
+}
 .slot-list {
   margin-top: var(--space-4);
   display: grid;
@@ -1017,9 +1100,30 @@ body {
 /* --- statistics --- */
 .stat-cards {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: var(--space-4);
   margin-bottom: var(--space-5);
+}
+.secondary-stat-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+.analytics-details {
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--space-5);
+  padding-bottom: var(--space-4);
+}
+.analytics-details > summary,
+.chart-data > summary {
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 650;
+  min-height: 44px;
+  padding: var(--space-3) 0;
+  width: fit-content;
 }
 
 .stats-context {
@@ -1201,6 +1305,7 @@ a.ghost-button {
   padding: 6px 12px;
   border-radius: 999px;
   cursor: pointer;
+  min-height: 44px;
 }
 .ghost-button:hover:not(:disabled) {
   color: var(--text);
@@ -1210,11 +1315,39 @@ a.ghost-button {
   opacity: 0.5;
   cursor: not-allowed;
 }
+.primary-button,
+.secondary-button {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 650;
+  justify-content: center;
+  min-height: 44px;
+  padding: 8px 16px;
+}
+.primary-button { background: var(--brand); color: #fff; }
+.primary-button:hover:not(:disabled) { background: var(--brand-strong); }
+.secondary-button { background: var(--surface); border-color: var(--border); color: var(--text); }
+.secondary-button:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }
+.primary-button:disabled,
+.secondary-button:disabled { cursor: not-allowed; opacity: 0.55; }
+.boost-confirm { border-color: var(--danger); color: var(--danger); }
 
 .barchart svg { width: 100%; height: auto; display: block; }
 .barchart .axis { font-size: 10px; fill: var(--text-subtle); }
 .barchart .avg-line line { stroke: var(--text-subtle); stroke-width: 1; opacity: 0.7; }
 .barchart .avg-label { font-size: 10px; fill: var(--text-muted); font-weight: 600; }
+.chart-data { margin-top: var(--space-2); }
+.chart-data-wrap { max-height: 280px; overflow: auto; }
+.chart-data table { border-collapse: collapse; font-size: 0.82rem; width: 100%; }
+.chart-data caption { font-weight: 650; padding: var(--space-2); text-align: left; }
+.chart-data th,
+.chart-data td { border-bottom: 1px solid var(--border); padding: var(--space-2); text-align: left; }
+.chart-data th { color: var(--text-muted); font-size: 0.72rem; text-transform: uppercase; }
 
 /* Household-vs-car energy card */
 .day-nav { display: inline-flex; align-items: center; gap: 8px; }
@@ -1254,7 +1387,7 @@ a.ghost-button {
 .chart-toolbar button {
   display: inline-flex;
   align-items: center;
-  min-height: 36px;
+  min-height: 40px;
   border: 0;
   background: transparent;
   color: var(--text-muted);
@@ -1303,6 +1436,10 @@ a.ghost-button {
   animation: shimmer 1.4s ease infinite;
   border-radius: var(--radius-sm);
 }
+.section-skeleton { display: grid; gap: var(--space-3); }
+.skeleton-title { height: 18px; width: min(42%, 180px); }
+.skeleton-copy { height: 12px; width: min(68%, 320px); }
+.skeleton-body { margin-top: var(--space-2); }
 @keyframes shimmer {
   0% { background-position: 100% 0; }
   100% { background-position: 0 0; }
@@ -1417,6 +1554,7 @@ a.ghost-button {
   color: var(--text);
   padding: 3px 8px;
   font-size: 0.85rem;
+  min-height: 44px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1425,6 +1563,7 @@ a.ghost-button {
 
 /* --- responsive --- */
 @media (max-width: 900px) {
+  .dashboard-overview { grid-template-columns: 1fr; }
   .stat-cards { grid-template-columns: repeat(2, 1fr); }
   .insights { grid-template-columns: repeat(3, 1fr); }
   .quality-grid { grid-template-columns: repeat(2, 1fr); }
@@ -1433,11 +1572,42 @@ a.ghost-button {
   .app { padding: var(--space-5) var(--space-4) var(--space-6); }
   .status-grid { grid-template-columns: 1fr; gap: var(--space-5); }
   .tiles { grid-template-columns: repeat(2, 1fr); }
+  .dashboard-secondary { grid-template-columns: 1fr; }
+  .settings-primary { grid-template-columns: 1fr; }
+  .app-header { align-items: flex-start; }
+  .app-meta { justify-content: space-between; width: 100%; }
+  .card > header { align-items: flex-start; flex-wrap: wrap; }
+  .stats-actions { flex-wrap: wrap; width: 100%; }
+  .chart-header { align-items: flex-start; flex-direction: column; }
 }
 @media (max-width: 460px) {
-  .stat-cards, .tiles, .insights { grid-template-columns: 1fr 1fr; }
+  .stat-cards, .tiles, .insights, .secondary-stat-cards { grid-template-columns: 1fr; }
   .quality-grid { grid-template-columns: 1fr; }
-  .day-chips { grid-template-columns: repeat(4, 1fr); }
+  .day-chips { grid-template-columns: 1fr; }
+  .day-chip { flex-direction: row; justify-content: space-between; padding: var(--space-2) var(--space-3); }
+  .day-chip select { width: min(68%, 190px); }
+  .card { padding: var(--space-4); }
+  .status-message { font-size: 1rem; }
+  .settings-summary { align-items: flex-start; text-align: left; }
+  .app { padding-left: max(var(--space-4), env(safe-area-inset-left)); padding-right: max(var(--space-4), env(safe-area-inset-right)); }
+  .app-meta { gap: var(--space-2); }
+  .app-meta > span:not(.live-dot) { font-size: 0.78rem; }
+  .stats-actions .chart-toolbar { order: -1; }
+  .stats-actions { justify-content: space-between; }
+  .session-head { display: none; }
+  .session-row { align-items: stretch; grid-template-columns: 1fr auto; }
+  .session-row .time,
+  .session-row .detail,
+  .session-row .session-action { display: grid; gap: 2px; grid-column: 1; }
+  .session-row [data-label]::before {
+    color: var(--text-subtle);
+    content: attr(data-label);
+    font-size: 0.65rem;
+    font-weight: 650;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .session-chevron { align-self: center; grid-column: 2; grid-row: 1 / span 3; }
 }
 
 /* --- battery health trend --- */

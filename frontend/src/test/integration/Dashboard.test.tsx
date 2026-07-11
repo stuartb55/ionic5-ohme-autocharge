@@ -18,10 +18,11 @@ describe('Dashboard integration', () => {
 
     // Section 2: schedule
     expect(await screen.findByRole('img', { name: /schedule timeline/i })).toBeInTheDocument();
-    expect(screen.getByText(/Charging active/i)).toBeInTheDocument();
+    expect(screen.getByText(/Scheduled charging/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/charge plan summary/i)).toHaveTextContent(/22\.2 kWh/i);
 
     // Section 3: statistics
-    expect(await screen.findByText('Saved vs standard tariff')).toBeInTheDocument();
+    expect(await screen.findByText('Saved vs standard')).toBeInTheDocument();
     expect(screen.getByText('42.0 kWh')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: /daily energy bar chart/i })).toBeInTheDocument();
   });
@@ -37,7 +38,7 @@ describe('Dashboard integration', () => {
     );
 
     render(<Dashboard />);
-    await screen.findByText('Saved vs standard tariff');
+    await screen.findByText('Saved vs standard');
 
     const ranges = screen.getByRole('group', { name: /time range/i });
     await userEvent.click(within(ranges).getByRole('button', { name: '30d' }));
@@ -71,7 +72,7 @@ describe('Dashboard integration', () => {
 
     render(<Dashboard />);
     // Status section renders the editor with the fixture target (80%).
-    await screen.findByText('Target 80%');
+    await screen.findByRole('button', { name: /charge target 80%/i });
 
     await userEvent.click(screen.getByRole('button', { name: /increase target/i }));
     await userEvent.click(screen.getByRole('button', { name: /save 85%/i }));

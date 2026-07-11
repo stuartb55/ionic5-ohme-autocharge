@@ -54,7 +54,7 @@ export function ChargeControls({ status, onChanged }: Props) {
       {paused && (
         <button
           type="button"
-          className="ghost-button"
+          className="primary-button"
           disabled={busy !== null}
           onClick={() => run('resume', () => api.resumeCharge())}
         >
@@ -64,7 +64,7 @@ export function ChargeControls({ status, onChanged }: Props) {
       {pausable && (
         <button
           type="button"
-          className="ghost-button"
+          className="secondary-button"
           disabled={busy !== null}
           onClick={() => run('pause', () => api.pauseCharge())}
         >
@@ -75,7 +75,7 @@ export function ChargeControls({ status, onChanged }: Props) {
       {boost ? (
         <button
           type="button"
-          className="ghost-button"
+          className="secondary-button"
           disabled={busy !== null}
           onClick={() => run('boost-off', () => api.setMaxCharge(false))}
         >
@@ -86,7 +86,7 @@ export function ChargeControls({ status, onChanged }: Props) {
           <div className="boost-confirm-actions">
             <button
               type="button"
-              className="ghost-button boost-confirm"
+              className="secondary-button boost-confirm"
               disabled={busy !== null}
               onClick={() => run('boost-on', () => api.setMaxCharge(true))}
             >
@@ -110,7 +110,7 @@ export function ChargeControls({ status, onChanged }: Props) {
       ) : (
         <button
           type="button"
-          className="ghost-button"
+          className="secondary-button"
           disabled={busy !== null}
           onClick={() => setConfirmBoost(true)}
           title="Charge at full rate now, ignoring the smart schedule"

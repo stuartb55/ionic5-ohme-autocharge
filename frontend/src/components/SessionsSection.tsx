@@ -76,13 +76,13 @@ export function SessionsSection({ data }: { data: SessionsResponse }) {
                   aria-expanded={expanded}
                   onClick={() => setExpandedId(expanded ? null : s.id)}
                 >
-                  <span className="time">
+                  <span className="time" data-label="When">
                     {s.pluggedInAt
                       ? `${formatDateShort(s.pluggedInAt)} · ${formatTime(s.pluggedInAt)}`
                       : '—'}
                   </span>
-                  <span className="detail">{detail}</span>
-                  <span className={`session-action ${s.action ?? ''}`}>
+                  <span className="detail" data-label="Charge">{detail}</span>
+                  <span className={`session-action ${s.action ?? ''}`} data-label="Result">
                     {ACTION_LABEL[s.action ?? ''] ?? s.action ?? ''}
                   </span>
                   <span className="session-chevron" aria-hidden="true">
