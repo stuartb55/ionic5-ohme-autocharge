@@ -344,3 +344,20 @@ export interface MetricProvenance {
   quality: 'complete' | 'measured' | 'actual' | 'unavailable' | 'stale';
   coverage: Record<string, unknown>;
 }
+
+export interface DataQualityResponse {
+  status: 'ok' | 'attention' | 'unavailable';
+  generatedAt: string;
+  persistenceAvailable: boolean;
+  actualCostExpected: boolean;
+  sessions: {
+    total: number;
+    completed: number;
+    missingActualEnergy: number;
+    missingActualCost: number;
+  } | null;
+  telemetry: { unlinkedLast24h: number } | null;
+  consumption: { uncertainLast30d: number; ingestedThrough: string | null } | null;
+  daily: { completeThrough: string | null } | null;
+  statisticsCache: { available: boolean; ageSeconds: number | null };
+}

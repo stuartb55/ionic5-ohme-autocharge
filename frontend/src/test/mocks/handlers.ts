@@ -5,6 +5,19 @@ import { scheduleFixture, sessionsFixture, statisticsFixture, statusFixture } fr
 // of the jsdom base URL used by the test environment.
 export const handlers = [
   http.get('*/api/status', () => HttpResponse.json(statusFixture)),
+  http.get('*/api/data-quality', () =>
+    HttpResponse.json({
+      status: 'ok',
+      generatedAt: '2026-06-03T08:00:00Z',
+      persistenceAvailable: false,
+      actualCostExpected: false,
+      sessions: null,
+      telemetry: null,
+      consumption: null,
+      daily: null,
+      statisticsCache: { available: true, ageSeconds: 30 },
+    }),
+  ),
   http.get('*/api/version', () => HttpResponse.json({ version: 'testsha1234567' })),
   // Single vehicle by default, so the dashboard picker stays hidden in tests.
   http.get('*/api/vehicles', () =>

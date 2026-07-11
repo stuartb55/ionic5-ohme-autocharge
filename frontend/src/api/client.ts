@@ -1,6 +1,7 @@
 import type {
   ChargeActionResponse,
   DayTargetsUpdateResponse,
+  DataQualityResponse,
   EnergyUsageResponse,
   ReadyByUpdateResponse,
   ScheduleResponse,
@@ -100,6 +101,8 @@ export interface VersionResponse {
 
 export const api = {
   getStatus: (signal?: AbortSignal) => getJson<StatusResponse>('/api/status', signal),
+  getDataQuality: (signal?: AbortSignal) =>
+    getJson<DataQualityResponse>('/api/data-quality', signal),
   getSchedule: (signal?: AbortSignal) => getJson<ScheduleResponse>('/api/schedule', signal),
   getStatistics: (days = 7, signal?: AbortSignal) =>
     getJson<StatisticsResponse>(`/api/statistics?days=${days}`, signal),
