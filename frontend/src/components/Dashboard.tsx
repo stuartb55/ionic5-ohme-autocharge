@@ -180,6 +180,15 @@ export function Dashboard() {
     [refetchStatus],
   );
 
+  const handleSetTripMode = useCallback(
+    async (enabled: boolean, target: number, readyBy: string | null) => {
+      await api.setTripMode(enabled, target, readyBy);
+      refetchStatus();
+      refetchSchedule();
+    },
+    [refetchStatus, refetchSchedule],
+  );
+
   // Switch the tracked Hyundai vehicle, then refresh vehicles + status.
   const handleSelectVehicle = useCallback(
     async (id: string) => {
@@ -261,6 +270,7 @@ export function Dashboard() {
             onSetTarget={handleSetTarget}
             onSetReadyBy={handleSetReadyBy}
             onSetDayTargets={handleSetDayTargets}
+            onSetTripMode={handleSetTripMode}
             onChargeChanged={refetchStatus}
           />
         ) : (

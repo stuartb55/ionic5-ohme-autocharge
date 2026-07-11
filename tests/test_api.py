@@ -50,6 +50,8 @@ def reset_state():
     store.charge_target_override = None
     store.ready_by = None
     store.day_targets = {}
+    store.trip_target = None
+    store.trip_ready_by = None
     store.vehicle_id_override = None
     store.avg_price_per_kwh = None
     store.price_currency = None
@@ -1542,6 +1544,84 @@ def test_day_targets_in_status_config(client):
     client.put("/api/settings/day-targets", json={"dayTargets": {"6": 95}})
     body = client.get("/api/status").json()
     assert body["config"]["dayTargets"] == {"6": 95}
+
+
+# --- one-session trip mode -------------------------------------------------
+
+def test_trip_mode_persists_and_is_reflected_in_status(client):
+    response = client.put(
+        "/api/settings/trip-mode",
+        json={"enabled": True, "targetPercent": 100, "readyBy": "06:30"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "enabled": True,
+        "targetPercent": 100,
+        "readyBy": "06:30",
+        "persisted": True,
+        "applied": False,
+    }
+    assert settings.load_trip_mode() == (100, "06:30")
+    assert client.get("/api/status").json()["config"]["tripMode"] == {
+        "enabled": True, "targetPercent": 100, "readyBy": "06:30"
+    }
+
+
+def test_trip_mode_applies_immediately_when_connected(client):
+    _populate_snapshot()
+    store.client = MagicMock(slots=[], next_slot_start=None, next_slot_end=None)
+    with patch("bluelink.get_vehicle_state", return_value=_vstate(55)), \
+         patch("ohme_client.set_target", new=AsyncMock()) as set_target:
+        body = client.put(
+            "/api/settings/trip-mode",
+            json={"enabled": True, "targetPercent": 100, "readyBy": "05:45"},
+        ).json()
+    assert body["applied"] is True
+    assert set_target.await_args.kwargs == {
+        "current_soc": 55, "target_percent": 100, "target_time": (5, 45)
+    }
+
+
+def test_trip_mode_cancel_restores_normal_settings(client):
+    store.set_charge_target(80)
+    client.put(
+        "/api/settings/trip-mode",
+        json={"enabled": True, "targetPercent": 100, "readyBy": None},
+    )
+    response = client.put(
+        "/api/settings/trip-mode",
+        json={"enabled": False, "targetPercent": 100, "readyBy": None},
+    )
+    assert response.json()["enabled"] is False
+    assert settings.load_trip_mode() is None
+    assert store.effective_target == 80
+
+
+def test_trip_mode_cancel_stops_higher_schedule_when_normal_target_reached(client):
+    _populate_snapshot()
+    store.client = MagicMock(slots=[], next_slot_start=None, next_slot_end=None)
+    store.set_charge_target(80)
+    store.set_trip_mode(100, "05:45")
+    settings.save_trip_mode(100, "05:45")
+    with patch("bluelink.get_vehicle_state", return_value=_vstate(90)), \
+         patch("ohme_client.set_target", new=AsyncMock()) as set_target:
+        body = client.put(
+            "/api/settings/trip-mode",
+            json={"enabled": False, "targetPercent": 100, "readyBy": None},
+        ).json()
+    assert body["applied"] is True
+    set_target.assert_awaited_once_with(
+        store.client, current_soc=90, target_percent=80, target_time=None
+    )
+
+
+@pytest.mark.parametrize("target", [0, 101])
+def test_trip_mode_rejects_invalid_target(client, target):
+    response = client.put(
+        "/api/settings/trip-mode",
+        json={"enabled": True, "targetPercent": target, "readyBy": None},
+    )
+    assert response.status_code == 422
 
 
 def test_effective_target_prefers_todays_override(client, monkeypatch):

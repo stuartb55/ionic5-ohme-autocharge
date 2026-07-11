@@ -145,6 +145,39 @@ def save_day_targets(day_targets: dict[int, int]) -> bool:
     return _save(data)
 
 
+def load_trip_mode() -> tuple[int, str | None] | None:
+    """Return the pending one-session trip override, or None when inactive."""
+    raw = _load().get("tripMode")
+    if not isinstance(raw, dict):
+        return None
+    try:
+        target = int(raw["targetPercent"])
+    except (KeyError, ValueError, TypeError):
+        return None
+    ready_by = raw.get("readyBy")
+    if not TARGET_MIN <= target <= TARGET_MAX:
+        logger.warning("Persisted trip target %s out of range — ignoring", target)
+        return None
+    if ready_by is not None and parse_hhmm(ready_by) is None:
+        logger.warning("Persisted trip readyBy %r invalid — ignoring", ready_by)
+        return None
+    return target, ready_by
+
+
+def save_trip_mode(target_percent: int, ready_by: str | None) -> bool:
+    """Persist a one-session trip override, preserving permanent settings."""
+    data = _load()
+    data["tripMode"] = {"targetPercent": int(target_percent), "readyBy": ready_by}
+    return _save(data)
+
+
+def clear_trip_mode() -> bool:
+    """Consume or cancel the pending trip override."""
+    data = _load()
+    data.pop("tripMode", None)
+    return _save(data)
+
+
 def load_vehicle_id() -> str | None:
     """Return the persisted selected Hyundai vehicle id, or None if unset/invalid."""
     value = _load().get("vehicleId")

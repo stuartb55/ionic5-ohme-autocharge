@@ -108,6 +108,29 @@ def test_save_empty_day_targets_clears_key(settings_path):
     assert "dayTargets" not in json.loads(settings_path.read_text())
 
 
+# --- one-session trip mode -------------------------------------------------
+
+def test_trip_mode_round_trip_and_clear(settings_path):
+    assert settings.load_trip_mode() is None
+    assert settings.save_trip_mode(100, "06:30") is True
+    assert settings.load_trip_mode() == (100, "06:30")
+    assert settings.clear_trip_mode() is True
+    assert settings.load_trip_mode() is None
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"targetPercent": 5, "readyBy": "06:30"},
+        {"targetPercent": 100, "readyBy": "25:00"},
+        {"targetPercent": "bad", "readyBy": None},
+    ],
+)
+def test_load_trip_mode_rejects_invalid_values(settings_path, raw):
+    _write_raw(settings_path, {"tripMode": raw})
+    assert settings.load_trip_mode() is None
+
+
 # --- vehicle id ------------------------------------------------------------
 
 def test_vehicle_id_set_and_clear(settings_path):
@@ -153,11 +176,13 @@ def test_setters_preserve_other_keys(settings_path):
     settings.save_ready_by("06:30")
     settings.save_day_targets({0: 90})
     settings.save_vehicle_id("v1")
+    settings.save_trip_mode(95, None)
     settings.save_session_active(True)
     assert settings.load_target() == 70
     assert settings.load_ready_by() == "06:30"
     assert settings.load_day_targets() == {0: 90}
     assert settings.load_vehicle_id() == "v1"
+    assert settings.load_trip_mode() == (95, None)
     assert settings.load_session_active() is True
 
 

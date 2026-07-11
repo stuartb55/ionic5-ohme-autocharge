@@ -5,7 +5,7 @@ import pytest
 import bluelink
 import config
 import settings
-from main import handle_plugin_event, run_loop, run_once
+from main import PlugInDetector, handle_plugin_event, load_persisted_settings, run_loop, run_once
 from state import store
 
 
@@ -27,9 +27,13 @@ def _reset_session_state():
     """Plug-in handling mutates the shared store and the persisted session
     marker; keep tests independent."""
     store.clear_soc()
+    store.clear_trip_mode()
+    settings.clear_trip_mode()
     settings.save_session_active(False)
     yield
     store.clear_soc()
+    store.clear_trip_mode()
+    settings.clear_trip_mode()
     settings.save_session_active(False)
 
 
@@ -322,6 +326,42 @@ async def test_unplug_clears_recorded_soc(monkeypatch):
     # Unplug must also clear the persisted session marker so the next plug-in
     # (after a restart) is handled afresh.
     assert settings.load_session_active() is False
+
+
+async def test_unplug_consumes_trip_mode():
+    from ohme import ChargerStatus
+
+    detector = PlugInDetector()
+    detector.was_connected = True
+    detector.session_handled = True
+    detector.session_key = "trip-session"
+    store.active_session_id = 42
+    store.set_trip_mode(100, "06:30")
+    settings.save_trip_mode(100, "06:30")
+    client = _mock_ohme_client()
+    client.energy = 1200
+
+    with patch("db.close_session", new=AsyncMock()) as close, \
+         patch("db.record_session_event", new=AsyncMock()) as event:
+        connected = await detector.update(client, ChargerStatus.UNPLUGGED)
+
+    assert connected is False
+    assert store.trip_mode_enabled is False
+    assert settings.load_trip_mode() is None
+    close.assert_awaited_once()
+    event.assert_awaited_once_with(
+        42, "trip_mode_consumed", {"target": 100, "readyBy": "06:30"}
+    )
+
+
+def test_pending_trip_mode_is_restored_after_restart():
+    settings.save_trip_mode(95, "05:30")
+    store.clear_trip_mode()
+
+    load_persisted_settings()
+
+    assert store.trip_target == 95
+    assert store.trip_ready_by == "05:30"
 
 
 # --- persisted session marker ---

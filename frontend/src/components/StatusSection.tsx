@@ -7,6 +7,7 @@ import { ConnectionBadge } from './ConnectionBadge';
 import { DayTargetsEditor } from './DayTargetsEditor';
 import { ReadyByEditor } from './ReadyByEditor';
 import { TargetEditor } from './TargetEditor';
+import { TripModeEditor } from './TripModeEditor';
 import { VehicleHealth } from './VehicleHealth';
 
 function Tile({ label, value, unit }: { label: string; value: string; unit?: string }) {
@@ -26,6 +27,7 @@ export function StatusSection({
   onSetTarget,
   onSetReadyBy,
   onSetDayTargets,
+  onSetTripMode,
   onChargeChanged,
 }: {
   status: StatusResponse;
@@ -34,6 +36,8 @@ export function StatusSection({
   onSetReadyBy?: (value: string | null) => Promise<void>;
   /** Persist per-weekday target overrides; editor hidden when omitted. */
   onSetDayTargets?: (map: Record<number, number>) => Promise<void>;
+  /** Set or cancel a one-session target/departure override. */
+  onSetTripMode?: (enabled: boolean, target: number, readyBy: string | null) => Promise<void>;
   /** Refetch status after a charge-control action; controls hidden when omitted. */
   onChargeChanged?: () => void;
 }) {
@@ -42,6 +46,7 @@ export function StatusSection({
   // today's per-weekday override) is what the ring and Ohme actually use.
   const baseTarget = status.config.chargeTarget;
   const target = charger.targetPercent ?? baseTarget;
+  const effectiveTargetLabel = status.config.tripMode.enabled ? 'Trip' : 'Today';
   // Tick once a minute so the projection hides itself when the finish time
   // passes, without reading the impure Date.now() during render.
   const now = useNow(60_000);
@@ -53,7 +58,7 @@ export function StatusSection({
     charger.projectedFinish != null &&
     new Date(charger.projectedFinish).getTime() > now;
 
-  const hasSettings = onSetTarget || onSetReadyBy || onSetDayTargets;
+  const hasSettings = onSetTarget || onSetReadyBy || onSetDayTargets || onSetTripMode;
 
   return (
     <section className="card" aria-labelledby="status-heading">
@@ -107,7 +112,7 @@ export function StatusSection({
             {/* Static target display when no settings panel will render */}
             {!onSetTarget && <div className="target">Target {baseTarget}%</div>}
             {!onSetTarget && target !== baseTarget && (
-              <div className="today-target">Today: {target}%</div>
+              <div className="today-target">{effectiveTargetLabel}: {target}%</div>
             )}
           </div>
         </div>
@@ -149,7 +154,7 @@ export function StatusSection({
                   onSave={onSetTarget}
                 />
                 {target !== baseTarget && (
-                  <div className="today-target">Today: {target}%</div>
+                  <div className="today-target">{effectiveTargetLabel}: {target}%</div>
                 )}
               </div>
             )}
@@ -170,6 +175,16 @@ export function StatusSection({
                   min={status.config.targetMin}
                   max={status.config.targetMax}
                   onSave={onSetDayTargets}
+                />
+              </div>
+            )}
+            {onSetTripMode && (
+              <div className="settings-row settings-row--full">
+                <TripModeEditor
+                  value={status.config.tripMode}
+                  min={status.config.targetMin}
+                  max={status.config.targetMax}
+                  onSave={onSetTripMode}
                 />
               </div>
             )}

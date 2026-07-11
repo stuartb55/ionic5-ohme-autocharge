@@ -104,3 +104,9 @@ async def test_set_target_passes_ready_by_time():
     client = _mock_client()
     await ohme_client.set_target(client, current_soc=55, target_percent=80, target_time=(7, 30))
     client.async_set_target.assert_called_once_with(target_percent=25, target_time=(7, 30))
+
+
+async def test_set_target_clamps_a_lower_restored_target_to_zero_topup():
+    client = _mock_client()
+    await ohme_client.set_target(client, current_soc=90, target_percent=80)
+    client.async_set_target.assert_called_once_with(target_percent=0, target_time=None)

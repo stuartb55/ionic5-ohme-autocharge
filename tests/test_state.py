@@ -59,6 +59,29 @@ def test_effective_target_combines_base_override_and_day_targets(monkeypatch):
         assert s.effective_target == 90  # today's override wins over base
 
 
+def test_trip_mode_takes_precedence_then_restores_normal_target(monkeypatch):
+    monkeypatch.setattr(config, "CHARGE_TARGET", 80)
+    s = AppState()
+    s.set_day_targets({2: 90})
+    with patch("state._today_weekday", return_value=2):
+        s.set_trip_mode(100, "05:45")
+        assert s.effective_target == 100
+        assert s.effective_ready_by == "05:45"
+        assert s.ready_by_tuple == (5, 45)
+        assert s.trip_mode_enabled is True
+        s.clear_trip_mode()
+        assert s.effective_target == 90
+        assert s.trip_mode_enabled is False
+
+
+def test_trip_mode_without_departure_ignores_permanent_ready_by():
+    s = AppState()
+    s.set_ready_by("07:30")
+    s.set_trip_mode(100, None)
+    assert s.effective_ready_by is None
+    assert s.ready_by_tuple is None
+
+
 # --- vehicle selection precedence ------------------------------------------
 
 def test_selected_vehicle_id_precedence(monkeypatch):

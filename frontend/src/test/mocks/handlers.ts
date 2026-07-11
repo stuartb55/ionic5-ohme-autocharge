@@ -56,6 +56,18 @@ export const handlers = [
     const body = (await request.json()) as { dayTargets: Record<string, number> };
     return HttpResponse.json({ dayTargets: body.dayTargets, persisted: true, applied: false });
   }),
+  http.put('*/api/settings/trip-mode', async ({ request }) => {
+    const body = (await request.json()) as {
+      enabled: boolean; targetPercent: number; readyBy: string | null;
+    };
+    return HttpResponse.json({
+      enabled: body.enabled,
+      targetPercent: body.enabled ? body.targetPercent : null,
+      readyBy: body.enabled ? body.readyBy : null,
+      persisted: true,
+      applied: false,
+    });
+  }),
   http.post('*/api/refresh', () =>
     HttpResponse.json({ ok: true, updatedAt: statusFixture.updatedAt, ready: true }),
   ),
