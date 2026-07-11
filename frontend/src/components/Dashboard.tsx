@@ -31,7 +31,13 @@ const QUALITY_INTERVAL = 300_000;
 const SOH_INTERVAL = 1_800_000; // 30 min
 
 function SectionSkeleton({ height }: { height: number }) {
-  return <div className="card"><div className="skeleton" style={{ height }} /></div>;
+  return (
+    <div className="card section-skeleton" aria-hidden="true">
+      <div className="skeleton skeleton-title" />
+      <div className="skeleton skeleton-copy" />
+      <div className="skeleton skeleton-body" style={{ height }} />
+    </div>
+  );
 }
 
 /**
@@ -67,7 +73,7 @@ function HeaderMeta({
   return (
     <div className="app-meta">
       <span className={`live-dot ${fresh ? '' : 'stale'}`} aria-hidden="true" />
-      <span>{refreshing ? 'Refreshing…' : `Updated ${relativeTime(lastPolled, new Date(now))}`}</span>
+      <span aria-live="polite">{refreshing ? 'Refreshing…' : `Updated ${relativeTime(lastPolled, new Date(now))}`}</span>
       <button
         type="button"
         className={`refresh-btn ${refreshing ? 'spinning' : ''}`}
@@ -85,7 +91,7 @@ function HeaderMeta({
 
 function SectionError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
-    <div className="card section-error" role="alert">
+    <div className="card section-error" role="status">
       <span>{message}</span>
       <button type="button" className="ghost-button" onClick={onRetry}>
         Retry
@@ -153,6 +159,9 @@ export function Dashboard() {
   const { refetch: refetchStats } = stats;
   const { refetch: refetchSessions } = sessions;
   const { refetch: refetchQuality } = quality;
+  const { refetch: refetchTariff } = tariff;
+  const { refetch: refetchSoh } = soh;
+  const { refetch: refetchEnergy } = energy;
 
   // Persist a new charge target, then refetch status so the UI reflects it.
   const handleSetTarget = useCallback(
@@ -283,10 +292,12 @@ export function Dashboard() {
         </div>
       )}
 
-      <main className="sections">
+      <main className="sections" aria-busy={status.loading && !status.data}>
         <div className="dashboard-overview">
           {status.data ? (
             <StatusSection status={status.data} onChargeChanged={refetchStatus} />
+          ) : status.error ? (
+            <SectionError message="Couldn’t load live charging status." onRetry={refetchStatus} />
           ) : (
             <SectionSkeleton height={420} />
           )}
@@ -318,11 +329,23 @@ export function Dashboard() {
           <SectionSkeleton height={320} />
         )}
         <div className="dashboard-secondary">
-          {sessions.data && <SessionsSection data={sessions.data} />}
-          {soh.data?.enabled && <SohTrendSection data={soh.data} />}
-          {tariff.data?.enabled && <TariffSection data={tariff.data} />}
-          {energy.data?.enabled && <EnergyUsageSection data={energy.data} onDateChange={setEnergyDate} />}
-          {quality.data && <DataQualitySection data={quality.data} />}
+          {sessions.data ? <SessionsSection data={sessions.data} /> : sessions.error ? (
+            <SectionError message="Couldn’t load recent sessions." onRetry={refetchSessions} />
+          ) : null}
+          {soh.data?.enabled ? <SohTrendSection data={soh.data} /> : soh.error ? (
+            <SectionError message="Couldn’t load battery health." onRetry={refetchSoh} />
+          ) : null}
+          {tariff.data?.enabled ? <TariffSection data={tariff.data} /> : tariff.error ? (
+            <SectionError message="Couldn’t load tariff prices." onRetry={refetchTariff} />
+          ) : null}
+          {energy.data?.enabled ? (
+            <EnergyUsageSection data={energy.data} onDateChange={setEnergyDate} />
+          ) : energy.error ? (
+            <SectionError message="Couldn’t load household energy." onRetry={refetchEnergy} />
+          ) : null}
+          {quality.data ? <DataQualitySection data={quality.data} /> : quality.error ? (
+            <SectionError message="Couldn’t load data quality." onRetry={refetchQuality} />
+          ) : null}
         </div>
       </main>
 

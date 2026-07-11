@@ -36,6 +36,18 @@ served from the same origin as the SPA).
   `Dashboard`, mocks all three API endpoints with [MSW](https://mswjs.io), and
   verifies the sections render real data and react to user input (time-range
   switching, error states).
+- **Accessibility test** runs axe-core against the fully populated dashboard;
+  colour contrast is verified separately in a real browser because the test DOM
+  has no paint engine.
+
+## PWA screenshots
+
+The manifest screenshots are captures of the real application using a local,
+read-only demo API. Start it with `VITE_DEMO_MODE=1 npm run dev`, then capture
+the page at 1280×720 and 720×1280. The demo middleware is enabled only by that
+environment variable and is never included in the production client bundle.
+`PwaAssets.test.ts` treats the reviewed captures as golden assets; update its
+hashes intentionally whenever the screenshots are recaptured.
 
 ## Production image
 

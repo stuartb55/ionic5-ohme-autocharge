@@ -32,7 +32,8 @@ body {
 .app {
   max-width: var(--maxw);
   margin: 0 auto;
-  padding: var(--space-6) var(--space-5) var(--space-7);
+  padding: max(var(--space-6), env(safe-area-inset-top)) max(var(--space-5), env(safe-area-inset-right))
+    max(var(--space-7), env(safe-area-inset-bottom)) max(var(--space-5), env(safe-area-inset-left));
 }
 
 /* --- header --- */
@@ -106,7 +107,7 @@ body {
 }
 .theme-option {
   min-width: 36px;
-  height: 36px;
+  height: 38px;
   border: none;
   background: transparent;
   border-radius: 999px;
@@ -1304,6 +1305,7 @@ a.ghost-button {
   padding: 6px 12px;
   border-radius: 999px;
   cursor: pointer;
+  min-height: 44px;
 }
 .ghost-button:hover:not(:disabled) {
   color: var(--text);
@@ -1313,6 +1315,27 @@ a.ghost-button {
   opacity: 0.5;
   cursor: not-allowed;
 }
+.primary-button,
+.secondary-button {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 650;
+  justify-content: center;
+  min-height: 44px;
+  padding: 8px 16px;
+}
+.primary-button { background: var(--brand); color: #fff; }
+.primary-button:hover:not(:disabled) { background: var(--brand-strong); }
+.secondary-button { background: var(--surface); border-color: var(--border); color: var(--text); }
+.secondary-button:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }
+.primary-button:disabled,
+.secondary-button:disabled { cursor: not-allowed; opacity: 0.55; }
+.boost-confirm { border-color: var(--danger); color: var(--danger); }
 
 .barchart svg { width: 100%; height: auto; display: block; }
 .barchart .axis { font-size: 10px; fill: var(--text-subtle); }
@@ -1364,7 +1387,7 @@ a.ghost-button {
 .chart-toolbar button {
   display: inline-flex;
   align-items: center;
-  min-height: 36px;
+  min-height: 40px;
   border: 0;
   background: transparent;
   color: var(--text-muted);
@@ -1413,6 +1436,10 @@ a.ghost-button {
   animation: shimmer 1.4s ease infinite;
   border-radius: var(--radius-sm);
 }
+.section-skeleton { display: grid; gap: var(--space-3); }
+.skeleton-title { height: 18px; width: min(42%, 180px); }
+.skeleton-copy { height: 12px; width: min(68%, 320px); }
+.skeleton-body { margin-top: var(--space-2); }
 @keyframes shimmer {
   0% { background-position: 100% 0; }
   100% { background-position: 0 0; }
@@ -1527,6 +1554,7 @@ a.ghost-button {
   color: var(--text);
   padding: 3px 8px;
   font-size: 0.85rem;
+  min-height: 44px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1546,6 +1574,11 @@ a.ghost-button {
   .tiles { grid-template-columns: repeat(2, 1fr); }
   .dashboard-secondary { grid-template-columns: 1fr; }
   .settings-primary { grid-template-columns: 1fr; }
+  .app-header { align-items: flex-start; }
+  .app-meta { justify-content: space-between; width: 100%; }
+  .card > header { align-items: flex-start; flex-wrap: wrap; }
+  .stats-actions { flex-wrap: wrap; width: 100%; }
+  .chart-header { align-items: flex-start; flex-direction: column; }
 }
 @media (max-width: 460px) {
   .stat-cards, .tiles, .insights, .secondary-stat-cards { grid-template-columns: 1fr; }
@@ -1556,6 +1589,11 @@ a.ghost-button {
   .card { padding: var(--space-4); }
   .status-message { font-size: 1rem; }
   .settings-summary { align-items: flex-start; text-align: left; }
+  .app { padding-left: max(var(--space-4), env(safe-area-inset-left)); padding-right: max(var(--space-4), env(safe-area-inset-right)); }
+  .app-meta { gap: var(--space-2); }
+  .app-meta > span:not(.live-dot) { font-size: 0.78rem; }
+  .stats-actions .chart-toolbar { order: -1; }
+  .stats-actions { justify-content: space-between; }
   .session-head { display: none; }
   .session-row { align-items: stretch; grid-template-columns: 1fr auto; }
   .session-row .time,
