@@ -59,7 +59,7 @@ export function DayTargetsEditor({ value, base, min, max, step = 5, onSave }: Pr
   return (
     <details className="day-targets">
       <summary>
-        Per-day targets
+        Weekly target overrides
         {overrideCount > 0 && (
           <span className="badge day-targets-count">
             {overrideCount} {overrideCount === 1 ? 'override' : 'overrides'}
@@ -68,7 +68,7 @@ export function DayTargetsEditor({ value, base, min, max, step = 5, onSave }: Pr
       </summary>
       <div className="day-chips">
         {DAYS.map((day, i) => (
-          <div key={day} className={`day-chip${draft[i] ? ' day-chip--override' : ''}`}>
+          <label key={day} className={`day-chip${draft[i] ? ' day-chip--override' : ''}`}>
             <span className="day-chip-name">{day}</span>
             <select
               value={draft[i]}
@@ -83,7 +83,7 @@ export function DayTargetsEditor({ value, base, min, max, step = 5, onSave }: Pr
                 </option>
               ))}
             </select>
-          </div>
+          </label>
         ))}
       </div>
       {edited && (

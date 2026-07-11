@@ -848,6 +848,11 @@ body {
   width: 100%;
 }
 .timeline svg { width: 100%; height: auto; display: block; }
+.timeline-segment { fill: var(--brand); }
+.timeline-segment.complete { fill: color-mix(in srgb, var(--brand) 52%, var(--charge-track)); }
+.timeline-segment.current { fill: var(--success); }
+.timeline-now line { stroke: var(--text); stroke-width: 2; }
+.timeline-now circle { fill: var(--text); }
 .timeline-legend {
   display: flex;
   gap: var(--space-4);
@@ -869,6 +874,33 @@ body {
 }
 .swatch.active { background: var(--brand); }
 .swatch.idle { background: var(--charge-track); }
+.swatch.now { background: var(--text); border-radius: 999px; width: 4px; }
+.schedule-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: calc(var(--space-2) * -1) 0 var(--space-5);
+}
+.schedule-summary > div {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-3);
+}
+.schedule-summary span,
+.schedule-summary small { color: var(--text-muted); font-size: 0.7rem; }
+.schedule-summary strong { font-size: 1rem; font-variant-numeric: tabular-nums; }
+.slot-details { margin-top: var(--space-4); }
+.slot-details summary {
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+  min-height: 44px;
+  padding: var(--space-3) 0;
+}
 .slot-list {
   margin-top: var(--space-4);
   display: grid;
@@ -1490,7 +1522,9 @@ a.ghost-button {
 @media (max-width: 460px) {
   .stat-cards, .tiles, .insights { grid-template-columns: 1fr 1fr; }
   .quality-grid { grid-template-columns: 1fr; }
-  .day-chips { grid-template-columns: repeat(4, 1fr); }
+  .day-chips { grid-template-columns: 1fr; }
+  .day-chip { flex-direction: row; justify-content: space-between; padding: var(--space-2) var(--space-3); }
+  .day-chip select { width: min(68%, 190px); }
   .card { padding: var(--space-4); }
   .status-message { font-size: 1rem; }
   .settings-summary { align-items: flex-start; text-align: left; }

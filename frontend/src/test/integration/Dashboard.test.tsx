@@ -18,7 +18,8 @@ describe('Dashboard integration', () => {
 
     // Section 2: schedule
     expect(await screen.findByRole('img', { name: /schedule timeline/i })).toBeInTheDocument();
-    expect(screen.getByText(/Charging active/i)).toBeInTheDocument();
+    expect(screen.getByText(/Scheduled charging/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/charge plan summary/i)).toHaveTextContent(/22\.2 kWh/i);
 
     // Section 3: statistics
     expect(await screen.findByText('Saved vs standard tariff')).toBeInTheDocument();
