@@ -65,6 +65,27 @@ describe('StatusSection trip mode', () => {
   });
 });
 
+describe('StatusSection vehicle profile', () => {
+  it('shows the active vehicle profile controls', () => {
+    const status: StatusResponse = {
+      ...statusFixture,
+      config: {
+        ...statusFixture.config,
+        vehicleProfiles: { 'car-1': { targetPercent: 90, readyBy: '06:15' } },
+      },
+    };
+    render(
+      <StatusSection
+        status={status}
+        activeVehicle={{ id: 'car-1', name: 'IONIQ 5' }}
+        onSetVehicleProfile={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/ioniq 5 profile/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/profile target/i)).toHaveValue(90);
+  });
+});
+
 describe('StatusSection projected cost', () => {
   function withCharger(overrides: Partial<StatusResponse['charger']>): StatusResponse {
     return { ...statusFixture, charger: { ...statusFixture.charger, ...overrides } };

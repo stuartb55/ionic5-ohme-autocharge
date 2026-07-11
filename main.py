@@ -48,6 +48,7 @@ def load_persisted_settings() -> None:
         store.set_trip_mode(*trip_mode)
         logger.info("Loaded pending trip mode: target=%s%% ready_by=%s", *trip_mode)
     store.set_notification_preferences(settings.load_notification_preferences())
+    store.set_vehicle_profiles(settings.load_vehicle_profiles())
     vehicle_id = settings.load_vehicle_id()
     if vehicle_id is not None:
         store.set_vehicle_id(vehicle_id)
@@ -83,7 +84,8 @@ async def handle_plugin_event(
     soc = vehicle.soc
 
     # effective_target applies today's per-weekday override (if any), else the base.
-    target = store.effective_target
+    target = store.effective_target_for(vehicle.vehicle_id)
+    ready_by = store.effective_ready_by_for(vehicle.vehicle_id)
 
     if soc >= target:
         logger.info(
@@ -130,7 +132,10 @@ async def handle_plugin_event(
         # the API; only the quick Ohme mutation is serialised.
         async with store.client_lock:
             await ohme_client.set_target(
-                client, current_soc=soc, target_percent=target, target_time=store.ready_by_tuple
+                client,
+                current_soc=soc,
+                target_percent=target,
+                target_time=store.ready_by_tuple_for(vehicle.vehicle_id),
             )
             # Capture everything we report on (notification text + DB snapshot)
             # while still holding the lock, so a concurrent charge-summary read
@@ -143,8 +148,8 @@ async def handle_plugin_event(
         # Multi-line body so each fact is on its own line — far easier to scan on
         # a phone than one run-on sentence. The vehicle name goes in the title.
         lines = [f"Charging {soc}% → {target}%"]
-        if store.effective_ready_by:
-            lines.append(f"Ready by {store.effective_ready_by}")
+        if ready_by:
+            lines.append(f"Ready by {ready_by}")
         if store.trip_mode_enabled:
             lines.append("One-time trip charge")
         schedule = ", ".join(str(s) for s in slots)

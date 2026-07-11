@@ -17,6 +17,7 @@ import type {
   TripModeUpdateResponse,
   TariffResponse,
   VehicleUpdateResponse,
+  VehicleProfileUpdateResponse,
   VehiclesResponse,
 } from './types';
 
@@ -131,6 +132,17 @@ export const api = {
   // Select which Hyundai vehicle to read (null = first).
   setVehicle: (vehicleId: string | null, signal?: AbortSignal) =>
     putJson<VehicleUpdateResponse>('/api/settings/vehicle', { vehicleId }, signal),
+  setVehicleProfile: (
+    vehicleId: string,
+    enabled: boolean,
+    targetPercent = 80,
+    readyBy: string | null = null,
+    signal?: AbortSignal,
+  ) => putJson<VehicleProfileUpdateResponse>(
+    '/api/settings/vehicle-profile',
+    { vehicleId, enabled, targetPercent, readyBy },
+    signal,
+  ),
   setTarget: (targetPercent: number, signal?: AbortSignal) =>
     putJson<TargetUpdateResponse>('/api/settings/target', { targetPercent }, signal),
   // Set ("HH:MM") or clear (null) the ready-by departure time.

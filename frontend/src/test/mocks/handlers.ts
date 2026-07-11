@@ -30,6 +30,19 @@ export const handlers = [
     const body = (await request.json()) as { vehicleId: string | null };
     return HttpResponse.json({ vehicleId: body.vehicleId, persisted: true, applied: false });
   }),
+  http.put('*/api/settings/vehicle-profile', async ({ request }) => {
+    const body = (await request.json()) as {
+      vehicleId: string; enabled: boolean; targetPercent: number; readyBy: string | null;
+    };
+    return HttpResponse.json({
+      vehicleId: body.vehicleId,
+      enabled: body.enabled,
+      targetPercent: body.enabled ? body.targetPercent : null,
+      readyBy: body.enabled ? body.readyBy : null,
+      persisted: true,
+      applied: false,
+    });
+  }),
   http.get('*/api/schedule', () => HttpResponse.json(scheduleFixture)),
   http.get('*/api/sessions', () => HttpResponse.json(sessionsFixture)),
   http.get('*/api/sessions/:id/audit', () => HttpResponse.json(sessionAuditFixture)),

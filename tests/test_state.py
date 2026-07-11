@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import config
+import settings
 from state import AppState, StatusSnapshot
 
 
@@ -80,6 +81,28 @@ def test_trip_mode_without_departure_ignores_permanent_ready_by():
     s.set_trip_mode(100, None)
     assert s.effective_ready_by is None
     assert s.ready_by_tuple is None
+
+
+def test_vehicle_profile_precedes_global_defaults_but_not_trip(monkeypatch):
+    monkeypatch.setattr(config, "CHARGE_TARGET", 80)
+    s = AppState()
+    s.set_ready_by("07:30")
+    s.set_vehicle_profiles({"car-2": settings.VehicleProfile(95, "05:45")})
+    assert s.effective_target_for("car-1") == 80
+    assert s.effective_ready_by_for("car-1") == "07:30"
+    assert s.effective_target_for("car-2") == 95
+    assert s.ready_by_tuple_for("car-2") == (5, 45)
+    s.set_trip_mode(100, "04:30")
+    assert s.effective_target_for("car-2") == 100
+    assert s.ready_by_tuple_for("car-2") == (4, 30)
+
+
+def test_last_observed_vehicle_selects_effective_profile(monkeypatch):
+    monkeypatch.setattr(config, "HYUNDAI_VEHICLE_ID", "")
+    s = AppState()
+    s.set_vehicle_profiles({"car-1": settings.VehicleProfile(90, None)})
+    s.last_vehicle_id = "car-1"
+    assert s.effective_target == 90
 
 
 # --- vehicle selection precedence ------------------------------------------

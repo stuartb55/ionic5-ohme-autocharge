@@ -197,6 +197,15 @@ export function Dashboard() {
     [refetchStatus],
   );
 
+  const handleSetVehicleProfile = useCallback(
+    async (vehicleId: string, enabled: boolean, target: number, readyBy: string | null) => {
+      await api.setVehicleProfile(vehicleId, enabled, target, readyBy);
+      refetchStatus();
+      refetchSchedule();
+    },
+    [refetchStatus, refetchSchedule],
+  );
+
   // Switch the tracked Hyundai vehicle, then refresh vehicles + status.
   const handleSelectVehicle = useCallback(
     async (id: string) => {
@@ -231,6 +240,8 @@ export function Dashboard() {
   // pollIntervalSeconds, so judge freshness against that cadence (with slack).
   const lastPolled = status.data?.updatedAt ? new Date(status.data.updatedAt) : null;
   const pollMs = (status.data?.config.pollIntervalSeconds ?? 180) * 1_000;
+  const activeVehicle = vehicles?.vehicles.find((vehicle) => vehicle.id === vehicles.selected)
+    ?? vehicles?.vehicles[0];
 
   return (
     <div className="app">
@@ -280,6 +291,8 @@ export function Dashboard() {
             onSetDayTargets={handleSetDayTargets}
             onSetTripMode={handleSetTripMode}
             onSetNotifications={handleSetNotifications}
+            activeVehicle={activeVehicle}
+            onSetVehicleProfile={handleSetVehicleProfile}
             onChargeChanged={refetchStatus}
           />
         ) : (

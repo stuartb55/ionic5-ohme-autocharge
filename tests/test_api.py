@@ -20,9 +20,12 @@ import settings
 from state import StatusSnapshot, store
 
 
-def _vstate(soc, *, range_miles=150, odometer_miles=10000):
+def _vstate(soc, *, range_miles=150, odometer_miles=10000, vehicle_id=None):
     """Build a Bluelink VehicleState for patching bluelink.get_vehicle_state."""
-    return bluelink.VehicleState(soc=soc, range_miles=range_miles, odometer_miles=odometer_miles)
+    return bluelink.VehicleState(
+        soc=soc, range_miles=range_miles, odometer_miles=odometer_miles,
+        vehicle_id=vehicle_id,
+    )
 
 
 @pytest.fixture
@@ -42,6 +45,7 @@ def reset_state():
     store.last_soc = None
     store.last_range_miles = None
     store.last_odometer_miles = None
+    store.last_vehicle_id = None
     store.last_soh_percent = None
     store.last_is_locked = None
     store.last_latitude = None
@@ -53,6 +57,7 @@ def reset_state():
     store.trip_target = None
     store.trip_ready_by = None
     store.notification_preferences = settings.NotificationPreferences()
+    store.vehicle_profiles = {}
     store.vehicle_id_override = None
     store.avg_price_per_kwh = None
     store.price_currency = None
@@ -1357,6 +1362,64 @@ def test_set_vehicle_clear_with_null(client):
     assert resp.status_code == 200
     assert store.vehicle_id_override is None
     assert settings.load_vehicle_id() is None
+
+
+def test_vehicle_profile_persists_and_appears_in_status(client):
+    response = client.put("/api/settings/vehicle-profile", json={
+        "vehicleId": "car-2", "enabled": True,
+        "targetPercent": 95, "readyBy": "05:45",
+    })
+    assert response.status_code == 200
+    assert response.json() == {
+        "vehicleId": "car-2", "enabled": True, "targetPercent": 95,
+        "readyBy": "05:45", "persisted": True, "applied": False,
+    }
+    assert settings.load_vehicle_profiles() == {
+        "car-2": settings.VehicleProfile(95, "05:45")
+    }
+    assert client.get("/api/status").json()["config"]["vehicleProfiles"] == {
+        "car-2": {"targetPercent": 95, "readyBy": "05:45"}
+    }
+
+
+def test_vehicle_profile_removal_restores_global_default(client):
+    store.set_charge_target(80)
+    client.put("/api/settings/vehicle-profile", json={
+        "vehicleId": "car-2", "enabled": True,
+        "targetPercent": 95, "readyBy": None,
+    })
+    response = client.put("/api/settings/vehicle-profile", json={
+        "vehicleId": "car-2", "enabled": False,
+        "targetPercent": 95, "readyBy": None,
+    })
+    assert response.json()["enabled"] is False
+    assert settings.load_vehicle_profiles() == {}
+    assert store.effective_target_for("car-2") == 80
+
+
+def test_active_vehicle_profile_reapplies_immediately(client):
+    _populate_snapshot()
+    store.client = MagicMock(slots=[], next_slot_start=None, next_slot_end=None)
+    store.last_vehicle_id = "car-2"
+    with patch(
+        "bluelink.get_vehicle_state", return_value=_vstate(55, vehicle_id="car-2")
+    ), patch("ohme_client.set_target", new=AsyncMock()) as set_target:
+        body = client.put("/api/settings/vehicle-profile", json={
+            "vehicleId": "car-2", "enabled": True,
+            "targetPercent": 90, "readyBy": "06:15",
+        }).json()
+    assert body["applied"] is True
+    set_target.assert_awaited_once_with(
+        store.client, current_soc=55, target_percent=90, target_time=(6, 15)
+    )
+
+
+@pytest.mark.parametrize("vehicle_id", ["", "x" * 201])
+def test_vehicle_profile_rejects_invalid_vehicle_id(client, vehicle_id):
+    assert client.put("/api/settings/vehicle-profile", json={
+        "vehicleId": vehicle_id, "enabled": True,
+        "targetPercent": 90, "readyBy": None,
+    }).status_code == 422
 
 
 def test_selected_vehicle_id_falls_back_to_env(client, monkeypatch):
