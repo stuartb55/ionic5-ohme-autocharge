@@ -727,6 +727,50 @@ def test_session_telemetry_returns_points(client):
     mock_get.assert_awaited_once_with(7)
 
 
+def test_session_audit_returns_typed_provenance(client):
+    at = dt.datetime(2026, 6, 1, 20, 0, tzinfo=dt.timezone.utc)
+    audit = {
+        "session": {
+            "id": 7, "sessionKey": "key-7", "pluggedInAt": at,
+            "unpluggedAt": at + dt.timedelta(hours=2),
+            "completedAt": at + dt.timedelta(hours=1), "vehicleName": "IONIQ 5",
+            "vehicleId": "car-1", "vin": "VIN", "chargerId": "charger-1",
+            "sourceObservedAt": at, "socPercent": 50, "targetPercent": 80,
+            "endSocPercent": 80, "topupPercent": 30, "action": "configured",
+            "odometerMiles": 12000, "sohPercent": 98, "actualEnergyWh": 18000,
+            "actualCostMinor": 123, "costCurrency": "GBP", "costMethod": "actual_agile",
+            "tariffCoverage": 1.0, "reconstructedEnergyWh": 17990,
+            "reconciliationDeltaWh": 10, "completionReason": "finished",
+            "quality": "reconciled", "updatedAt": at + dt.timedelta(hours=2),
+        },
+        "events": [{"at": at, "type": "target_configured", "details": {"target": 80}}],
+        "schedules": [{
+            "recordedAt": at, "nextSlotStart": at, "nextSlotEnd": at + dt.timedelta(hours=1),
+            "slots": [], "revision": 1, "reason": "initial",
+        }],
+        "intervals": [{
+            "start": at, "end": at + dt.timedelta(minutes=30), "energyWh": 4000,
+            "costMinor": 20, "rateMinorPerKwh": 5.0, "currency": "GBP",
+            "quality": "priced", "source": "ohme_counter",
+        }],
+    }
+    with patch("db.is_enabled", return_value=True), \
+         patch("db.get_session_audit", new=AsyncMock(return_value=audit)):
+        response = client.get("/api/sessions/7/audit")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["session"]["actualEnergyWh"] == 18000
+    assert body["events"][0]["details"] == {"target": 80}
+    assert body["schedules"][0]["revision"] == 1
+    assert body["intervals"][0]["costMinor"] == 20
+
+
+def test_session_audit_404_when_unknown(client):
+    with patch("db.is_enabled", return_value=True), \
+         patch("db.get_session_audit", new=AsyncMock(return_value=None)):
+        assert client.get("/api/sessions/999/audit").status_code == 404
+
+
 def test_soh_history_disabled_when_persistence_off(client):
     with patch("db.get_soh_history", new=AsyncMock(return_value=None)):
         body = client.get("/api/soh-history").json()

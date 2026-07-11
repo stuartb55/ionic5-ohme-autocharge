@@ -196,6 +196,57 @@ export interface SessionTelemetryResponse {
   points: SessionTelemetryPoint[];
 }
 
+export interface SessionAuditResponse {
+  session: {
+    id: number;
+    sessionKey: string | null;
+    pluggedInAt: string;
+    unpluggedAt: string | null;
+    completedAt: string | null;
+    vehicleName: string | null;
+    vehicleId: string | null;
+    vin: string | null;
+    chargerId: string | null;
+    sourceObservedAt: string | null;
+    socPercent: number | null;
+    targetPercent: number | null;
+    endSocPercent: number | null;
+    topupPercent: number | null;
+    action: string | null;
+    odometerMiles: number | null;
+    sohPercent: number | null;
+    actualEnergyWh: number | null;
+    actualCostMinor: number | null;
+    costCurrency: string | null;
+    costMethod: string | null;
+    tariffCoverage: number | null;
+    reconstructedEnergyWh: number | null;
+    reconciliationDeltaWh: number | null;
+    completionReason: string | null;
+    quality: string;
+    updatedAt: string;
+  };
+  events: Array<{ at: string; type: string; details: Record<string, unknown> }>;
+  schedules: Array<{
+    recordedAt: string;
+    nextSlotStart: string | null;
+    nextSlotEnd: string | null;
+    slots: Array<Record<string, unknown>>;
+    revision: number;
+    reason: string;
+  }>;
+  intervals: Array<{
+    start: string;
+    end: string;
+    energyWh: number;
+    costMinor: number | null;
+    rateMinorPerKwh: number | null;
+    currency: string | null;
+    quality: string;
+    source: string;
+  }>;
+}
+
 export interface SohPoint {
   /** Plug-in timestamp (ISO) of the reading, or null. */
   date: string | null;

@@ -6,6 +6,7 @@ import type {
   ReadyByUpdateResponse,
   ScheduleResponse,
   SessionsResponse,
+  SessionAuditResponse,
   SessionTelemetryResponse,
   SohHistoryResponse,
   StatisticsResponse,
@@ -113,6 +114,8 @@ export const api = {
   // Per-poll charge curve (SOC + power over time) for one session.
   getSessionTelemetry: (id: number, signal?: AbortSignal) =>
     getJson<SessionTelemetryResponse>(`/api/sessions/${id}/telemetry`, signal),
+  getSessionAudit: (id: number, signal?: AbortSignal) =>
+    getJson<SessionAuditResponse>(`/api/sessions/${id}/audit`, signal),
   getTariff: (signal?: AbortSignal) => getJson<TariffResponse>('/api/tariff', signal),
   // Household-vs-car energy for a day (YYYY-MM-DD); omit for yesterday (default).
   getEnergyUsage: (date?: string, signal?: AbortSignal) =>

@@ -25,6 +25,7 @@ When the car is plugged in, the app reads the real battery state-of-charge from 
 - **House vs car energy** *(optional, needs Postgres)* — splits Octopus import into car, household and explicitly unattributed energy; telemetry gaps and inconsistencies remain visible instead of being silently forced into a plausible split.
 - **History & Grafana** *(optional)* — per-session and telemetry data persisted to Postgres.
 - **Data-quality dashboard** *(needs Postgres)* — shows missing measured energy/cost, session-linkage problems, uncertain attribution, ingestion freshness and statistics-cache age, with a direct path to session records needing review.
+- **Session audit view** *(needs Postgres)* — expands each history row into measured energy/cost, reconciliation quality, lifecycle events, schedule revisions, priced tariff intervals and the charge curve.
 - **Battery health trend** *(needs Postgres)* — a state-of-health sparkline on the dashboard showing degradation over time, not just the current figure.
 - **Installable PWA** — add to your phone/desktop home screen; works offline (app shell cached).
 
@@ -155,7 +156,7 @@ A React + TypeScript single-page app (in `frontend/`) served by a hardened, non-
 2. **Schedule** — a timeline of the allocated charging slots (active vs paused / off-peak windows) plus a slot-by-slot breakdown.
 3. **Statistics & savings** — account-wide Ohme energy, savings and CO₂ for the last 7/30/90 **complete local calendar days**, plus vehicle-scoped home-energy efficiency and actual home running cost from complete charge-to-next-plug-in intervals. The UI shows the matched energy and interval count so these narrower metrics are not confused with whole-account totals. Daily charts include period-over-period deltas and CSV export; DST days follow `TIMEZONE` rather than assuming every day is 24 hours.
 4. **Recent sessions** *(when Postgres is enabled)* — the last plug-ins with SOC, target, top-up and odometer, with a CSV/JSON export of the full history.
-   Each row expands to show that session's **charge curve** — battery SOC climbing and the charge draw over time, from the per-poll telemetry.
+   Each row expands into a **session audit**: measured energy/cost and reconciliation, lifecycle events, schedule revisions, tariff-priced intervals, and the SOC/power charge curve. Missing evidence stays explicitly unavailable rather than being estimated.
 5. **Agile prices** *(when Octopus is configured)* — the current price and cheapest upcoming slots.
 6. **House vs car** *(when Octopus consumption + Postgres are configured)* — a stacked half-hourly chart of whole-house import split into car charging vs the rest of the household, with a day selector.
 
@@ -188,6 +189,7 @@ npm run build    # type-check + production build to dist/
 | `GET /api/sessions?limit=N` | Recent plug-in sessions from Postgres (N = 1–50; `enabled: false` when persistence is off) |
 | `GET /api/sessions/export?format=csv\|json` | Download the **full** plug-in history as a CSV or JSON attachment (404 when persistence is off) |
 | `GET /api/sessions/{id}/telemetry` | Per-poll charge curve (SOC + power over time) for one session (404 when the id is unknown; `enabled: false` when persistence is off) |
+| `GET /api/sessions/{id}/audit` | Typed session provenance: identity record, lifecycle events, schedule revisions and priced charging intervals (404 when persistence is off or the id is unknown) |
 | `GET /api/soh-history?limit=N` | Battery state-of-health readings over time, one point per change (N = 1–365; `enabled: false` when persistence is off) |
 | `GET /api/tariff` | Upcoming Octopus Agile rates + cheapest slots (`enabled: false` when unconfigured) |
 | `GET /api/energy-usage?date=YYYY-MM-DD` | A day's half-hourly whole-house import split into car vs rest-of-house + totals (default yesterday; `enabled: false` when unconfigured) |

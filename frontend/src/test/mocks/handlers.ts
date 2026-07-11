@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw';
-import { scheduleFixture, sessionsFixture, statisticsFixture, statusFixture } from '../fixtures';
+import { scheduleFixture, sessionAuditFixture, sessionsFixture, statisticsFixture, statusFixture } from '../fixtures';
 
 // Wildcard origin (`*/…`) so the handlers match the relative fetches regardless
 // of the jsdom base URL used by the test environment.
@@ -32,6 +32,10 @@ export const handlers = [
   }),
   http.get('*/api/schedule', () => HttpResponse.json(scheduleFixture)),
   http.get('*/api/sessions', () => HttpResponse.json(sessionsFixture)),
+  http.get('*/api/sessions/:id/audit', () => HttpResponse.json(sessionAuditFixture)),
+  http.get('*/api/sessions/:id/telemetry', () =>
+    HttpResponse.json({ enabled: true, points: [] }),
+  ),
   // SoH history off by default, so the trend card stays hidden in tests.
   http.get('*/api/soh-history', () => HttpResponse.json({ enabled: false, history: [] })),
   // Tariff feature off by default, so the card stays hidden in tests.
