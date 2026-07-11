@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api } from '../api/client';
 import type { SessionsResponse } from '../api/types';
 import { formatDateShort, formatTime } from '../utils/format';
-import { SessionChargeCurve } from './SessionChargeCurve';
+import { SessionAudit } from './SessionAudit';
 
 const ACTION_LABEL: Record<string, string> = {
   configured: 'Target set',
@@ -12,7 +12,7 @@ const ACTION_LABEL: Record<string, string> = {
 /**
  * Recent plug-in sessions from the Postgres history. Renders nothing at all
  * when persistence is disabled — the dashboard works without the feature. Each
- * row expands to show that session's charge curve (SOC + power over time).
+ * row expands to explain that session's measurements and provenance.
  */
 export function SessionsSection({ data }: { data: SessionsResponse }) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -69,7 +69,7 @@ export function SessionsSection({ data }: { data: SessionsResponse }) {
             if (s.vehicleName) extras.push(s.vehicleName);
             const detail = [battery, ...extras].filter(Boolean).join(' · ') || '—';
             return (
-              <div className="session-item" key={s.id}>
+              <div className="session-item" id={`session-${s.id}`} key={s.id}>
                 <button
                   type="button"
                   className={`session-row ${expanded ? 'expanded' : ''}`}
@@ -89,7 +89,7 @@ export function SessionsSection({ data }: { data: SessionsResponse }) {
                     {expanded ? '▾' : '▸'}
                   </span>
                 </button>
-                {expanded && <SessionChargeCurve sessionId={s.id} />}
+                {expanded && <SessionAudit sessionId={s.id} />}
               </div>
             );
           })}

@@ -322,6 +322,107 @@ async def get_all_sessions() -> Optional[list[dict[str, Any]]]:
         return None
 
 
+async def get_session_audit(session_id: int) -> Optional[dict[str, Any]]:
+    """Full provenance for one session: identity, events, schedules and pricing."""
+    if _pool is None:
+        return None
+    try:
+        async with _pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT id, session_key, plugged_in_at, unplugged_at, completed_at, "
+                "vehicle_name, vehicle_id, vin, charger_id, source_observed_at, "
+                "soc_percent, target_percent, end_soc_percent, topup_percent, action, "
+                "odometer_miles, soh_percent, actual_energy_wh, actual_cost_minor, "
+                "cost_currency, cost_method, tariff_coverage, reconstructed_energy_wh, "
+                "reconciliation_delta_wh, completion_reason, quality_status, updated_at "
+                "FROM charge_sessions WHERE id = %s",
+                (session_id,),
+            )
+            session = await cur.fetchone()
+            if not session:
+                return None
+            cur = await conn.execute(
+                "SELECT occurred_at, event_type, details FROM session_events "
+                "WHERE session_id = %s ORDER BY occurred_at",
+                (session_id,),
+            )
+            events = await cur.fetchall()
+            cur = await conn.execute(
+                "SELECT recorded_at, next_slot_start, next_slot_end, slots, revision, reason "
+                "FROM schedule_snapshots WHERE session_id = %s ORDER BY revision, recorded_at",
+                (session_id,),
+            )
+            schedules = await cur.fetchall()
+            cur = await conn.execute(
+                "SELECT interval_start, interval_end, energy_wh, cost_minor, "
+                "rate_minor_per_kwh, currency, quality_status, source "
+                "FROM charging_intervals WHERE session_id = %s ORDER BY interval_start",
+                (session_id,),
+            )
+            intervals = await cur.fetchall()
+        return {
+            "session": {
+                "id": session[0],
+                "sessionKey": session[1],
+                "pluggedInAt": session[2],
+                "unpluggedAt": session[3],
+                "completedAt": session[4],
+                "vehicleName": session[5],
+                "vehicleId": session[6],
+                "vin": session[7],
+                "chargerId": session[8],
+                "sourceObservedAt": session[9],
+                "socPercent": session[10],
+                "targetPercent": session[11],
+                "endSocPercent": session[12],
+                "topupPercent": session[13],
+                "action": session[14],
+                "odometerMiles": session[15],
+                "sohPercent": session[16],
+                "actualEnergyWh": session[17],
+                "actualCostMinor": session[18],
+                "costCurrency": session[19],
+                "costMethod": session[20],
+                "tariffCoverage": session[21],
+                "reconstructedEnergyWh": session[22],
+                "reconciliationDeltaWh": session[23],
+                "completionReason": session[24],
+                "quality": session[25],
+                "updatedAt": session[26],
+            },
+            "events": [
+                {"at": row[0], "type": row[1], "details": row[2] or {}} for row in events
+            ],
+            "schedules": [
+                {
+                    "recordedAt": row[0],
+                    "nextSlotStart": row[1],
+                    "nextSlotEnd": row[2],
+                    "slots": row[3] or [],
+                    "revision": row[4],
+                    "reason": row[5],
+                }
+                for row in schedules
+            ],
+            "intervals": [
+                {
+                    "start": row[0],
+                    "end": row[1],
+                    "energyWh": row[2],
+                    "costMinor": row[3],
+                    "rateMinorPerKwh": float(row[4]) if row[4] is not None else None,
+                    "currency": row[5],
+                    "quality": row[6],
+                    "source": row[7],
+                }
+                for row in intervals
+            ],
+        }
+    except Exception:
+        logger.warning("Failed to read session audit from Postgres", exc_info=True)
+        return None
+
+
 async def get_soh_history(limit: int) -> Optional[list[dict[str, Any]]]:
     """Battery state-of-health readings over time, oldest first, for the trend.
 

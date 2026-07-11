@@ -50,7 +50,7 @@ describe('SessionsSection', () => {
     expect(screen.queryByRole('link', { name: /export/i })).not.toBeInTheDocument();
   });
 
-  it('expands a row to show its charge curve on click', async () => {
+  it('expands a row to show its audit and charge curve on click', async () => {
     server.use(
       http.get('*/api/sessions/3/telemetry', () =>
         HttpResponse.json({
@@ -68,6 +68,8 @@ describe('SessionsSection', () => {
     await userEvent.click(row);
 
     await waitFor(() => expect(screen.getByText(/battery %/i)).toBeInTheDocument());
+    expect(screen.getByText(/measured energy/i)).toBeInTheDocument();
+    expect(screen.getByText(/lifecycle/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { expanded: true })).toBeInTheDocument();
   });
 });

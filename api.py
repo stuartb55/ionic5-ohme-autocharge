@@ -945,6 +945,69 @@ class DataQualityResponseModel(BaseModel):
     statisticsCache: StatisticsCacheQualityModel
 
 
+class SessionAuditRecordModel(BaseModel):
+    id: int
+    sessionKey: Optional[str]
+    pluggedInAt: datetime.datetime
+    unpluggedAt: Optional[datetime.datetime]
+    completedAt: Optional[datetime.datetime]
+    vehicleName: Optional[str]
+    vehicleId: Optional[str]
+    vin: Optional[str]
+    chargerId: Optional[str]
+    sourceObservedAt: Optional[datetime.datetime]
+    socPercent: Optional[int]
+    targetPercent: Optional[int]
+    endSocPercent: Optional[int]
+    topupPercent: Optional[int]
+    action: Optional[str]
+    odometerMiles: Optional[int]
+    sohPercent: Optional[int]
+    actualEnergyWh: Optional[int]
+    actualCostMinor: Optional[int]
+    costCurrency: Optional[str]
+    costMethod: Optional[str]
+    tariffCoverage: Optional[float]
+    reconstructedEnergyWh: Optional[int]
+    reconciliationDeltaWh: Optional[int]
+    completionReason: Optional[str]
+    quality: str
+    updatedAt: datetime.datetime
+
+
+class SessionAuditEventModel(BaseModel):
+    at: datetime.datetime
+    type: str
+    details: dict[str, Any]
+
+
+class SessionAuditScheduleModel(BaseModel):
+    recordedAt: datetime.datetime
+    nextSlotStart: Optional[datetime.datetime]
+    nextSlotEnd: Optional[datetime.datetime]
+    slots: list[dict[str, Any]]
+    revision: int
+    reason: str
+
+
+class SessionAuditIntervalModel(BaseModel):
+    start: datetime.datetime
+    end: datetime.datetime
+    energyWh: int
+    costMinor: Optional[int]
+    rateMinorPerKwh: Optional[float]
+    currency: Optional[str]
+    quality: str
+    source: str
+
+
+class SessionAuditResponseModel(BaseModel):
+    session: SessionAuditRecordModel
+    events: list[SessionAuditEventModel]
+    schedules: list[SessionAuditScheduleModel]
+    intervals: list[SessionAuditIntervalModel]
+
+
 async def _reapply_target_if_connected() -> bool:
     """Push the current effective target/ready-by to Ohme if the car is plugged in.
 
@@ -1410,6 +1473,17 @@ async def get_session_telemetry(session_id: int) -> JSONResponse:
     if points is None:
         raise HTTPException(status_code=404, detail="Unknown session")
     return JSONResponse({"enabled": True, "points": points})
+
+
+@app.get("/api/sessions/{session_id}/audit", response_model=SessionAuditResponseModel)
+async def get_session_audit(session_id: int) -> SessionAuditResponseModel:
+    """Identity, lifecycle, schedule revisions and measured tariff intervals."""
+    if not db.is_enabled():
+        raise HTTPException(status_code=404, detail="History persistence is disabled")
+    audit = await db.get_session_audit(session_id)
+    if audit is None:
+        raise HTTPException(status_code=404, detail="Unknown session")
+    return SessionAuditResponseModel.model_validate(audit)
 
 
 @app.get("/api/soh-history")

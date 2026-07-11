@@ -66,6 +66,18 @@ class _FakeConn:
         return self._cursor
 
 
+class _SequenceConn(_FakeConn):
+    """Connection returning a different result cursor for each query."""
+
+    def __init__(self, cursors):
+        super().__init__(cursors[0])
+        self._cursors = iter(cursors)
+
+    async def execute(self, sql, params=None):
+        self.executed.append((sql, params))
+        return next(self._cursors)
+
+
 class _FakeConnCtx:
     def __init__(self, conn):
         self._conn = conn
@@ -275,6 +287,57 @@ async def test_get_all_sessions_orders_chronologically_unbounded(fake_pool):
 async def test_get_all_sessions_none_when_disabled():
     db._pool = None
     assert await db.get_all_sessions() is None
+
+
+async def test_get_session_audit_maps_all_provenance():
+    observed = dt.datetime(2026, 6, 1, 20, 0, tzinfo=dt.timezone.utc)
+    finished = observed + dt.timedelta(hours=3)
+    session = (
+        7, "session-7", observed, finished, finished, "IONIQ 5", "car-1", "VIN1",
+        "charger-1", observed, 50, 80, 80, 30, "configured", 12000, 98, 18500,
+        123, "GBP", "actual_agile", 1.0, 18450, 50, "finished", "reconciled",
+        finished,
+    )
+    conn = _SequenceConn([
+        _FakeCursor(row=session),
+        _FakeCursor(rows=[(observed, "plugged_in", {"soc_percent": 50})]),
+        _FakeCursor(rows=[(observed, observed, observed + dt.timedelta(minutes=30),
+                           [{"energy": 3.7}], 1, "initial")]),
+        _FakeCursor(rows=[(observed, observed + dt.timedelta(minutes=30), 3700, 25,
+                           6.75, "GBP", "measured", "ohme_counter")]),
+    ])
+    db._pool = _FakePool(conn)
+    try:
+        audit = await db.get_session_audit(7)
+    finally:
+        db._pool = None
+
+    assert all(params == (7,) for _, params in conn.executed)
+    assert audit["session"]["sessionKey"] == "session-7"
+    assert audit["session"]["actualEnergyWh"] == 18500
+    assert audit["events"] == [
+        {"at": observed, "type": "plugged_in", "details": {"soc_percent": 50}}
+    ]
+    assert audit["schedules"][0]["revision"] == 1
+    assert audit["intervals"][0] == {
+        "start": observed,
+        "end": observed + dt.timedelta(minutes=30),
+        "energyWh": 3700,
+        "costMinor": 25,
+        "rateMinorPerKwh": 6.75,
+        "currency": "GBP",
+        "quality": "measured",
+        "source": "ohme_counter",
+    }
+
+
+async def test_get_session_audit_none_for_unknown_or_disabled():
+    db._pool = _FakePool(_FakeConn(_FakeCursor(row=None)))
+    try:
+        assert await db.get_session_audit(999) is None
+    finally:
+        db._pool = None
+    assert await db.get_session_audit(1) is None
 
 
 async def test_get_session_telemetry_maps_points(fake_pool):
