@@ -583,6 +583,63 @@ async def record_daily_stats(daily: list[dict[str, Any]], currency: Optional[str
         logger.warning("Failed to record daily stats to Postgres", exc_info=True)
 
 
+async def get_monthly_report_rows(
+    start: datetime.datetime, end: datetime.datetime
+) -> Optional[dict[str, list[dict[str, Any]]]]:
+    """Exact persisted account-day and home-session evidence for ``[start, end)``."""
+    if _pool is None:
+        return None
+    try:
+        async with _pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT stat_date, energy_wh, savings_minor, cost_minor, currency, "
+                "source, is_complete, updated_at FROM daily_stats "
+                "WHERE stat_date >= %s AND stat_date < %s ORDER BY stat_date",
+                (start.date(), end.date()),
+            )
+            daily_rows = await cur.fetchall()
+            cur = await conn.execute(
+                "SELECT id, plugged_in_at, completed_at, actual_energy_wh, "
+                "actual_cost_minor, cost_currency, quality_status, vehicle_name, action "
+                "FROM charge_sessions WHERE plugged_in_at >= %s AND plugged_in_at < %s "
+                "ORDER BY plugged_in_at",
+                (start, end),
+            )
+            session_rows = await cur.fetchall()
+        return {
+            "daily": [
+                {
+                    "date": row[0],
+                    "energyWh": row[1],
+                    "savingsMinor": row[2],
+                    "costMinor": row[3],
+                    "currency": row[4],
+                    "source": row[5],
+                    "isComplete": row[6],
+                    "updatedAt": row[7],
+                }
+                for row in daily_rows
+            ],
+            "sessions": [
+                {
+                    "id": row[0],
+                    "pluggedInAt": row[1],
+                    "completedAt": row[2],
+                    "actualEnergyWh": row[3],
+                    "actualCostMinor": row[4],
+                    "currency": row[5],
+                    "quality": row[6],
+                    "vehicleName": row[7],
+                    "action": row[8],
+                }
+                for row in session_rows
+            ],
+        }
+    except Exception:
+        logger.warning("Failed to read monthly report evidence", exc_info=True)
+        return None
+
+
 async def get_single_vehicle_id() -> Optional[str]:
     """Return the sole persisted vehicle id, or None when ambiguous/unavailable."""
     if _pool is None:

@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { StatisticsResponse } from '../api/types';
@@ -113,5 +113,24 @@ describe('StatisticsSection CSV export', () => {
 
     clickSpy.mockRestore();
     vi.unstubAllGlobals();
+  });
+});
+
+describe('StatisticsSection monthly report', () => {
+  it('offers CSV and JSON evidence reports for a selected calendar month', async () => {
+    renderSection();
+    await userEvent.click(screen.getByText(/monthly report/i));
+
+    const month = screen.getByLabelText(/monthly report month/i);
+    expect(month).toHaveValue('2026-05');
+    fireEvent.change(month, { target: { value: '2026-04' } });
+
+    expect(screen.getByRole('link', { name: /download csv/i })).toHaveAttribute(
+      'href', expect.stringContaining('month=2026-04&format=csv'),
+    );
+    expect(screen.getByRole('link', { name: /^json$/i })).toHaveAttribute(
+      'href', expect.stringContaining('month=2026-04&format=json'),
+    );
+    expect(screen.getByText(/explicit coverage and quality/i)).toBeInTheDocument();
   });
 });

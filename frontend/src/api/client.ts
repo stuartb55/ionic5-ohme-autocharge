@@ -172,4 +172,6 @@ export const api = {
   // fetch — point an <a download> at it.
   sessionsExportUrl: (format: 'csv' | 'json') =>
     `${API_BASE}/api/sessions/export?format=${format}`,
+  monthlyReportUrl: (month: string, format: 'csv' | 'json') =>
+    `${API_BASE}/api/reports/monthly?month=${encodeURIComponent(month)}&format=${format}`,
 };

@@ -27,6 +27,7 @@ When the car is plugged in, the app reads the real battery state-of-charge from 
 - **History & Grafana** *(optional)* — per-session and telemetry data persisted to Postgres.
 - **Data-quality dashboard** *(needs Postgres)* — shows missing measured energy/cost, session-linkage problems, uncertain attribution, ingestion freshness and statistics-cache age, with a direct path to session records needing review.
 - **Session audit view** *(needs Postgres)* — expands each history row into measured energy/cost, reconciliation quality, lifecycle events, schedule revisions, priced tariff intervals and the charge curve.
+- **Monthly evidence reports** *(needs Postgres)* — download JSON or spreadsheet-friendly CSV for any local calendar month, keeping account totals and measured home-session figures separate with explicit coverage and missing-data counts.
 - **Battery health trend** *(needs Postgres)* — a state-of-health sparkline on the dashboard showing degradation over time, not just the current figure.
 - **Installable PWA** — add to your phone/desktop home screen; works offline (app shell cached).
 
@@ -155,7 +156,7 @@ A React + TypeScript single-page app (in `frontend/`) served by a hardened, non-
 
 1. **Vehicle & charger status** — a state-of-charge ring with target marker; driving range, battery health (SoH), lock status + a "view location" link, and vehicle-health chips (12V battery, tyre/washer/key warnings, anything left open); connection state; live charge rate (kW / A); energy added and an estimated session cost. Controls: **target** stepper, **ready-by** time, **per-day targets**, a one-session **trip charge**, configurable **notifications**, **pause/resume**, and **max-charge (boost)**.
 2. **Schedule** — a timeline of the allocated charging slots (active vs paused / off-peak windows) plus a slot-by-slot breakdown.
-3. **Statistics & savings** — account-wide Ohme energy, savings and CO₂ for the last 7/30/90 **complete local calendar days**, plus vehicle-scoped home-energy efficiency and actual home running cost from complete charge-to-next-plug-in intervals. The UI shows the matched energy and interval count so these narrower metrics are not confused with whole-account totals. Daily charts include period-over-period deltas and CSV export; DST days follow `TIMEZONE` rather than assuming every day is 24 hours.
+3. **Statistics & savings** — account-wide Ohme energy, savings and CO₂ for the last 7/30/90 **complete local calendar days**, plus vehicle-scoped home-energy efficiency and actual home running cost from complete charge-to-next-plug-in intervals. The UI shows the matched energy and interval count so these narrower metrics are not confused with whole-account totals. Daily charts include period-over-period deltas and CSV export; a month picker downloads auditable monthly JSON/CSV reports. DST days follow `TIMEZONE` rather than assuming every day is 24 hours.
 4. **Recent sessions** *(when Postgres is enabled)* — the last plug-ins with SOC, target, top-up and odometer, with a CSV/JSON export of the full history.
    Each row expands into a **session audit**: measured energy/cost and reconciliation, lifecycle events, schedule revisions, tariff-priced intervals, and the SOC/power charge curve. Missing evidence stays explicitly unavailable rather than being estimated.
 5. **Agile prices** *(when Octopus is configured)* — the current price and cheapest upcoming slots.
@@ -183,6 +184,7 @@ npm run build    # type-check + production build to dist/
 |---|---|
 | `GET /api/health` | Liveness probe (503 if the poll loop has died) |
 | `GET /api/data-quality` | Read-only persistence completeness counters, ingestion freshness, and statistics-cache age for monitoring |
+| `GET /api/reports/monthly?month=YYYY-MM&format=json\|csv` | Calendar-month persisted account/day and measured home-session evidence; defaults to the previous month (404 when persistence is off) |
 | `GET /api/version` | Build git SHA (`dev` when unset) |
 | `GET /api/status` | Vehicle SOC, range, SoH, lock/location, health (12V battery, tyre/washer/key warnings, anything left open), connection, charge rate, target, session energy + estimated cost, ready-by, per-day targets |
 | `GET /api/schedule` | Allocated charge slots + next slot times |

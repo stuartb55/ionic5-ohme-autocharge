@@ -988,6 +988,38 @@ body {
   gap: 0.5rem 1rem;
   margin: -0.25rem 0 1rem;
 }
+.monthly-report {
+  margin: -0.25rem 0 var(--space-4);
+}
+.monthly-report summary {
+  width: fit-content;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.monthly-report-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 var(--space-2);
+}
+.monthly-report-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+.monthly-report-controls input {
+  min-height: 40px;
+  padding: 6px 8px;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
 
 .stats-context details { position: relative; }
 .stats-context summary { cursor: pointer; }

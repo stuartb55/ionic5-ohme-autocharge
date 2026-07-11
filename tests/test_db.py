@@ -640,6 +640,38 @@ async def test_record_daily_stats_all_dateless_is_noop(fake_pool):
     assert cursor.executemany_calls == []
 
 
+async def test_get_monthly_report_rows_maps_exact_units_and_sessions():
+    start = dt.datetime(2026, 6, 1, tzinfo=dt.timezone.utc)
+    end = dt.datetime(2026, 7, 1, tzinfo=dt.timezone.utc)
+    updated = start + dt.timedelta(days=2)
+    conn = _SequenceConn([
+        _FakeCursor(rows=[
+            (dt.date(2026, 6, 1), 4200, 80, 50, "GBP", "ohme_summary", True, updated),
+        ]),
+        _FakeCursor(rows=[
+            (7, start, updated, 4100, 49, "GBP", "reconciled", "IONIQ 5", "configured"),
+        ]),
+    ])
+    db._pool = _FakePool(conn)
+    try:
+        report = await db.get_monthly_report_rows(start, end)
+    finally:
+        db._pool = None
+
+    assert conn.executed[0][1] == (start.date(), end.date())
+    assert conn.executed[1][1] == (start, end)
+    assert report["daily"][0]["energyWh"] == 4200
+    assert report["daily"][0]["isComplete"] is True
+    assert report["sessions"][0]["actualCostMinor"] == 49
+    assert report["sessions"][0]["action"] == "configured"
+
+
+async def test_get_monthly_report_rows_none_when_disabled():
+    db._pool = None
+    now = dt.datetime.now(dt.timezone.utc)
+    assert await db.get_monthly_report_rows(now, now) is None
+
+
 # --- grid consumption ------------------------------------------------------------
 
 
