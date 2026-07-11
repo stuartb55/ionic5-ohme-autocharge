@@ -189,12 +189,12 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
 
       <div className="stat-cards">
         <StatCard
-          label="Energy charged"
-          value={formatKwh(totals.energyKwh)}
-          delta={prev && <DeltaBadge current={totals.energyKwh} previous={prev.energyKwh} goodWhen="neutral" />}
+          label="Total cost"
+          value={formatMoney(totals.costTotal, currency)}
+          delta={prev && <DeltaBadge current={totals.costTotal} previous={prev.costTotal} goodWhen="down" />}
         />
         <StatCard
-          label="Saved vs standard tariff"
+          label="Saved vs standard"
           value={formatMoney(totals.savingsVsStandard, currency)}
           highlight
           delta={
@@ -203,48 +203,53 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
             )
           }
         />
-        <StatCard label="Avg. price / kWh" value={formatPricePerKwh(totals.averageKwhPrice, currency)} />
-        <StatCard label="CO₂ saved vs petrol" value={`${totals.carbonSavedKgVsGasCar} kg`} />
+        <StatCard
+          label="Energy charged"
+          value={formatKwh(totals.energyKwh)}
+          delta={prev && <DeltaBadge current={totals.energyKwh} previous={prev.energyKwh} goodWhen="neutral" />}
+        />
       </div>
 
-      <p className="eyebrow insights-eyebrow">Breakdowns</p>
-      <div className="insights" aria-label="Derived insights">
-        <Insight
-          label="Charging days"
-          value={`${insights.chargingDays}`}
-          sub={`of ${insights.totalDays} days`}
-        />
-        <Insight label="Avg / charging day" value={formatKwh(insights.avgPerChargingDay)} />
-        <Insight
-          label="Best day"
-          value={insights.bestDay ? formatKwh(insights.bestDay.energyKwh) : '—'}
-          sub={insights.bestDay ? formatDateShort(insights.bestDay.date) : undefined}
-        />
-        {insights.efficiencyIsReal && (
+      <details className="analytics-details">
+        <summary>More performance insights</summary>
+        <div className="secondary-stat-cards">
+          <StatCard label="Avg. price / kWh" value={formatPricePerKwh(totals.averageKwhPrice, currency)} />
+          <StatCard label="CO₂ saved vs petrol" value={`${totals.carbonSavedKgVsGasCar} kg`} />
+        </div>
+        <p className="eyebrow insights-eyebrow">Breakdowns</p>
+        <div className="insights" aria-label="Derived insights">
           <Insight
-            label="Home-energy efficiency"
-            value={`${insights.milesPerKwh} mi/kWh`}
-            sub={`${insights.matchedEnergyKwh} kWh across ${insights.efficiencyIntervalCount} matched intervals`}
+            label="Charging days"
+            value={`${insights.chargingDays}`}
+            sub={`of ${insights.totalDays} days`}
           />
-        )}
-        {insights.costPerMile != null && (
+          <Insight label="Avg / charging day" value={formatKwh(insights.avgPerChargingDay)} />
           <Insight
-            label="Actual home running cost"
-            value={`${formatPricePerMile(insights.costPerMile, currency)} / mi`}
-            sub={`${insights.costIntervalCount} matched intervals`}
+            label="Best day"
+            value={insights.bestDay ? formatKwh(insights.bestDay.energyKwh) : '—'}
+            sub={insights.bestDay ? formatDateShort(insights.bestDay.date) : undefined}
           />
-        )}
-        <Insight
-          label={insights.efficiencyIsReal ? 'Matched distance' : 'Est. range added'}
-          value={`${Math.round(insights.estimatedMiles)} mi`}
-          sub={insights.efficiencyIsReal ? 'after matched home charges' : `@ ${insights.milesPerKwh} mi/kWh assumed`}
-        />
-        <Insight
-          label="Total cost"
-          value={formatMoney(totals.costTotal, currency)}
-          sub={prev && <DeltaBadge current={totals.costTotal} previous={prev.costTotal} goodWhen="down" />}
-        />
-      </div>
+          {insights.efficiencyIsReal && (
+            <Insight
+              label="Home-energy efficiency"
+              value={`${insights.milesPerKwh} mi/kWh`}
+              sub={`${insights.matchedEnergyKwh} kWh across ${insights.efficiencyIntervalCount} matched intervals`}
+            />
+          )}
+          {insights.costPerMile != null && (
+            <Insight
+              label="Actual home running cost"
+              value={`${formatPricePerMile(insights.costPerMile, currency)} / mi`}
+              sub={`${insights.costIntervalCount} matched intervals`}
+            />
+          )}
+          <Insight
+            label={insights.efficiencyIsReal ? 'Matched distance' : 'Est. range added'}
+            value={`${Math.round(insights.estimatedMiles)} mi`}
+            sub={insights.efficiencyIsReal ? 'after matched home charges' : `@ ${insights.milesPerKwh} mi/kWh assumed`}
+          />
+        </div>
+      </details>
 
       <header className="chart-header">
         <h3 className="chart-title">{CHART_TITLE[metric]}</h3>

@@ -1099,9 +1099,30 @@ body {
 /* --- statistics --- */
 .stat-cards {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: var(--space-4);
   margin-bottom: var(--space-5);
+}
+.secondary-stat-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+.analytics-details {
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--space-5);
+  padding-bottom: var(--space-4);
+}
+.analytics-details > summary,
+.chart-data > summary {
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 650;
+  min-height: 44px;
+  padding: var(--space-3) 0;
+  width: fit-content;
 }
 
 .stats-context {
@@ -1297,6 +1318,13 @@ a.ghost-button {
 .barchart .axis { font-size: 10px; fill: var(--text-subtle); }
 .barchart .avg-line line { stroke: var(--text-subtle); stroke-width: 1; opacity: 0.7; }
 .barchart .avg-label { font-size: 10px; fill: var(--text-muted); font-weight: 600; }
+.chart-data { margin-top: var(--space-2); }
+.chart-data-wrap { max-height: 280px; overflow: auto; }
+.chart-data table { border-collapse: collapse; font-size: 0.82rem; width: 100%; }
+.chart-data caption { font-weight: 650; padding: var(--space-2); text-align: left; }
+.chart-data th,
+.chart-data td { border-bottom: 1px solid var(--border); padding: var(--space-2); text-align: left; }
+.chart-data th { color: var(--text-muted); font-size: 0.72rem; text-transform: uppercase; }
 
 /* Household-vs-car energy card */
 .day-nav { display: inline-flex; align-items: center; gap: 8px; }
@@ -1520,7 +1548,7 @@ a.ghost-button {
   .settings-primary { grid-template-columns: 1fr; }
 }
 @media (max-width: 460px) {
-  .stat-cards, .tiles, .insights { grid-template-columns: 1fr 1fr; }
+  .stat-cards, .tiles, .insights, .secondary-stat-cards { grid-template-columns: 1fr; }
   .quality-grid { grid-template-columns: 1fr; }
   .day-chips { grid-template-columns: 1fr; }
   .day-chip { flex-direction: row; justify-content: space-between; padding: var(--space-2) var(--space-3); }
@@ -1528,6 +1556,20 @@ a.ghost-button {
   .card { padding: var(--space-4); }
   .status-message { font-size: 1rem; }
   .settings-summary { align-items: flex-start; text-align: left; }
+  .session-head { display: none; }
+  .session-row { align-items: stretch; grid-template-columns: 1fr auto; }
+  .session-row .time,
+  .session-row .detail,
+  .session-row .session-action { display: grid; gap: 2px; grid-column: 1; }
+  .session-row [data-label]::before {
+    color: var(--text-subtle);
+    content: attr(data-label);
+    font-size: 0.65rem;
+    font-weight: 650;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .session-chevron { align-self: center; grid-column: 2; grid-row: 1 / span 3; }
 }
 
 /* --- battery health trend --- */

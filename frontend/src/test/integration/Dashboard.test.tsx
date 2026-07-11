@@ -22,7 +22,7 @@ describe('Dashboard integration', () => {
     expect(screen.getByLabelText(/charge plan summary/i)).toHaveTextContent(/22\.2 kWh/i);
 
     // Section 3: statistics
-    expect(await screen.findByText('Saved vs standard tariff')).toBeInTheDocument();
+    expect(await screen.findByText('Saved vs standard')).toBeInTheDocument();
     expect(screen.getByText('42.0 kWh')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: /daily energy bar chart/i })).toBeInTheDocument();
   });
@@ -38,7 +38,7 @@ describe('Dashboard integration', () => {
     );
 
     render(<Dashboard />);
-    await screen.findByText('Saved vs standard tariff');
+    await screen.findByText('Saved vs standard');
 
     const ranges = screen.getByRole('group', { name: /time range/i });
     await userEvent.click(within(ranges).getByRole('button', { name: '30d' }));

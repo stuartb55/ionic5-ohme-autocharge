@@ -88,6 +88,25 @@ export function EnergyBarChart({ daily, metric, currency, title }: Props) {
           </g>
         )}
       </svg>
+      <details className="chart-data">
+        <summary>View chart data</summary>
+        <div className="chart-data-wrap">
+          <table>
+            <caption>{title}</caption>
+            <thead>
+              <tr><th scope="col">Date</th><th scope="col">Value</th></tr>
+            </thead>
+            <tbody>
+              {daily.map((day, index) => (
+                <tr key={day.date ?? index}>
+                  <td>{formatDateShort(day.date)}</td>
+                  <td>{formatMetric(day[metric] ?? 0, metric, currency)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
     </div>
   );
 }
