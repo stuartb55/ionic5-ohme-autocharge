@@ -43,6 +43,10 @@ def load_persisted_settings() -> None:
     if day_targets:
         store.set_day_targets(day_targets)
         logger.info("Loaded persisted per-weekday targets: %s", day_targets)
+    trip_mode = settings.load_trip_mode()
+    if trip_mode is not None:
+        store.set_trip_mode(*trip_mode)
+        logger.info("Loaded pending trip mode: target=%s%% ready_by=%s", *trip_mode)
     vehicle_id = settings.load_vehicle_id()
     if vehicle_id is not None:
         store.set_vehicle_id(vehicle_id)
@@ -104,7 +108,11 @@ async def handle_plugin_event(
             )
             store.active_session_id = session_id
             store.active_session_key = session_key
-            await db.record_session_event(session_id, "skipped_at_target", {"soc": soc, "target": target})
+            await db.record_session_event(
+                session_id,
+                "skipped_at_target",
+                {"soc": soc, "target": target, "tripMode": store.trip_mode_enabled},
+            )
         store.plugin_failure_notified = False
         return True
 
@@ -134,8 +142,10 @@ async def handle_plugin_event(
         # Multi-line body so each fact is on its own line — far easier to scan on
         # a phone than one run-on sentence. The vehicle name goes in the title.
         lines = [f"Charging {soc}% → {target}%"]
-        if store.ready_by:
-            lines.append(f"Ready by {store.ready_by}")
+        if store.effective_ready_by:
+            lines.append(f"Ready by {store.effective_ready_by}")
+        if store.trip_mode_enabled:
+            lines.append("One-time trip charge")
         schedule = ", ".join(str(s) for s in slots)
         if schedule:
             lines.append(f"Schedule: {schedule}")
@@ -160,7 +170,11 @@ async def handle_plugin_event(
             )
             store.active_session_id = session_id
             store.active_session_key = session_key
-            await db.record_session_event(session_id, "target_configured", {"soc": soc, "target": target})
+            await db.record_session_event(
+                session_id,
+                "target_configured",
+                {"soc": soc, "target": target, "tripMode": store.trip_mode_enabled},
+            )
             await db.record_schedule(
                 session_id=session_id,
                 slots=[s.to_dict() for s in slots],
@@ -275,6 +289,14 @@ class PlugInDetector:
                 actual_energy_wh=float(raw_energy) if isinstance(raw_energy, (int, float)) else None,
                 end_soc_percent=store.last_soc,
             )
+            if store.trip_mode_enabled:
+                await db.record_session_event(
+                    store.active_session_id,
+                    "trip_mode_consumed",
+                    {"target": store.trip_target, "readyBy": store.trip_ready_by},
+                )
+                settings.clear_trip_mode()
+                store.clear_trip_mode()
             self.session_handled = False
             # Clear the persisted marker so the next plug-in is handled afresh.
             settings.clear_session_marker()

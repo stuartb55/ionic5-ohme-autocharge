@@ -806,6 +806,14 @@ class DayTargetsUpdate(BaseModel):
         return value
 
 
+class TripModeUpdate(BaseModel):
+    """Enable/update or cancel a one-physical-session charge override."""
+
+    enabled: bool
+    targetPercent: int = Field(default=100, ge=settings.TARGET_MIN, le=settings.TARGET_MAX)
+    readyBy: Optional[str] = Field(default=None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
+
+
 class VehicleUpdate(BaseModel):
     """Request body for PUT /api/settings/vehicle (null selects the first vehicle)."""
 
@@ -1008,11 +1016,11 @@ class SessionAuditResponseModel(BaseModel):
     intervals: list[SessionAuditIntervalModel]
 
 
-async def _reapply_target_if_connected() -> bool:
+async def _reapply_target_if_connected(*, allow_zero_topup: bool = False) -> bool:
     """Push the current effective target/ready-by to Ohme if the car is plugged in.
 
-    Reads ``store.effective_target`` (and ``store.ready_by``) so any settings
-    change — base target, per-weekday override, or ready-by — re-plans the active
+    Reads the effective target and ready-by so any settings change — base,
+    weekday, trip, or departure time — re-plans the active
     session. Returns True only if Ohme was reconfigured. Best-effort: failure
     here doesn't fail the request; the settings still apply on the next plug-in.
     """
@@ -1035,7 +1043,7 @@ async def _reapply_target_if_connected() -> bool:
             exc_info=True,
         )
         soc = store.last_soc
-    if soc is None or soc >= target:
+    if soc is None or (soc >= target and not allow_zero_topup):
         await db.record_session_event(
             store.active_session_id,
             "target_reapply_skipped",
@@ -1053,7 +1061,12 @@ async def _reapply_target_if_connected() -> bool:
         await db.record_session_event(
             store.active_session_id,
             "target_reapplied",
-            {"soc": soc, "target": target, "readyBy": store.ready_by},
+            {
+                "soc": soc,
+                "target": target,
+                "readyBy": store.effective_ready_by,
+                "tripMode": store.trip_mode_enabled,
+            },
         )
         await db.record_schedule(
             session_id=store.active_session_id,
@@ -1193,6 +1206,38 @@ async def set_day_targets(update: DayTargetsUpdate) -> JSONResponse:
     )
 
 
+@app.put("/api/settings/trip-mode")
+async def set_trip_mode(update: TripModeUpdate) -> JSONResponse:
+    """Set a durable override that is automatically consumed on unplug."""
+    if update.enabled:
+        store.set_trip_mode(update.targetPercent, update.readyBy)
+        persisted = settings.save_trip_mode(update.targetPercent, update.readyBy)
+    else:
+        store.clear_trip_mode()
+        persisted = settings.clear_trip_mode()
+    # Cancelling while connected must send a zero top-up when the normal target
+    # is already reached; otherwise Ohme could retain the old trip schedule.
+    applied = await _reapply_target_if_connected(allow_zero_topup=not update.enabled)
+    _reflect_effective_target()
+    logger.info(
+        "Trip mode %s (target=%s%% ready_by=%s persisted=%s applied=%s)",
+        "enabled" if update.enabled else "cancelled",
+        update.targetPercent,
+        update.readyBy,
+        persisted,
+        applied,
+    )
+    return JSONResponse(
+        {
+            "enabled": store.trip_mode_enabled,
+            "targetPercent": store.trip_target,
+            "readyBy": store.trip_ready_by,
+            "persisted": persisted,
+            "applied": applied,
+        }
+    )
+
+
 @app.get("/api/vehicles")
 async def get_vehicles() -> JSONResponse:
     """List the Hyundai vehicles on the account, with the selected one flagged.
@@ -1283,6 +1328,11 @@ async def get_status() -> JSONResponse:
             # Per-weekday target overrides {"0".."6": percent}; empty when none.
             # charger.targetPercent reflects today's effective target.
             "dayTargets": {str(d): p for d, p in store.day_targets.items()},
+            "tripMode": {
+                "enabled": store.trip_mode_enabled,
+                "targetPercent": store.trip_target,
+                "readyBy": store.trip_ready_by,
+            },
         },
         "updatedAt": store.status.updated_at,
         "ready": store.ready,

@@ -16,6 +16,7 @@ When the car is plugged in, the app reads the real battery state-of-charge from 
 - **Charge controls** — adjust the target, pause/resume, toggle max-charge ("boost"), and force a live refresh.
 - **Ready-by time** — finish charging by a chosen time (auto-populates from Ohme's own configured time).
 - **Per-weekday targets** — e.g. 80% on weekdays, 100% before the weekend, applied automatically at plug-in.
+- **One-time trip charge** — temporarily raise the target and optionally set a departure time for the current or next session; the override survives restarts and clears automatically on unplug.
 - **Live SOC while charging** — the ring climbs through the session (re-reads Bluelink on a slow cadence; never wakes the car).
 - **Multi-vehicle** — pick which car on the Hyundai account to track.
 - **Vehicle health** — read-only 12V auxiliary battery level plus the car's own tyre-pressure, washer-fluid and key-fob-battery warnings and anything left open (door/bonnet/boot), shown on the dashboard with an optional ntfy when a warning first appears.
@@ -152,7 +153,7 @@ uvicorn api:app --host 0.0.0.0 --port 8000   # web API + poll loop (docs at /doc
 
 A React + TypeScript single-page app (in `frontend/`) served by a hardened, non-root nginx image. It polls the backend and renders:
 
-1. **Vehicle & charger status** — a state-of-charge ring with target marker; driving range, battery health (SoH), lock status + a "view location" link, and vehicle-health chips (12V battery, tyre/washer/key warnings, anything left open); connection state; live charge rate (kW / A); energy added and an estimated session cost. Controls: **target** stepper, **ready-by** time, **per-day targets** (in a collapsible), **pause/resume**, and **max-charge (boost)**.
+1. **Vehicle & charger status** — a state-of-charge ring with target marker; driving range, battery health (SoH), lock status + a "view location" link, and vehicle-health chips (12V battery, tyre/washer/key warnings, anything left open); connection state; live charge rate (kW / A); energy added and an estimated session cost. Controls: **target** stepper, **ready-by** time, **per-day targets** (in a collapsible), a one-session **trip charge**, **pause/resume**, and **max-charge (boost)**.
 2. **Schedule** — a timeline of the allocated charging slots (active vs paused / off-peak windows) plus a slot-by-slot breakdown.
 3. **Statistics & savings** — account-wide Ohme energy, savings and CO₂ for the last 7/30/90 **complete local calendar days**, plus vehicle-scoped home-energy efficiency and actual home running cost from complete charge-to-next-plug-in intervals. The UI shows the matched energy and interval count so these narrower metrics are not confused with whole-account totals. Daily charts include period-over-period deltas and CSV export; DST days follow `TIMEZONE` rather than assuming every day is 24 hours.
 4. **Recent sessions** *(when Postgres is enabled)* — the last plug-ins with SOC, target, top-up and odometer, with a CSV/JSON export of the full history.
@@ -200,6 +201,7 @@ npm run build    # type-check + production build to dist/
 | `PUT /api/settings/target` | Set the charge target — `{"targetPercent": N}` |
 | `PUT /api/settings/ready-by` | Set/clear the ready-by time — `{"readyBy": "HH:MM"\|null}` |
 | `PUT /api/settings/day-targets` | Replace per-weekday overrides — `{"dayTargets": {"4": 100}}` |
+| `PUT /api/settings/trip-mode` | Enable/update or cancel the durable one-session override — `{"enabled": true, "targetPercent": 100, "readyBy": "06:30"}` |
 | `PUT /api/settings/vehicle` | Select the tracked vehicle — `{"vehicleId": "…"\|null}` |
 
 ## Notifications (ntfy)

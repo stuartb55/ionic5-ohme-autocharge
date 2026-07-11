@@ -47,6 +47,24 @@ describe('StatusSection projected finish', () => {
   });
 });
 
+describe('StatusSection trip mode', () => {
+  it('shows the active override and uses its target', () => {
+    const status: StatusResponse = {
+      ...statusFixture,
+      charger: { ...statusFixture.charger, targetPercent: 100 },
+      config: {
+        ...statusFixture.config,
+        tripMode: { enabled: true, targetPercent: 100, readyBy: '05:45' },
+      },
+    };
+    render(<StatusSection status={status} onSetTripMode={vi.fn()} />);
+
+    expect(screen.getByText(/trip mode active/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/trip target percent/i)).toHaveValue(100);
+    expect(screen.getByText(/clears automatically/i)).toBeInTheDocument();
+  });
+});
+
 describe('StatusSection projected cost', () => {
   function withCharger(overrides: Partial<StatusResponse['charger']>): StatusResponse {
     return { ...statusFixture, charger: { ...statusFixture.charger, ...overrides } };

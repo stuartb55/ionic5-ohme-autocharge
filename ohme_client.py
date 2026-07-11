@@ -52,7 +52,10 @@ async def set_target(
     # async_update_device_info must run first to populate _cars and serial (needed for internal API calls).
     await client.async_update_device_info()
     await client.async_get_charge_session()
-    topup = target_percent - current_soc
+    # A cancelled one-off override may restore a normal target that the battery
+    # has already reached. Ohme represents "stop here" as a zero top-up; never
+    # send a negative percentage to its internal API.
+    topup = max(0, target_percent - current_soc)
     await client.async_set_target(target_percent=topup, target_time=target_time)
     await client.async_get_charge_session()  # refresh so client.slots reflects the new schedule
     logger.info(

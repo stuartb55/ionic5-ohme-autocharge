@@ -75,6 +75,12 @@ export interface StatusResponse {
      * when none set. charger.targetPercent reflects today's effective target.
      */
     dayTargets: Record<string, number>;
+    /** One-session target/departure override, consumed when the car unplugs. */
+    tripMode: {
+      enabled: boolean;
+      targetPercent: number | null;
+      readyBy: string | null;
+    };
   };
   updatedAt: string | null;
   ready: boolean;
@@ -112,6 +118,14 @@ export interface ReadyByUpdateResponse {
 export interface DayTargetsUpdateResponse {
   /** The new per-weekday overrides keyed by weekday string. */
   dayTargets: Record<string, number>;
+  persisted: boolean;
+  applied: boolean;
+}
+
+export interface TripModeUpdateResponse {
+  enabled: boolean;
+  targetPercent: number | null;
+  readyBy: string | null;
   persisted: boolean;
   applied: boolean;
 }

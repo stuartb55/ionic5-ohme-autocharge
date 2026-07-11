@@ -140,6 +140,10 @@ class AppState:
         # Per-weekday target overrides {0(Mon)..6(Sun): percent}. Any day not
         # present falls back to the base charge_target. Drives effective_target.
         self.day_targets: dict[int, int] = {}
+        # One physical-session override for a longer journey. It takes
+        # precedence over permanent/day targets and is cleared on unplug.
+        self.trip_target: Optional[int] = None
+        self.trip_ready_by: Optional[str] = None
         # Runtime-selected Hyundai vehicle id (when the account has more than
         # one). None means "use config.HYUNDAI_VEHICLE_ID, else the first".
         self.vehicle_id_override: Optional[str] = None
@@ -191,6 +195,18 @@ class AppState:
         """Set the per-weekday target overrides (does not persist; see settings.save_day_targets)."""
         self.day_targets = dict(value)
 
+    def set_trip_mode(self, target: int, ready_by: Optional[str]) -> None:
+        self.trip_target = int(target)
+        self.trip_ready_by = ready_by
+
+    def clear_trip_mode(self) -> None:
+        self.trip_target = None
+        self.trip_ready_by = None
+
+    @property
+    def trip_mode_enabled(self) -> bool:
+        return self.trip_target is not None
+
     def set_vehicle_id(self, value: Optional[str]) -> None:
         """Set the runtime vehicle selection (does not persist; see settings.save_vehicle_id)."""
         self.vehicle_id_override = value
@@ -204,15 +220,23 @@ class AppState:
 
     @property
     def effective_target(self) -> int:
-        """The target to use right now: today's per-weekday override, else the base."""
+        """Trip override, then today's per-weekday override, then the base."""
+        if self.trip_target is not None:
+            return self.trip_target
         return self.day_targets.get(_today_weekday(), self.charge_target)
+
+    @property
+    def effective_ready_by(self) -> Optional[str]:
+        """The one-session departure time when active, else the permanent one."""
+        return self.trip_ready_by if self.trip_target is not None else self.ready_by
 
     @property
     def ready_by_tuple(self) -> Optional[tuple[int, int]]:
         """The ready-by time as an (hour, minute) tuple for the Ohme API, or None."""
         import settings  # local import to avoid a cycle at module load
 
-        return settings.parse_hhmm(self.ready_by) if self.ready_by else None
+        value = self.effective_ready_by
+        return settings.parse_hhmm(value) if value else None
 
     def update(self, snapshot: StatusSnapshot) -> None:
         self.status = snapshot

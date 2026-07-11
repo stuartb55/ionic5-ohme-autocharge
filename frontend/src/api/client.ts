@@ -12,6 +12,7 @@ import type {
   StatisticsResponse,
   StatusResponse,
   TargetUpdateResponse,
+  TripModeUpdateResponse,
   TariffResponse,
   VehicleUpdateResponse,
   VehiclesResponse,
@@ -136,6 +137,16 @@ export const api = {
   // Replace the per-weekday target overrides (weekday 0-6 -> percent).
   setDayTargets: (dayTargets: Record<number, number>, signal?: AbortSignal) =>
     putJson<DayTargetsUpdateResponse>('/api/settings/day-targets', { dayTargets }, signal),
+  setTripMode: (
+    enabled: boolean,
+    targetPercent = 100,
+    readyBy: string | null = null,
+    signal?: AbortSignal,
+  ) => putJson<TripModeUpdateResponse>(
+    '/api/settings/trip-mode',
+    { enabled, targetPercent, readyBy },
+    signal,
+  ),
   // Ask the backend to pull a fresh live reading from Ohme, then the caller
   // refetches the read endpoints to display it.
   refresh: (signal?: AbortSignal) => postJson<RefreshResponse>('/api/refresh', signal),

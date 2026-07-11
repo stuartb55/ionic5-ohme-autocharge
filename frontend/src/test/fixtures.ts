@@ -45,6 +45,7 @@ export const statusFixture: StatusResponse = {
     readyBy: null,
     readyByIsManual: false,
     dayTargets: {},
+    tripMode: { enabled: false, targetPercent: null, readyBy: null },
   },
   updatedAt: '2026-06-02T00:05:00+01:00',
   ready: true,
