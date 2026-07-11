@@ -24,6 +24,7 @@ When the car is plugged in, the app reads the real battery state-of-charge from 
 - **Reconciled actual cost** *(Octopus Agile + Postgres)* — persists tariff windows in the background and prices measured session-energy intervals after charging finishes; incomplete tariff or telemetry coverage is reported instead of guessed.
 - **House vs car energy** *(optional, needs Postgres)* — splits Octopus import into car, household and explicitly unattributed energy; telemetry gaps and inconsistencies remain visible instead of being silently forced into a plausible split.
 - **History & Grafana** *(optional)* — per-session and telemetry data persisted to Postgres.
+- **Data-quality dashboard** *(needs Postgres)* — shows missing measured energy/cost, session-linkage problems, uncertain attribution, ingestion freshness and statistics-cache age, with a direct path to session records needing review.
 - **Battery health trend** *(needs Postgres)* — a state-of-health sparkline on the dashboard showing degradation over time, not just the current figure.
 - **Installable PWA** — add to your phone/desktop home screen; works offline (app shell cached).
 

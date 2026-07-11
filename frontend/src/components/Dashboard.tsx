@@ -4,6 +4,7 @@ import { usePolling } from '../api/usePolling';
 import { useNow } from '../hooks/useNow';
 import { relativeTime } from '../utils/format';
 import { Banner } from './Banner';
+import { DataQualitySection } from './DataQualitySection';
 import { EnergyUsageSection } from './EnergyUsageSection';
 import { ScheduleSection } from './ScheduleSection';
 import { SessionsSection } from './SessionsSection';
@@ -24,6 +25,7 @@ const TARIFF_INTERVAL = 1_800_000; // 30 min
 // Household consumption lags ~a day and only updates on the backend's slow
 // ingest cadence, so a 5-min poll is more than enough.
 const ENERGY_INTERVAL = 300_000;
+const QUALITY_INTERVAL = 300_000;
 // SoH only moves a fraction of a percent over months — refresh rarely.
 const SOH_INTERVAL = 1_800_000; // 30 min
 
@@ -142,12 +144,14 @@ export function Dashboard() {
     [energyDate],
   );
   const energy = usePolling(energyFetcher, ENERGY_INTERVAL, [energyDate]);
+  const quality = usePolling(api.getDataQuality, QUALITY_INTERVAL);
 
   // refetch() from usePolling is stable, so these are safe to capture.
   const { refetch: refetchStatus } = status;
   const { refetch: refetchSchedule } = schedule;
   const { refetch: refetchStats } = stats;
   const { refetch: refetchSessions } = sessions;
+  const { refetch: refetchQuality } = quality;
 
   // Persist a new charge target, then refetch status so the UI reflects it.
   const handleSetTarget = useCallback(
@@ -200,8 +204,9 @@ export function Dashboard() {
         refetchSchedule();
         refetchStats();
         refetchSessions();
+        refetchQuality();
       });
-  }, [refetchStatus, refetchSchedule, refetchStats, refetchSessions]);
+  }, [refetchStatus, refetchSchedule, refetchStats, refetchSessions, refetchQuality]);
 
   const offline = status.error && !status.data;
   // Show how long ago the *backend* last polled Ohme (updatedAt), not when the
@@ -275,7 +280,8 @@ export function Dashboard() {
         ) : (
           <SectionSkeleton height={320} />
         )}
-        {/* No skeleton: the card may legitimately never appear (history disabled). */}
+        {quality.data && <DataQualitySection data={quality.data} />}
+        {/* No skeleton: these cards may legitimately never appear (history disabled). */}
         {sessions.data && <SessionsSection data={sessions.data} />}
         {/* Battery health trend — only when persistence has readings to plot. */}
         {soh.data?.enabled && <SohTrendSection data={soh.data} />}
