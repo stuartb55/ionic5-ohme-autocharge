@@ -157,6 +157,20 @@ body {
   display: grid;
   gap: var(--space-5);
 }
+.dashboard-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(340px, 0.8fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+.dashboard-secondary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-5);
+  align-items: start;
+}
+.dashboard-secondary:empty { display: none; }
+.dashboard-secondary > .card:only-child { grid-column: 1 / -1; }
 
 .card {
   background: var(--surface);
@@ -164,6 +178,18 @@ body {
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: var(--space-5);
+}
+.status-card {
+  border-radius: var(--radius-lg);
+  border-color: color-mix(in srgb, var(--brand) 20%, var(--border));
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 18px 44px rgba(37, 99, 235, 0.08);
+}
+.status-message {
+  color: var(--text);
+  font-size: 1.12rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  margin: calc(var(--space-2) * -1) 0 var(--space-5);
 }
 .card > header {
   display: flex;
@@ -190,9 +216,14 @@ body {
 /* --- status section --- */
 .status-grid {
   display: grid;
-  grid-template-columns: minmax(220px, 280px) 1fr;
-  gap: var(--space-6);
+  grid-template-columns: minmax(190px, 220px) 1fr;
+  gap: var(--space-5);
   align-items: center;
+}
+.status-card .battery-wrap svg {
+  height: auto;
+  max-width: 190px;
+  width: 100%;
 }
 .battery-wrap {
   display: flex;
@@ -560,28 +591,47 @@ body {
   max-width: 40ch;
 }
 
-/* --- charge settings panel (Zone B) --- */
-.charge-settings {
-  margin-top: var(--space-5);
-  padding-top: var(--space-5);
-  border-top: 1px solid var(--border);
-}
-.charge-settings > .eyebrow {
-  margin-bottom: var(--space-4);
-}
-.settings-rows {
+/* --- charge settings --- */
+.settings-card > header { align-items: flex-start; }
+.settings-summary {
+  align-items: flex-end;
   display: flex;
   flex-direction: column;
+  line-height: 1.25;
+  text-align: right;
+}
+.settings-summary strong { font-size: 1.35rem; }
+.settings-summary span { color: var(--text-muted); font-size: 0.78rem; }
+.settings-context {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: calc(var(--space-2) * -1) 0 var(--space-5);
+}
+.settings-primary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-4);
 }
-.settings-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-3);
+.setting-block {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-4);
 }
-.settings-row--full {
-  align-items: flex-start;
+.setting-label {
+  color: var(--text-subtle);
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  margin-bottom: var(--space-3);
+  text-transform: uppercase;
+}
+.settings-advanced {
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  padding-top: var(--space-3);
 }
 
 .trip-mode-editor {
@@ -1425,6 +1475,7 @@ a.ghost-button {
 
 /* --- responsive --- */
 @media (max-width: 900px) {
+  .dashboard-overview { grid-template-columns: 1fr; }
   .stat-cards { grid-template-columns: repeat(2, 1fr); }
   .insights { grid-template-columns: repeat(3, 1fr); }
   .quality-grid { grid-template-columns: repeat(2, 1fr); }
@@ -1433,11 +1484,16 @@ a.ghost-button {
   .app { padding: var(--space-5) var(--space-4) var(--space-6); }
   .status-grid { grid-template-columns: 1fr; gap: var(--space-5); }
   .tiles { grid-template-columns: repeat(2, 1fr); }
+  .dashboard-secondary { grid-template-columns: 1fr; }
+  .settings-primary { grid-template-columns: 1fr; }
 }
 @media (max-width: 460px) {
   .stat-cards, .tiles, .insights { grid-template-columns: 1fr 1fr; }
   .quality-grid { grid-template-columns: 1fr; }
   .day-chips { grid-template-columns: repeat(4, 1fr); }
+  .card { padding: var(--space-4); }
+  .status-message { font-size: 1rem; }
+  .settings-summary { align-items: flex-start; text-align: left; }
 }
 
 /* --- battery health trend --- */

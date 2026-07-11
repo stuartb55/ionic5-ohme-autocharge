@@ -53,6 +53,10 @@ export const handlers = [
   http.get('*/api/soh-history', () => HttpResponse.json({ enabled: false, history: [] })),
   // Tariff feature off by default, so the card stays hidden in tests.
   http.get('*/api/tariff', () => HttpResponse.json({ enabled: false, rates: [], cheapest: [] })),
+  // Household consumption off by default, so the card stays hidden in tests.
+  http.get('*/api/energy-usage', () =>
+    HttpResponse.json({ enabled: false, date: null, slots: [], totals: null }),
+  ),
   http.get('*/api/statistics', ({ request }) => {
     const days = Number(new URL(request.url).searchParams.get('days') ?? 7);
     return HttpResponse.json({ ...statisticsFixture, rangeDays: days });

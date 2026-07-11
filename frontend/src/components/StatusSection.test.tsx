@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StatusResponse } from '../api/types';
 import { statusFixture } from '../test/fixtures';
 import { StatusSection } from './StatusSection';
+import { ChargeSettingsSection } from './ChargeSettingsSection';
 
 function withCharger(overrides: Partial<StatusResponse['charger']>): StatusResponse {
   return { ...statusFixture, charger: { ...statusFixture.charger, ...overrides } };
@@ -57,7 +58,17 @@ describe('StatusSection trip mode', () => {
         tripMode: { enabled: true, targetPercent: 100, readyBy: '05:45' },
       },
     };
-    render(<StatusSection status={status} onSetTripMode={vi.fn()} />);
+    render(
+      <ChargeSettingsSection
+        status={status}
+        onSetTarget={vi.fn()}
+        onSetReadyBy={vi.fn()}
+        onSetDayTargets={vi.fn()}
+        onSetTripMode={vi.fn()}
+        onSetNotifications={vi.fn()}
+        onSetVehicleProfile={vi.fn()}
+      />,
+    );
 
     expect(screen.getByText(/trip mode active/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/trip target percent/i)).toHaveValue(100);
@@ -75,13 +86,18 @@ describe('StatusSection vehicle profile', () => {
       },
     };
     render(
-      <StatusSection
+      <ChargeSettingsSection
         status={status}
         activeVehicle={{ id: 'car-1', name: 'IONIQ 5' }}
+        onSetTarget={vi.fn()}
+        onSetReadyBy={vi.fn()}
+        onSetDayTargets={vi.fn()}
+        onSetTripMode={vi.fn()}
+        onSetNotifications={vi.fn()}
         onSetVehicleProfile={vi.fn()}
       />,
     );
-    expect(screen.getByText(/ioniq 5 profile/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/ioniq 5 profile/i)).toHaveLength(2);
     expect(screen.getByLabelText(/profile target/i)).toHaveValue(90);
   });
 });

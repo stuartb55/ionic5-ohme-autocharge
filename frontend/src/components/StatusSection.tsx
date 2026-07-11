@@ -4,13 +4,7 @@ import { formatFinishTime, formatKwh, formatMiles, formatMoney, formatPower } fr
 import { BatteryRing } from './BatteryRing';
 import { ChargeControls } from './ChargeControls';
 import { ConnectionBadge } from './ConnectionBadge';
-import { DayTargetsEditor } from './DayTargetsEditor';
-import { NotificationSettings } from './NotificationSettings';
-import { ReadyByEditor } from './ReadyByEditor';
-import { TargetEditor } from './TargetEditor';
-import { TripModeEditor } from './TripModeEditor';
 import { VehicleHealth } from './VehicleHealth';
-import { VehicleProfileEditor } from './VehicleProfileEditor';
 
 function Tile({ label, value, unit }: { label: string; value: string; unit?: string }) {
   return (
@@ -26,30 +20,9 @@ function Tile({ label, value, unit }: { label: string; value: string; unit?: str
 
 export function StatusSection({
   status,
-  onSetTarget,
-  onSetReadyBy,
-  onSetDayTargets,
-  onSetTripMode,
-  onSetNotifications,
-  activeVehicle,
-  onSetVehicleProfile,
   onChargeChanged,
 }: {
   status: StatusResponse;
-  onSetTarget?: (target: number) => Promise<void>;
-  /** Persist the ready-by time (or null to clear); editor hidden when omitted. */
-  onSetReadyBy?: (value: string | null) => Promise<void>;
-  /** Persist per-weekday target overrides; editor hidden when omitted. */
-  onSetDayTargets?: (map: Record<number, number>) => Promise<void>;
-  /** Set or cancel a one-session target/departure override. */
-  onSetTripMode?: (enabled: boolean, target: number, readyBy: string | null) => Promise<void>;
-  onSetNotifications?: (
-    preferences: Omit<StatusResponse['config']['notifications'], 'configured'>,
-  ) => Promise<void>;
-  activeVehicle?: { id: string; name: string | null };
-  onSetVehicleProfile?: (
-    vehicleId: string, enabled: boolean, target: number, readyBy: string | null,
-  ) => Promise<void>;
   /** Refetch status after a charge-control action; controls hidden when omitted. */
   onChargeChanged?: () => void;
 }) {
@@ -58,11 +31,6 @@ export function StatusSection({
   // today's per-weekday override) is what the ring and Ohme actually use.
   const baseTarget = status.config.chargeTarget;
   const target = charger.targetPercent ?? baseTarget;
-  const effectiveTargetLabel = status.config.tripMode.enabled
-    ? 'Trip'
-    : activeVehicle && status.config.vehicleProfiles[activeVehicle.id]
-      ? 'Vehicle profile'
-      : 'Today';
   // Tick once a minute so the projection hides itself when the finish time
   // passes, without reading the impure Date.now() during render.
   const now = useNow(60_000);
@@ -74,11 +42,16 @@ export function StatusSection({
     charger.projectedFinish != null &&
     new Date(charger.projectedFinish).getTime() > now;
 
-  const hasSettings = onSetTarget || onSetReadyBy || onSetDayTargets || onSetTripMode
-    || onSetNotifications || (activeVehicle && onSetVehicleProfile);
+  const statusMessage = charger.status === 'charging'
+    ? `Charging to ${target}%${showFinish ? ` · finishes ${formatFinishTime(charger.projectedFinish as string, new Date(now))}` : ''}`
+    : charger.status === 'paused'
+      ? `Charging paused · target ${target}%`
+      : charger.connected
+        ? `Connected · target ${target}%`
+        : `Not connected · target ${target}%`;
 
   return (
-    <section className="card" aria-labelledby="status-heading">
+    <section className="card status-card" aria-labelledby="status-heading">
       <header>
         <div>
           <p className="eyebrow">Live status</p>
@@ -86,6 +59,8 @@ export function StatusSection({
         </div>
         <ConnectionBadge status={charger.status} />
       </header>
+
+      <p className="status-message">{statusMessage}</p>
 
       {/* Zone A — Live telemetry (read-only) */}
       <div className="status-grid">
@@ -126,21 +101,13 @@ export function StatusSection({
                 Finishes ~{formatFinishTime(charger.projectedFinish as string, new Date(now))}
               </div>
             )}
-            {/* Static target display when no settings panel will render */}
-            {!onSetTarget && <div className="target">Target {baseTarget}%</div>}
-            {!onSetTarget && target !== baseTarget && (
-              <div className="today-target">{effectiveTargetLabel}: {target}%</div>
-            )}
+            <div className="target">Target {target}%</div>
           </div>
         </div>
 
         <div className="tiles">
-          <Tile label="Charging rate" value={formatPower(charger.power.watts)} />
-          <Tile
-            label="Current"
-            value={charger.power.amps ? charger.power.amps.toFixed(0) : '0'}
-            unit="A"
-          />
+          {charger.power.watts > 0 && <Tile label="Charging rate" value={formatPower(charger.power.watts)} />}
+          {charger.power.amps > 0 && <Tile label="Current" value={charger.power.amps.toFixed(0)} unit="A" />}
           <Tile label="Added this session" value={formatKwh(charger.sessionEnergyKwh)} />
           {charger.projectedCost != null && (
             <Tile
@@ -153,82 +120,7 @@ export function StatusSection({
         </div>
       </div>
 
-      {/* Live session actions sit above the (future-facing) settings panel so
-          Pause/Boost are reachable without scrolling past the settings on mobile. */}
       {onChargeChanged && <ChargeControls status={status} onChanged={onChargeChanged} />}
-
-      {/* Zone B — Charge settings */}
-      {hasSettings && (
-        <div className="charge-settings">
-          <p className="eyebrow">Charge settings</p>
-          <div className="settings-rows">
-            {onSetTarget && (
-              <div className="settings-row">
-                <TargetEditor
-                  value={baseTarget}
-                  min={status.config.targetMin}
-                  max={status.config.targetMax}
-                  onSave={onSetTarget}
-                />
-                {target !== baseTarget && (
-                  <div className="today-target">{effectiveTargetLabel}: {target}%</div>
-                )}
-              </div>
-            )}
-            {onSetReadyBy && (
-              <div className="settings-row">
-                <ReadyByEditor
-                  value={status.config.readyBy}
-                  clearable={status.config.readyByIsManual}
-                  onSave={onSetReadyBy}
-                />
-              </div>
-            )}
-            {onSetDayTargets && (
-              <div className="settings-row settings-row--full">
-                <DayTargetsEditor
-                  value={status.config.dayTargets}
-                  base={baseTarget}
-                  min={status.config.targetMin}
-                  max={status.config.targetMax}
-                  onSave={onSetDayTargets}
-                />
-              </div>
-            )}
-            {onSetTripMode && (
-              <div className="settings-row settings-row--full">
-                <TripModeEditor
-                  value={status.config.tripMode}
-                  min={status.config.targetMin}
-                  max={status.config.targetMax}
-                  onSave={onSetTripMode}
-                />
-              </div>
-            )}
-            {onSetNotifications && (
-              <div className="settings-row settings-row--full">
-                <NotificationSettings
-                  value={status.config.notifications}
-                  onSave={onSetNotifications}
-                />
-              </div>
-            )}
-            {activeVehicle && onSetVehicleProfile && (
-              <div className="settings-row settings-row--full">
-                <VehicleProfileEditor
-                  key={activeVehicle.id}
-                  vehicleId={activeVehicle.id}
-                  vehicleName={activeVehicle.name ?? vehicle.name ?? 'Vehicle'}
-                  value={status.config.vehicleProfiles[activeVehicle.id] ?? null}
-                  min={status.config.targetMin}
-                  max={status.config.targetMax}
-                  onSave={onSetVehicleProfile}
-                />
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </section>
   );
 }

@@ -71,7 +71,7 @@ describe('Dashboard integration', () => {
 
     render(<Dashboard />);
     // Status section renders the editor with the fixture target (80%).
-    await screen.findByText('Target 80%');
+    await screen.findByRole('button', { name: /charge target 80%/i });
 
     await userEvent.click(screen.getByRole('button', { name: /increase target/i }));
     await userEvent.click(screen.getByRole('button', { name: /save 85%/i }));

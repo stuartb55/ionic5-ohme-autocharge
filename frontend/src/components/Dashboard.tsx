@@ -4,6 +4,7 @@ import { usePolling } from '../api/usePolling';
 import { useNow } from '../hooks/useNow';
 import { relativeTime } from '../utils/format';
 import { Banner } from './Banner';
+import { ChargeSettingsSection } from './ChargeSettingsSection';
 import { DataQualitySection } from './DataQualitySection';
 import { EnergyUsageSection } from './EnergyUsageSection';
 import { ScheduleSection } from './ScheduleSection';
@@ -248,7 +249,7 @@ export function Dashboard() {
       <header className="app-header">
         <div>
           <h1>Autocharge</h1>
-          <div className="subtitle">EV charging scheduler · IONIQ&nbsp;5 + Ohme</div>
+          <div className="subtitle">Smart EV charging · Hyundai Bluelink + Ohme</div>
         </div>
         <HeaderMeta
           lastPolled={lastPolled}
@@ -282,9 +283,23 @@ export function Dashboard() {
         </div>
       )}
 
-      <div className="sections">
-        {status.data ? (
-          <StatusSection
+      <main className="sections">
+        <div className="dashboard-overview">
+          {status.data ? (
+            <StatusSection status={status.data} onChargeChanged={refetchStatus} />
+          ) : (
+            <SectionSkeleton height={420} />
+          )}
+          {schedule.data ? (
+            <ScheduleSection schedule={schedule.data} />
+          ) : schedule.error ? (
+            <SectionError message="Couldn’t load the charge schedule." onRetry={refetchSchedule} />
+          ) : (
+            <SectionSkeleton height={320} />
+          )}
+        </div>
+        {status.data && (
+          <ChargeSettingsSection
             status={status.data}
             onSetTarget={handleSetTarget}
             onSetReadyBy={handleSetReadyBy}
@@ -293,17 +308,7 @@ export function Dashboard() {
             onSetNotifications={handleSetNotifications}
             activeVehicle={activeVehicle}
             onSetVehicleProfile={handleSetVehicleProfile}
-            onChargeChanged={refetchStatus}
           />
-        ) : (
-          <SectionSkeleton height={260} />
-        )}
-        {schedule.data ? (
-          <ScheduleSection schedule={schedule.data} />
-        ) : schedule.error ? (
-          <SectionError message="Couldn’t load the charge schedule." onRetry={refetchSchedule} />
-        ) : (
-          <SectionSkeleton height={180} />
         )}
         {stats.data ? (
           <StatisticsSection stats={stats.data} days={days} onDaysChange={setDays} />
@@ -312,18 +317,14 @@ export function Dashboard() {
         ) : (
           <SectionSkeleton height={320} />
         )}
-        {quality.data && <DataQualitySection data={quality.data} />}
-        {/* No skeleton: these cards may legitimately never appear (history disabled). */}
-        {sessions.data && <SessionsSection data={sessions.data} />}
-        {/* Battery health trend — only when persistence has readings to plot. */}
-        {soh.data?.enabled && <SohTrendSection data={soh.data} />}
-        {/* Agile tariff card — only shown when the feature is configured. */}
-        {tariff.data?.enabled && <TariffSection data={tariff.data} />}
-        {/* Household-vs-car energy — only when Octopus consumption is configured. */}
-        {energy.data?.enabled && (
-          <EnergyUsageSection data={energy.data} onDateChange={setEnergyDate} />
-        )}
-      </div>
+        <div className="dashboard-secondary">
+          {sessions.data && <SessionsSection data={sessions.data} />}
+          {soh.data?.enabled && <SohTrendSection data={soh.data} />}
+          {tariff.data?.enabled && <TariffSection data={tariff.data} />}
+          {energy.data?.enabled && <EnergyUsageSection data={energy.data} onDateChange={setEnergyDate} />}
+          {quality.data && <DataQualitySection data={quality.data} />}
+        </div>
+      </main>
 
       <footer className="app-footer">
         Data from Ohme &amp; Hyundai Bluelink · refreshed automatically
