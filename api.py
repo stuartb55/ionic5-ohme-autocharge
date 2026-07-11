@@ -992,6 +992,220 @@ class DataQualityResponseModel(BaseModel):
     statisticsCache: StatisticsCacheQualityModel
 
 
+class MonthlyReportDailyModel(BaseModel):
+    date: datetime.date
+    energyWh: int
+    savingsMinor: int
+    costMinor: int
+    currency: Optional[str]
+    source: str
+    isComplete: bool
+    updatedAt: datetime.datetime
+
+
+class MonthlyReportSessionModel(BaseModel):
+    id: int
+    pluggedInAt: datetime.datetime
+    completedAt: Optional[datetime.datetime]
+    actualEnergyWh: Optional[int]
+    actualCostMinor: Optional[int]
+    currency: Optional[str]
+    quality: str
+    vehicleName: Optional[str]
+    action: Optional[str]
+
+
+class MonthlyAccountSummaryModel(BaseModel):
+    energyWh: int
+    savingsMinor: Optional[int]
+    costMinor: Optional[int]
+    currency: Optional[str]
+    completeDays: int
+    expectedDays: int
+    missingDays: int
+    quality: Literal["complete", "partial", "unavailable", "mixed_currency"]
+
+
+class MonthlySessionSummaryModel(BaseModel):
+    total: int
+    configuredCompleted: int
+    measuredEnergyCount: int
+    measuredEnergyWh: int
+    actualCostCount: int
+    actualCostMinor: Optional[int]
+    costCurrency: Optional[str]
+    actualCostExpected: bool
+    missingActualEnergy: int
+    missingActualCost: int
+    qualityCounts: dict[str, int]
+
+
+class MonthlyReportResponseModel(BaseModel):
+    month: str
+    timezone: str
+    from_: datetime.datetime = Field(alias="from")
+    toExclusive: datetime.datetime
+    generatedAt: datetime.datetime
+    account: MonthlyAccountSummaryModel
+    homeSessions: MonthlySessionSummaryModel
+    daily: list[MonthlyReportDailyModel]
+    sessions: list[MonthlyReportSessionModel]
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+def _monthly_window(month: Optional[str]) -> tuple[str, datetime.datetime, datetime.datetime]:
+    """Resolve an explicit/default month to a DST-safe local half-open window."""
+    tz = _STATS_TZ or datetime.timezone.utc
+    today = datetime.datetime.now(tz).date()
+    if month is None:
+        current_start = today.replace(day=1)
+        previous_last = current_start - datetime.timedelta(days=1)
+        start_day = previous_last.replace(day=1)
+    else:
+        try:
+            start_day = datetime.date.fromisoformat(f"{month}-01")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="month must be YYYY-MM") from exc
+    if start_day.month == 12:
+        end_day = datetime.date(start_day.year + 1, 1, 1)
+    else:
+        end_day = datetime.date(start_day.year, start_day.month + 1, 1)
+    start = datetime.datetime.combine(start_day, datetime.time.min, tzinfo=tz)
+    end = datetime.datetime.combine(end_day, datetime.time.min, tzinfo=tz)
+    return start_day.strftime("%Y-%m"), start, end
+
+
+def _build_monthly_report(
+    month: str,
+    start: datetime.datetime,
+    end: datetime.datetime,
+    evidence: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    """Aggregate exact persisted units while retaining the underlying rows."""
+    daily = evidence["daily"]
+    sessions = evidence["sessions"]
+    complete_daily = [row for row in daily if row["isComplete"]]
+    unique_complete_dates = {row["date"] for row in complete_daily}
+    now_date = datetime.datetime.now(start.tzinfo).date()
+    expected_end = min(end.date(), now_date)
+    expected_days = max(0, (expected_end - start.date()).days)
+    complete_days = len(unique_complete_dates)
+    missing_days = max(0, expected_days - complete_days)
+    daily_currencies = {row["currency"] for row in complete_daily if row["currency"]}
+    if not complete_daily:
+        account_quality = "unavailable"
+    elif len(daily_currencies) > 1:
+        account_quality = "mixed_currency"
+    elif end.date() <= now_date and missing_days == 0:
+        account_quality = "complete"
+    else:
+        account_quality = "partial"
+    currency = next(iter(daily_currencies)) if len(daily_currencies) == 1 else None
+
+    configured_completed = [
+        row for row in sessions
+        if row["action"] == "configured" and row["completedAt"] is not None
+    ]
+    with_energy = [row for row in configured_completed if row["actualEnergyWh"] is not None]
+    with_cost = [row for row in configured_completed if row["actualCostMinor"] is not None]
+    cost_currencies = {row["currency"] for row in with_cost if row["currency"]}
+    cost_currency = next(iter(cost_currencies)) if len(cost_currencies) == 1 else None
+    quality_counts: dict[str, int] = {}
+    for row in sessions:
+        quality_counts[row["quality"]] = quality_counts.get(row["quality"], 0) + 1
+    actual_cost_expected = octopus.is_enabled()
+
+    return {
+        "month": month,
+        "timezone": config.TIMEZONE,
+        "from": start,
+        "toExclusive": end,
+        "generatedAt": datetime.datetime.now(datetime.timezone.utc),
+        "account": {
+            "energyWh": sum(row["energyWh"] for row in complete_daily),
+            "savingsMinor": (
+                sum(row["savingsMinor"] for row in complete_daily) if currency else None
+            ),
+            "costMinor": sum(row["costMinor"] for row in complete_daily) if currency else None,
+            "currency": currency,
+            "completeDays": complete_days,
+            "expectedDays": expected_days,
+            "missingDays": missing_days,
+            "quality": account_quality,
+        },
+        "homeSessions": {
+            "total": len(sessions),
+            "configuredCompleted": len(configured_completed),
+            "measuredEnergyCount": len(with_energy),
+            "measuredEnergyWh": sum(row["actualEnergyWh"] for row in with_energy),
+            "actualCostCount": len(with_cost),
+            "actualCostMinor": (
+                sum(row["actualCostMinor"] for row in with_cost)
+                if cost_currency is not None else None
+            ),
+            "costCurrency": cost_currency,
+            "actualCostExpected": actual_cost_expected,
+            "missingActualEnergy": len(configured_completed) - len(with_energy),
+            "missingActualCost": (
+                len(configured_completed) - len(with_cost) if actual_cost_expected else 0
+            ),
+            "qualityCounts": quality_counts,
+        },
+        "daily": daily,
+        "sessions": sessions,
+    }
+
+
+def _monthly_report_csv(report: dict[str, Any]) -> str:
+    """Flatten report summary and evidence into one spreadsheet-friendly file."""
+    fields = [
+        "recordType", "month", "date", "sessionId", "pluggedInAt", "completedAt",
+        "vehicleName", "action", "quality", "energyWh", "costMinor", "savingsMinor",
+        "currency", "source", "isComplete", "completeDays", "expectedDays", "missingDays",
+        "sessionCount", "measuredEnergyCount", "actualCostCount", "missingActualEnergy",
+        "missingActualCost", "accountEnergyWh", "accountCostMinor", "accountSavingsMinor",
+        "measuredSessionEnergyWh", "actualSessionCostMinor", "actualSessionCostCurrency",
+    ]
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fields)
+    writer.writeheader()
+    account = report["account"]
+    home = report["homeSessions"]
+    writer.writerow({
+        "recordType": "summary", "month": report["month"], "quality": account["quality"],
+        "accountEnergyWh": account["energyWh"],
+        "accountCostMinor": account["costMinor"],
+        "accountSavingsMinor": account["savingsMinor"], "currency": account["currency"],
+        "completeDays": account["completeDays"], "expectedDays": account["expectedDays"],
+        "missingDays": account["missingDays"], "sessionCount": home["total"],
+        "measuredEnergyCount": home["measuredEnergyCount"],
+        "actualCostCount": home["actualCostCount"],
+        "missingActualEnergy": home["missingActualEnergy"],
+        "missingActualCost": home["missingActualCost"],
+        "measuredSessionEnergyWh": home["measuredEnergyWh"],
+        "actualSessionCostMinor": home["actualCostMinor"],
+        "actualSessionCostCurrency": home["costCurrency"],
+    })
+    for row in report["daily"]:
+        writer.writerow({
+            "recordType": "daily", "month": report["month"], "date": row["date"],
+            "quality": "complete" if row["isComplete"] else "incomplete",
+            "energyWh": row["energyWh"], "costMinor": row["costMinor"],
+            "savingsMinor": row["savingsMinor"], "currency": row["currency"],
+            "source": row["source"], "isComplete": row["isComplete"],
+        })
+    for row in report["sessions"]:
+        writer.writerow({
+            "recordType": "session", "month": report["month"], "sessionId": row["id"],
+            "pluggedInAt": row["pluggedInAt"], "completedAt": row["completedAt"],
+            "vehicleName": row["vehicleName"], "action": row["action"],
+            "quality": row["quality"], "energyWh": row["actualEnergyWh"],
+            "costMinor": row["actualCostMinor"], "currency": row["currency"],
+        })
+    return output.getvalue()
+
+
 class SessionAuditRecordModel(BaseModel):
     id: int
     sessionKey: Optional[str]
@@ -1183,6 +1397,27 @@ async def get_data_quality() -> DataQualityResponseModel:
         daily=summary["daily"],
         statisticsCache={"available": cache_available, "ageSeconds": cache_age},
     )
+
+
+@app.get("/api/reports/monthly", response_model=MonthlyReportResponseModel)
+async def get_monthly_report(
+    month: Optional[str] = Query(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    format: Literal["json", "csv"] = Query(default="json"),
+) -> MonthlyReportResponseModel | Response:
+    """Auditable calendar-month account totals and measured home sessions."""
+    report_month, start, end = _monthly_window(month)
+    evidence = await db.get_monthly_report_rows(start, end)
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="History persistence is disabled")
+    report = _build_monthly_report(report_month, start, end, evidence)
+    if format == "csv":
+        filename = f"autocharge-monthly-{report_month}.csv"
+        return Response(
+            content=_monthly_report_csv(report),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    return MonthlyReportResponseModel.model_validate(report)
 
 
 def _reflect_effective_target() -> None:

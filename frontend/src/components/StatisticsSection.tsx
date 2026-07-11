@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { useMemo, useState } from 'react';
 import type { StatisticsResponse } from '../api/types';
+import { api } from '../api/client';
 import {
   formatDateShort,
   formatKwh,
@@ -97,6 +98,12 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
   const insights = useMemo(() => deriveInsights(stats), [stats]);
   const prev = stats.comparison?.previous;
   const lastCompleteDay = stats.daily[stats.daily.length - 1]?.date;
+  const defaultReportMonth = (() => {
+    const [year, month] = stats.window.completeThrough.slice(0, 10).split('-').map(Number);
+    const previous = new Date(Date.UTC(year!, month! - 2, 1));
+    return `${previous.getUTCFullYear()}-${String(previous.getUTCMonth() + 1).padStart(2, '0')}`;
+  })();
+  const [reportMonth, setReportMonth] = useState(defaultReportMonth);
 
   return (
     <section className="card" aria-labelledby="stats-heading">
@@ -128,6 +135,30 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
           </div>
         </div>
       </header>
+
+      <details className="monthly-report">
+        <summary>Monthly report</summary>
+        <div className="monthly-report-controls">
+          <label>
+            <span>Calendar month</span>
+            <input
+              type="month"
+              value={reportMonth}
+              onChange={(event) => setReportMonth(event.target.value)}
+              aria-label="Monthly report month"
+            />
+          </label>
+          <a className="ghost-button" href={api.monthlyReportUrl(reportMonth, 'csv')} download>
+            Download CSV
+          </a>
+          <a className="ghost-button" href={api.monthlyReportUrl(reportMonth, 'json')} download>
+            JSON
+          </a>
+        </div>
+        <p className="field-hint">
+          Account daily totals and measured home-session evidence, with explicit coverage and quality.
+        </p>
+      </details>
 
       <div className="stats-context" aria-label="Statistics coverage">
         <span>

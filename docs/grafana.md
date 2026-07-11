@@ -5,7 +5,7 @@ you can chart it in Grafana. Persistence is **optional** — leave `DATABASE_URL
 blank and the app runs entirely in memory exactly as before.
 
 The bundled `docker-compose.yml` / `docker-compose.prod.yml` include a
-`postgres:16-alpine` service (database `autocharge`, user `autocharge`) with the
+`postgres:18-alpine` service (database `autocharge`, user `autocharge`) with the
 port published on **loopback only** (`127.0.0.1:5432`) so a Grafana running on
 the same host can query it directly without exposing the database to the LAN.
 Set `POSTGRES_PASSWORD` in `.env` to change the password — the backend's
@@ -42,6 +42,9 @@ startup. `charge_sessions.session_key` is the durable idempotency key for a
 physical plug-in; new telemetry and event rows reference `charge_sessions.id`.
 `GET /api/data-quality` exposes non-sensitive aggregate completeness counters
 and cursor/cache freshness for a Grafana JSON/API datasource or external monitor.
+The same exact-unit evidence powers `GET /api/reports/monthly?month=YYYY-MM`:
+account-wide `daily_stats` totals remain separate from measured home-session
+totals, with explicit coverage and missing-data counts in JSON or CSV.
 
 ## Ready-made dashboard
 

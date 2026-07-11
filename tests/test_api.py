@@ -152,6 +152,103 @@ def test_data_quality_reports_unavailable_without_persistence(client):
     assert body["sessions"] is None
 
 
+# --- monthly reports -------------------------------------------------------
+
+def _monthly_evidence():
+    start = dt.datetime(2026, 6, 1, tzinfo=dt.timezone.utc)
+    return {
+        "daily": [
+            {
+                "date": dt.date(2026, 6, 1), "energyWh": 4200,
+                "savingsMinor": 80, "costMinor": 50, "currency": "GBP",
+                "source": "ohme_summary", "isComplete": True, "updatedAt": start,
+            },
+            {
+                "date": dt.date(2026, 6, 2), "energyWh": 0,
+                "savingsMinor": 0, "costMinor": 0, "currency": "GBP",
+                "source": "ohme_summary", "isComplete": True, "updatedAt": start,
+            },
+        ],
+        "sessions": [
+            {
+                "id": 1, "pluggedInAt": start, "completedAt": start + dt.timedelta(hours=2),
+                "actualEnergyWh": 4100, "actualCostMinor": 49, "currency": "GBP",
+                "quality": "reconciled", "vehicleName": "IONIQ 5", "action": "configured",
+            },
+            {
+                "id": 2, "pluggedInAt": start + dt.timedelta(days=2),
+                "completedAt": start + dt.timedelta(days=2, hours=1),
+                "actualEnergyWh": None, "actualCostMinor": None, "currency": None,
+                "quality": "missing_actual", "vehicleName": "IONIQ 5", "action": "configured",
+            },
+            {
+                "id": 3, "pluggedInAt": start + dt.timedelta(days=3), "completedAt": None,
+                "actualEnergyWh": None, "actualCostMinor": None, "currency": None,
+                "quality": "validated", "vehicleName": "IONIQ 5",
+                "action": "skipped_at_target",
+            },
+        ],
+    }
+
+
+def test_monthly_report_keeps_account_and_measured_session_scopes_separate(client):
+    with patch("db.get_monthly_report_rows", new=AsyncMock(return_value=_monthly_evidence())), \
+         patch("octopus.is_enabled", return_value=True):
+        response = client.get("/api/reports/monthly?month=2026-06")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["month"] == "2026-06"
+    assert body["timezone"] == config.TIMEZONE
+    assert body["account"] == {
+        "energyWh": 4200,
+        "savingsMinor": 80,
+        "costMinor": 50,
+        "currency": "GBP",
+        "completeDays": 2,
+        "expectedDays": 30,
+        "missingDays": 28,
+        "quality": "partial",
+    }
+    assert body["homeSessions"]["total"] == 3
+    assert body["homeSessions"]["configuredCompleted"] == 2
+    assert body["homeSessions"]["measuredEnergyWh"] == 4100
+    assert body["homeSessions"]["missingActualEnergy"] == 1
+    assert body["homeSessions"]["missingActualCost"] == 1
+    assert body["homeSessions"]["qualityCounts"] == {
+        "reconciled": 1, "missing_actual": 1, "validated": 1
+    }
+
+
+def test_monthly_report_csv_is_an_attachment_with_summary_and_evidence(client):
+    with patch("db.get_monthly_report_rows", new=AsyncMock(return_value=_monthly_evidence())):
+        response = client.get("/api/reports/monthly?month=2026-06&format=csv")
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == (
+        'attachment; filename="autocharge-monthly-2026-06.csv"'
+    )
+    assert "recordType,month" in response.text
+    assert "summary,2026-06" in response.text
+    assert "daily,2026-06" in response.text
+    assert "session,2026-06" in response.text
+
+
+def test_monthly_report_404_without_persistence(client):
+    with patch("db.get_monthly_report_rows", new=AsyncMock(return_value=None)):
+        assert client.get("/api/reports/monthly?month=2026-06").status_code == 404
+
+
+@pytest.mark.parametrize("month", ["2026-00", "2026-13", "June-2026", "2026-6"])
+def test_monthly_report_rejects_invalid_month(client, month):
+    assert client.get(f"/api/reports/monthly?month={month}").status_code == 422
+
+
+def test_monthly_window_uses_local_calendar_boundaries_across_dst():
+    _, start, end = api._monthly_window("2026-03")
+    assert start.date() == dt.date(2026, 3, 1)
+    assert end.date() == dt.date(2026, 4, 1)
+    assert start.utcoffset() != end.utcoffset()
+
+
 def test_data_quality_flags_only_applicable_completeness_problems(client):
     summary = {
         "sessions": {
