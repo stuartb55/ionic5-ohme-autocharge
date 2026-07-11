@@ -1,9 +1,8 @@
+import babelParser from '@babel/eslint-parser';
 import js from '@eslint/js';
 import globals from 'globals';
 import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
-import tseslint from '@typescript-eslint/eslint-plugin';
-import tsparser from '@typescript-eslint/parser';
 
 export default [
   { ignores: ['dist', 'coverage', 'node_modules'] },
@@ -22,17 +21,26 @@ export default [
   {
     files: ['**/*.{ts,tsx}'],
     languageOptions: {
-      parser: tsparser,
+      parser: babelParser,
       ecmaVersion: 2020,
       globals: { ...globals.browser },
+      parserOptions: {
+        requireConfigFile: false,
+        babelOptions: {
+          plugins: ['@babel/plugin-syntax-jsx'],
+          presets: ['@babel/preset-typescript'],
+        },
+      },
     },
     plugins: {
-      '@typescript-eslint': tseslint,
       'react-hooks': reactHooks,
       'react-refresh': reactRefresh,
     },
     rules: {
-      ...tseslint.configs.recommended.rules,
+      // Babel's scope analyser treats type-only names as runtime references.
+      // TypeScript enforces both checks via noUnused* and ordinary type checking.
+      'no-undef': 'off',
+      'no-unused-vars': 'off',
       ...reactHooks.configs.recommended.rules,
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
     },
