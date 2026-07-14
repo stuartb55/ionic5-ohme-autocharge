@@ -1,8 +1,8 @@
 # Autocharge Dashboard (frontend)
 
-Single-page dashboard for the Ohme EV charging scheduler. React 18 + TypeScript +
+Single-page, single-vehicle dashboard for the Ohme EV charging scheduler. React 19 + TypeScript +
 Vite, no UI framework — a small hand-rolled design system and dependency-free SVG
-charts keep the bundle lean (~50 kB gzipped).
+charts keep the bundle lean (~80 kB JavaScript gzipped).
 
 ## Scripts
 
@@ -23,7 +23,7 @@ served from the same origin as the SPA).
 
 - `src/api/` — typed fetch client (`client.ts`), response types, and the
   `usePolling` hook that refreshes data on an interval.
-- `src/components/` — the three dashboard sections plus reusable pieces
+- `src/components/` — live status, planning, preferences, insights and history plus reusable pieces
   (`BatteryRing`, `ScheduleTimeline`, `EnergyBarChart`, `ConnectionBadge`).
 - `src/utils/` — formatting helpers and the schedule-timeline geometry.
 - `src/test/` — MSW request handlers, fixtures, and the end-to-end dashboard test.
@@ -33,7 +33,7 @@ served from the same origin as the SPA).
 - **Component tests** render individual components and assert their output and
   accessibility attributes.
 - **Integration test** (`src/test/integration/Dashboard.test.tsx`) mounts the whole
-  `Dashboard`, mocks all three API endpoints with [MSW](https://mswjs.io), and
+  `Dashboard`, mocks the API endpoints with [MSW](https://mswjs.io), and
   verifies the sections render real data and react to user input (time-range
   switching, error states).
 - **Accessibility test** runs axe-core against the fully populated dashboard;

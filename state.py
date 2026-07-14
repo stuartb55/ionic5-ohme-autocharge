@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import math
 import time
 from dataclasses import dataclass, field, asdict
 from typing import Any, Optional
@@ -185,6 +186,17 @@ class AppState:
         # session events use these instead of inferring boundaries from time.
         self.active_session_id: Optional[int] = None
         self.active_session_key: Optional[str] = None
+        # Session rows waiting for Postgres to become available.  The same
+        # payloads are also stored in settings.json so an outage followed by a
+        # process restart cannot erase the plug-in evidence.  Keep this mapping
+        # separate from ``active_session_*``: a long database outage can span
+        # more than one physical plug-in session.
+        self.pending_sessions: dict[str, dict[str, Any]] = {}
+        # Highest cumulative Ohme energy counter observed for the active physical
+        # session. The pinned Ohme client resets ``client.energy`` to zero as soon
+        # as a DISCONNECTED response is read, so the unplug handler must not rely
+        # on the just-refreshed client value for the final session total.
+        self.last_session_energy_wh: Optional[float] = None
         # Local date the weekly digest was last sent, so it goes out once on its
         # scheduled day rather than every poll during the digest hour. In-memory:
         # a restart within that hour could re-send once (rare, low-harm).
@@ -277,6 +289,8 @@ class AppState:
 
     def update(self, snapshot: StatusSnapshot) -> None:
         self.status = snapshot
+        if snapshot.connected:
+            self.record_session_energy(snapshot.session_energy_wh)
         if snapshot.error is None:
             self.ready = True
             self.last_poll_error = None
@@ -303,6 +317,16 @@ class AppState:
         """Remember the real vehicle SOC fetched from Bluelink at plug-in."""
         self.last_soc = soc
         self.last_soc_at = time.monotonic()
+
+    def record_session_energy(self, energy_wh: Any) -> None:
+        """Keep the active session's cumulative energy counter monotonic."""
+        if isinstance(energy_wh, bool) or not isinstance(energy_wh, (int, float)):
+            return
+        value = float(energy_wh)
+        if not math.isfinite(value) or value < 0:
+            return
+        if self.last_session_energy_wh is None or value > self.last_session_energy_wh:
+            self.last_session_energy_wh = value
 
     def record_vehicle_state(self, state: Any) -> None:
         """Remember the SOC plus driving range, odometer and SoH from a Bluelink read."""
@@ -340,6 +364,7 @@ class AppState:
         self.plugin_failure_notified = False
         self.active_session_id = None
         self.active_session_key = None
+        self.last_session_energy_wh = None
         self.record_automation_attempt("idle")
 
 

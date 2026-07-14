@@ -368,22 +368,16 @@ async def _maybe_notify_finished(prev_status: str, snap: StatusSnapshot) -> None
     so a short top-up that goes plugged_in→finished between two polls still
     notifies, but a plug-in skipped at target (0 kWh) doesn't. unknown→finished
     is excluded too, so a restart into a finished session doesn't re-notify.
+
+    This function intentionally owns only the edge-triggered alert. Durable
+    completion and reconciliation are level-triggered separately, because an
+    on-demand refresh or control request may update the shared snapshot before
+    the background poll observes the transition.
     """
     if prev_status not in _ACTIVE_STATUSES or snap.charger_status != "finished":
         return
     if snap.session_energy_wh <= 0:
         return
-    await db.complete_session(
-        store.active_session_key,
-        actual_energy_wh=snap.session_energy_wh,
-        end_soc_percent=snap.battery_percent,
-    )
-    await db.record_session_event(
-        store.active_session_id,
-        "charging_finished",
-        {"energyWh": round(snap.session_energy_wh), "soc": snap.battery_percent},
-    )
-    await _reconcile_finished_session(snap)
     kwh = snap.session_energy_wh / 1000
     preferences = store.notification_preferences
     if preferences.charge_complete and kwh >= preferences.minimum_charge_kwh:
@@ -393,6 +387,32 @@ async def _maybe_notify_finished(prev_status: str, snap: StatusSnapshot) -> None
             title="Charging finished",
             tags="white_check_mark",
         )
+
+
+async def _finalize_finished_session(snap: StatusSnapshot) -> None:
+    """Persist an active session whenever its current state is ``finished``.
+
+    Unlike the notification helper, this is deliberately level-triggered. The
+    database update is idempotent and returns a session id only to the caller
+    that first completes the row, keeping the lifecycle event and initial
+    reconciliation single-shot even when ``finished`` spans many polls.
+    """
+    if snap.charger_status != "finished" or not store.active_session_key:
+        return
+    session_id = await db.complete_session(
+        store.active_session_key,
+        actual_energy_wh=snap.session_energy_wh,
+        end_soc_percent=snap.battery_percent,
+    )
+    if session_id is None:
+        return
+    store.active_session_id = session_id
+    await db.record_session_event(
+        session_id,
+        "charging_finished",
+        {"energyWh": round(snap.session_energy_wh), "soc": snap.battery_percent},
+    )
+    await _reconcile_finished_session(snap)
 
 
 # Health warnings from the SDK plus an optional user-defined 12V percentage
@@ -469,14 +489,18 @@ async def _maybe_record_telemetry(snap: StatusSnapshot) -> None:
     )
 
 
-async def _reconcile_finished_session(snap: StatusSnapshot) -> None:
-    """Price measured session energy only when telemetry and tariff coverage agree."""
-    if store.active_session_id is None:
+async def _reconcile_session(
+    session_id: Optional[int], counter_energy_wh: float, *, trigger: str
+) -> None:
+    """Price one durable session when telemetry and tariff coverage agree."""
+    if session_id is None:
         return
-    rows = await db.get_session_attribution_rows(store.active_session_id)
+    rows = await db.get_session_attribution_rows(session_id)
     if not rows:
         await db.record_session_event(
-            store.active_session_id, "reconciliation_skipped", {"reason": "no_telemetry"}
+            session_id,
+            "reconciliation_skipped",
+            {"reason": "no_telemetry", "trigger": trigger},
         )
         return
     attribution = energy.attribute_car_kwh(
@@ -489,19 +513,46 @@ async def _reconcile_finished_session(snap: StatusSnapshot) -> None:
         rates = store.agile_rates
     priced = octopus.price_energy_buckets(attribution.car_by_slot, rates)
     await db.record_session_reconciliation(
-        store.active_session_id, priced, counter_energy_wh=snap.session_energy_wh
+        session_id, priced, counter_energy_wh=counter_energy_wh
     )
     await db.record_session_event(
-        store.active_session_id,
+        session_id,
         "session_reconciled",
         {
-            "counterEnergyWh": round(snap.session_energy_wh),
+            "counterEnergyWh": round(counter_energy_wh),
             "reconstructedEnergyWh": priced.energy_wh,
             "tariffCoverage": priced.coverage,
             "costMinor": priced.cost_minor,
             "attributionIssues": attribution.issue_count,
+            "trigger": trigger,
         },
     )
+
+
+async def _reconcile_finished_session(snap: StatusSnapshot) -> None:
+    """Initial reconciliation when a durable row first reaches ``finished``."""
+    await _reconcile_session(
+        store.active_session_id, snap.session_energy_wh, trigger="finished"
+    )
+
+
+async def _reconcile_unplugged_session(
+    session_key: Optional[str], session_id: Optional[int], energy_wh: Optional[float]
+) -> None:
+    """Retry reconciliation at the final physical session boundary."""
+    resolved_id = session_id
+    if resolved_id is None:
+        resolved_id = await db.get_session_id_by_key(session_key)
+    if resolved_id is None:
+        return
+    if energy_wh is None:
+        await db.record_session_event(
+            resolved_id,
+            "reconciliation_skipped",
+            {"reason": "no_energy_counter", "trigger": "unplugged"},
+        )
+        return
+    await _reconcile_session(resolved_id, energy_wh, trigger="unplugged")
 
 
 def _on_poll_task_done(task: asyncio.Task) -> None:
@@ -538,7 +589,7 @@ async def poll_loop() -> None:
         logger.warning("Could not fetch device info on startup", exc_info=True)
 
     # The plug-in transition state machine is shared with main.run_loop.
-    detector = main.PlugInDetector()
+    detector = main.PlugInDetector(on_unplug=_reconcile_unplugged_session)
     try:
         initial_status = await ohme_client.get_charger_status(client)
         detector.prime(initial_status)
@@ -590,6 +641,7 @@ async def poll_loop() -> None:
                 # persistence is disabled). Outside the lock: it doesn't touch the
                 # Ohme client. Identical idle rows are de-duplicated.
                 await _maybe_record_telemetry(store.status)
+                await _finalize_finished_session(store.status)
                 await _maybe_notify_finished(prev_status, store.status)
                 await _maybe_notify_vehicle_health(prev_snapshot, store.status)
 
@@ -757,17 +809,40 @@ except Exception:  # noqa: BLE001 - bad TIMEZONE value; fall back to host-local
     logger.warning("Unknown TIMEZONE %r — using host-local time for daily stats", config.TIMEZONE)
     _STATS_TZ = None
 
-def _money(node: Any) -> tuple[float, Optional[str]]:
-    """Return (amount_in_major_units, currencyCode) from an Ohme Money dict."""
+def _money_amount(node: Any) -> tuple[Decimal, Optional[str]]:
+    """Return Ohme's exact minor-unit amount and currency code."""
     if not isinstance(node, dict):
-        return 0.0, None
+        return Decimal("0"), None
     try:
         amount = Decimal(str(node.get("amount") or 0))
     except (TypeError, ValueError, ArithmeticError):
         amount = Decimal("0")
+    if not amount.is_finite():
+        amount = Decimal("0")
     currency = node.get("currencyCode")
-    factor = {"JPY": 1, "KWD": 1000}.get(str(currency or "GBP").upper(), 100)
+    return amount, currency
+
+
+def _minor_factor(currency: Optional[str]) -> int:
+    return {"JPY": 1, "KWD": 1000}.get(str(currency or "GBP").upper(), 100)
+
+
+def _money(node: Any) -> tuple[float, Optional[str]]:
+    """Return (amount_in_major_units, currencyCode) from an Ohme Money dict."""
+    amount, currency = _money_amount(node)
+    factor = _minor_factor(currency)
     return float(amount / factor), currency
+
+
+def _whole_units(value: Any) -> int:
+    """Normalise an upstream whole-unit counter without a float round trip."""
+    try:
+        amount = Decimal(str(value or 0))
+    except (TypeError, ValueError, ArithmeticError):
+        return 0
+    if not amount.is_finite() or amount < 0:
+        return 0
+    return int(amount.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 def _statistics_window(days: int, now: Optional[datetime.datetime] = None) -> dict[str, Any]:
@@ -797,15 +872,16 @@ def _statistics_window(days: int, now: Optional[datetime.datetime] = None) -> di
 def _complete_daily_series(
     daily: list[dict[str, Any]], window: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    """Return exactly one row for every complete local day in the window."""
+    """Return only upstream-reported rows inside the complete-day window."""
     by_date = {row["date"]: row for row in daily if row.get("date")}
     day = window["start"].date()
     end_day = window["end"].date()
     result = []
     while day < end_day:
         key = day.isoformat()
-        row = by_date.get(key) or {"date": key, "energyKwh": 0.0, "savings": 0.0, "cost": 0.0}
-        result.append({**row, "isComplete": True})
+        row = by_date.get(key)
+        if row is not None:
+            result.append({**row, "isComplete": True})
         day += datetime.timedelta(days=1)
     return result
 
@@ -823,11 +899,17 @@ def parse_summary(summary: dict[str, Any], days: int) -> dict[str, Any]:
 
     daily = []
     for stat in summary.get("stats") or []:
-        day_saved, _ = _money((stat.get("costStats") or {}).get("moneySavedVsStandardTariff"))
-        day_cost, _ = _money((stat.get("costStats") or {}).get("moneyCostTotal"))
+        stat_cost = stat.get("costStats") or {}
+        day_saved_node = stat_cost.get("moneySavedVsStandardTariff")
+        day_cost_node = stat_cost.get("moneyCostTotal")
+        day_saved_amount, day_saved_currency = _money_amount(day_saved_node)
+        day_cost_amount, day_cost_currency = _money_amount(day_cost_node)
+        day_currency = day_saved_currency or day_cost_currency or currency
+        factor = _minor_factor(day_currency)
+        energy_wh = _whole_units(stat.get("energyChargedTotalWh"))
         start_ms = stat.get("startTime")
         date = None
-        if start_ms:
+        if start_ms is not None:
             date = (
                 datetime.datetime.fromtimestamp(start_ms / 1000, tz=_STATS_TZ)
                 .date()
@@ -836,9 +918,19 @@ def parse_summary(summary: dict[str, Any], days: int) -> dict[str, Any]:
         daily.append(
             {
                 "date": date,
-                "energyKwh": round((stat.get("energyChargedTotalWh") or 0) / 1000, 2),
-                "savings": round(day_saved, 2),
-                "cost": round(day_cost, 2),
+                "energyKwh": round(energy_wh / 1000, 2),
+                "savings": round(float(day_saved_amount / factor), 2),
+                "cost": round(float(day_cost_amount / factor), 2),
+                # Internal exact fields are consumed by ``record_daily_stats``.
+                # The response model deliberately omits them from the public API.
+                "energyWh": energy_wh,
+                "savingsMinor": int(
+                    day_saved_amount.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+                ),
+                "costMinor": int(
+                    day_cost_amount.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+                ),
+                "currency": day_currency,
             }
         )
 
@@ -1481,6 +1573,7 @@ async def get_status() -> JSONResponse:
         "config": {
             "chargeTarget": store.charge_target,
             "pollIntervalSeconds": config.POLL_INTERVAL,
+            "timezone": config.TIMEZONE,
             # Bounds for the target editor, so the UI stays in sync with the
             # validation on PUT /api/settings/target rather than hardcoding them.
             "targetMin": settings.TARGET_MIN,
@@ -1530,6 +1623,7 @@ async def get_schedule() -> JSONResponse:
             "nextSlotEnd": store.status.next_slot_end,
             "connected": store.status.connected,
             "updatedAt": store.status.updated_at,
+            "timezone": config.TIMEZONE,
         }
     )
 
@@ -1588,16 +1682,26 @@ async def get_energy_usage(date: Optional[str] = Query(default=None)) -> JSONRes
     ``/api/sessions`` and ``/api/tariff``.
     """
     if not octopus.consumption_is_enabled() or not db.is_available():
-        return JSONResponse({"enabled": False, "slots": [], "totals": None, "date": None})
+        return JSONResponse(
+            {
+                "enabled": False,
+                "slots": [],
+                "totals": None,
+                "date": None,
+                "latestDate": None,
+                "timezone": str(_STATS_TZ or datetime.timezone.utc),
+            }
+        )
 
     tz = _STATS_TZ or datetime.timezone.utc
+    latest_day = (datetime.datetime.now(tz) - datetime.timedelta(days=1)).date()
     if date:
         try:
             day = datetime.date.fromisoformat(date)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD") from exc
     else:
-        day = (datetime.datetime.now(tz) - datetime.timedelta(days=1)).date()
+        day = latest_day
 
     # Local-midnight bounds for the requested day, so a day's 48 slots line up
     # with the user's calendar rather than the container's UTC day.
@@ -1605,7 +1709,16 @@ async def get_energy_usage(date: Optional[str] = Query(default=None)) -> JSONRes
     end = start + datetime.timedelta(days=1)
     rows = await db.get_grid_consumption(start, end)
     if rows is None:
-        return JSONResponse({"enabled": False, "slots": [], "totals": None, "date": None})
+        return JSONResponse(
+            {
+                "enabled": False,
+                "slots": [],
+                "totals": None,
+                "date": None,
+                "latestDate": latest_day.isoformat(),
+                "timezone": str(tz),
+            }
+        )
 
     totals = {
         "importKwh": round(sum(r["importKwh"] or 0 for r in rows), 2),
@@ -1617,6 +1730,8 @@ async def get_energy_usage(date: Optional[str] = Query(default=None)) -> JSONRes
         {
             "enabled": True,
             "date": day.isoformat(),
+            "latestDate": latest_day.isoformat(),
+            "timezone": str(tz),
             "currency": "GBP",
             "slots": rows,
             "totals": totals,
@@ -1749,7 +1864,12 @@ async def _persist_daily_stats(client: Any, days: int = 90) -> None:
     parsed = parse_summary({k: v for k, v in summary.items() if k != "granularity"}, days)
     parsed["daily"] = _complete_daily_series(parsed["daily"], window)
     _cache_avg_price(parsed)
-    await db.record_daily_stats(parsed["daily"], parsed["currency"])
+    await db.record_daily_stats(
+        parsed["daily"],
+        parsed["currency"],
+        window_start=window["start"].date(),
+        window_end=window["end"].date(),
+    )
 
 
 async def _persist_grid_consumption(days: int = 3) -> None:
@@ -1953,12 +2073,30 @@ def _statistics_metadata(
     efficiency = parsed.get("efficiency")
     running_cost = parsed.get("runningCost")
     comparison = parsed.get("comparison")
+    reported_dates = {row["date"] for row in parsed["daily"] if row.get("date")}
+    reported_days = len(reported_dates)
+    missing_days = max(0, window["days"] - reported_days)
+    contiguous_day = window["start"].date()
+    while (
+        contiguous_day < window["end"].date()
+        and contiguous_day.isoformat() in reported_dates
+    ):
+        contiguous_day += datetime.timedelta(days=1)
+    daily_complete_through = datetime.datetime.combine(
+        contiguous_day,
+        datetime.time.min,
+        tzinfo=window["start"].tzinfo,
+    ).isoformat()
     summary_coverage = {
         "requestedDays": window["days"],
-        "completeDays": len(parsed["daily"]),
         "from": window["start"].isoformat(),
         "toExclusive": complete_through,
         "scope": "ohme_account",
+    }
+    daily_coverage = {
+        **summary_coverage,
+        "completeDays": reported_days,
+        "missingDays": missing_days,
     }
 
     return {
@@ -1972,11 +2110,17 @@ def _statistics_metadata(
         },
         "daily": {
             "source": "ohme_charge_summary",
-            "calculationType": "complete_local_calendar_days",
+            "calculationType": "upstream_reported_complete_local_days",
             "observedAt": fetched_at.isoformat(),
-            "completeThrough": complete_through,
-            "quality": "complete",
-            "coverage": summary_coverage,
+            "completeThrough": daily_complete_through,
+            "quality": (
+                "complete"
+                if missing_days == 0
+                else "partial"
+                if reported_days > 0
+                else "unavailable"
+            ),
+            "coverage": daily_coverage,
         },
         "efficiency": {
             "source": "charge_sessions.actual_energy_wh+bluelink_odometer",
@@ -2087,7 +2231,12 @@ async def get_statistics(
     parsed["metadata"] = _statistics_metadata(parsed, window, metrics, fetched_at)
     _summary_cache.update(key=cache_key, value=parsed, at=now)
     # Opportunistically persist the day totals we just fetched (no-op when disabled).
-    await db.record_daily_stats(parsed["daily"], parsed["currency"])
+    await db.record_daily_stats(
+        parsed["daily"],
+        parsed["currency"],
+        window_start=window["start"].date(),
+        window_end=window["end"].date(),
+    )
     return StatisticsResponseModel.model_validate(parsed)
 
 

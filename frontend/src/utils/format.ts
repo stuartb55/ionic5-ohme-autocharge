@@ -67,26 +67,48 @@ export function formatPricePerMile(amount: number, currency: string | null): str
   return formatMoney(amount, currency);
 }
 
-/** "01:00" from an ISO timestamp, in the viewer's locale time. */
-export function formatTime(iso: string): string {
+/** "01:00" from an ISO timestamp, in the configured home timezone when supplied. */
+export function formatTime(iso: string, timeZone?: string): string {
   const d = new Date(iso);
-  return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    ...(timeZone ? { timeZone } : {}),
+  });
+}
+
+function calendarDay(date: Date, timeZone?: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    ...(timeZone ? { timeZone } : {}),
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? '';
+  return `${value('year')}-${value('month')}-${value('day')}`;
 }
 
 /**
  * Projected charge finish: "06:30" when it's today, otherwise "Sat 06:30" —
  * overnight charges routinely finish on the next calendar day.
  */
-export function formatFinishTime(iso: string, now: Date = new Date()): string {
+export function formatFinishTime(iso: string, now: Date = new Date(), timeZone?: string): string {
   const d = new Date(iso);
-  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-  if (d.toDateString() === now.toDateString()) return time;
-  return `${d.toLocaleDateString(undefined, { weekday: 'short' })} ${time}`;
+  const time = formatTime(iso, timeZone);
+  if (calendarDay(d, timeZone) === calendarDay(now, timeZone)) return time;
+  return `${d.toLocaleDateString(undefined, { weekday: 'short', ...(timeZone ? { timeZone } : {}) })} ${time}`;
 }
 
-export function formatDateShort(iso: string | null): string {
+export function formatDateShort(iso: string | null, timeZone?: string): string {
   if (!iso) return '';
-  return new Date(iso).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(iso);
+  const value = dateOnly ? new Date(`${iso}T00:00:00Z`) : new Date(iso);
+  return value.toLocaleDateString(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    ...(dateOnly ? { timeZone: 'UTC' } : timeZone ? { timeZone } : {}),
+  });
 }
 
 /**

@@ -10,8 +10,10 @@ import argparse
 import asyncio
 import datetime
 import logging
+import math
 import sys
 import uuid
+from collections.abc import Awaitable, Callable
 
 import bluelink
 import ohme_client
@@ -53,6 +55,228 @@ def load_persisted_settings() -> None:
     if vehicle_id is not None:
         store.set_vehicle_id(vehicle_id)
         logger.info("Loaded persisted vehicle selection: %s", vehicle_id)
+    store.pending_sessions = settings.load_pending_sessions()
+
+
+def _outbox_timestamp(value) -> str | None:
+    """Make a timestamp JSON-safe for the durable session outbox."""
+    if isinstance(value, datetime.datetime):
+        return value.isoformat()
+    return value if isinstance(value, str) and value else None
+
+
+def _string_or_none(value) -> str | None:
+    """Keep third-party client metadata JSON/DB safe at the persistence boundary."""
+    return value if isinstance(value, str) and value else None
+
+
+def _restore_outbox_timestamp(value) -> datetime.datetime | None:
+    """Restore a timestamp from a validated, internally-produced outbox row."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _slot_payloads(slots) -> list[dict]:
+    """Return only JSON-safe schedule rows from the Ohme client."""
+    payloads = []
+    for slot in slots:
+        try:
+            payload = slot.to_dict()
+        except Exception:  # noqa: BLE001 - optional audit evidence only
+            continue
+        if isinstance(payload, dict):
+            payloads.append(payload)
+    return payloads
+
+
+def _save_outbox_payload(payload: dict) -> None:
+    """Keep one outbox item in memory and on the durable settings volume."""
+    session_key = payload["sessionKey"]
+    store.pending_sessions[session_key] = payload
+    if not settings.save_pending_session(payload):
+        # The in-memory copy still recovers a transient DB outage.  The warning
+        # makes the narrower restart guarantee explicit if the settings volume
+        # itself is unavailable.
+        logger.warning("Session outbox could not be persisted; retaining it in memory")
+
+
+def _stage_pending_session(
+    *,
+    session_key: str,
+    vehicle_name: str | None,
+    soc_percent: int | None,
+    target_percent: int | None,
+    topup_percent: int | None,
+    action: str,
+    odometer_miles: int | None,
+    soh_percent: int | None,
+    vehicle_id: str | None,
+    vin: str | None,
+    charger_id: str | None,
+    source_observed_at: datetime.datetime | None,
+    plugged_in_at: datetime.datetime,
+    initial_event_type: str,
+    initial_event_details: dict,
+    initial_schedule: dict | None = None,
+) -> None:
+    """Persist the evidence needed to create one idempotent session row.
+
+    This happens before the plug-in is marked handled.  PostgreSQL can therefore
+    be absent for the whole plug-in event (or across a process restart) without
+    losing the row needed to link telemetry and final energy later.
+    """
+    if not db.is_enabled():
+        return
+    payload = {
+        "sessionKey": session_key,
+        "vehicleName": vehicle_name,
+        "socPercent": soc_percent,
+        "targetPercent": target_percent,
+        "topupPercent": topup_percent,
+        "action": action,
+        "odometerMiles": odometer_miles,
+        "sohPercent": soh_percent,
+        "vehicleId": vehicle_id,
+        "vin": vin,
+        "chargerId": charger_id,
+        "sourceObservedAt": _outbox_timestamp(source_observed_at),
+        "pluggedInAt": _outbox_timestamp(plugged_in_at),
+        "initialEvent": {
+            "type": initial_event_type,
+            "details": initial_event_details,
+        },
+        "initialSchedule": initial_schedule,
+    }
+    _save_outbox_payload(payload)
+
+
+def _stage_pending_session_close(
+    session_key: str, *, final_energy_wh: float | None, end_soc_percent: int | None
+) -> None:
+    """Durably stage the final physical boundary before in-memory state clears."""
+    if not db.is_enabled():
+        return
+    pending = settings.load_pending_sessions()
+    pending.update(store.pending_sessions)
+    payload = pending.get(session_key)
+    if payload is None:
+        # The creation outbox was already acknowledged, so the row is known to
+        # exist. This close-only command is sufficient to retry a later outage.
+        payload = {"sessionKey": session_key, "rowPersisted": True}
+    else:
+        payload = dict(payload)
+    payload.update(
+        {
+            "unplugged": True,
+            "finalEnergyWh": final_energy_wh,
+            "endSocPercent": end_soc_percent,
+            "completionReason": "unplugged",
+        }
+    )
+    _save_outbox_payload(payload)
+
+
+async def _record_pending_session_row(session_key: str, payload: dict) -> int | None:
+    """Write the creation part of one outbox item via its idempotency key."""
+    return await db.record_session(
+        vehicle_name=payload.get("vehicleName"),
+        soc_percent=payload.get("socPercent"),
+        target_percent=payload.get("targetPercent"),
+        topup_percent=payload.get("topupPercent"),
+        action=payload.get("action") or "configured",
+        odometer_miles=payload.get("odometerMiles"),
+        soh_percent=payload.get("sohPercent"),
+        session_key=session_key,
+        vehicle_id=payload.get("vehicleId"),
+        vin=payload.get("vin"),
+        charger_id=payload.get("chargerId"),
+        source_observed_at=_restore_outbox_timestamp(
+            payload.get("sourceObservedAt")
+        ),
+        plugged_in_at=_restore_outbox_timestamp(payload.get("pluggedInAt")),
+    )
+
+
+async def ensure_pending_sessions(*, active_session_key: str | None = None) -> int | None:
+    """Drain durable session rows into Postgres, retrying safely on every poll.
+
+    ``db.record_session`` uses ``session_key`` as an idempotency key, so a crash
+    after the INSERT commits but before this function acknowledges the outbox is
+    harmless.  Multiple rows are retained because one database outage can span
+    more than one physical plug-in session.
+    """
+    if not db.is_enabled():
+        return None
+    pending = settings.load_pending_sessions()
+    pending.update(store.pending_sessions)
+    store.pending_sessions = pending
+    active_id: int | None = None
+    for session_key, payload in list(pending.items()):
+        session_id = None
+        if payload.get("rowPersisted") is True:
+            if session_key == active_session_key and store.active_session_id is not None:
+                session_id = store.active_session_id
+            else:
+                session_id = await db.get_session_id_by_key(session_key)
+            # The acknowledgement can outlive a restored/replaced database. A
+            # full creation payload can safely repair that case; a close-only
+            # command deliberately waits because it lacks trustworthy row data.
+            if session_id is None and isinstance(payload.get("action"), str):
+                payload["rowPersisted"] = False
+                _save_outbox_payload(payload)
+                session_id = await _record_pending_session_row(session_key, payload)
+        else:
+            session_id = await _record_pending_session_row(session_key, payload)
+        if session_id is None:
+            continue
+        if payload.get("rowPersisted") is not True:
+            payload["rowPersisted"] = True
+            _save_outbox_payload(payload)
+        if session_key == active_session_key:
+            store.active_session_id = session_id
+            store.active_session_key = session_key
+            active_id = session_id
+        initial_event = payload.get("initialEvent")
+        if isinstance(initial_event, dict):
+            event_type = initial_event.get("type")
+            if not isinstance(event_type, str) or not await db.record_initial_session_event(
+                session_id,
+                event_type,
+                initial_event.get("details")
+                if isinstance(initial_event.get("details"), dict)
+                else {},
+            ):
+                continue
+        initial_schedule = payload.get("initialSchedule")
+        if isinstance(initial_schedule, dict):
+            slots = initial_schedule.get("slots")
+            if not await db.record_initial_schedule(
+                session_id=session_id,
+                slots=slots if isinstance(slots, list) else [],
+                next_slot_start=_restore_outbox_timestamp(
+                    initial_schedule.get("nextSlotStart")
+                ),
+                next_slot_end=_restore_outbox_timestamp(
+                    initial_schedule.get("nextSlotEnd")
+                ),
+            ):
+                continue
+        if payload.get("unplugged") is True and not await db.close_session(
+            session_key,
+            actual_energy_wh=payload.get("finalEnergyWh"),
+            end_soc_percent=payload.get("endSocPercent"),
+            completion_reason=payload.get("completionReason") or "unplugged",
+        ):
+            continue
+        # A failed acknowledgement leaves the item in memory and on disk.  The
+        # next idempotent retry will return the same row id and try again.
+        if settings.clear_pending_session(session_key):
+            store.pending_sessions.pop(session_key, None)
+    return active_id
 
 
 async def handle_plugin_event(
@@ -95,29 +319,32 @@ async def handle_plugin_event(
             soc,
             target,
         )
-        if db.is_available():
-            session_id = await db.record_session(
-                vehicle_name=client.current_vehicle,
-                soc_percent=soc,
-                target_percent=target,
-                topup_percent=0,
-                action="skipped_at_target",
-                odometer_miles=vehicle.odometer_miles,
-                soh_percent=vehicle.soh_percent,
-                session_key=session_key,
-                vehicle_id=vehicle.vehicle_id,
-                vin=vehicle.vin,
-                charger_id=client.serial if isinstance(getattr(client, "serial", None), str) else None,
-                source_observed_at=vehicle.observed_at,
-                plugged_in_at=plugged_in_at,
-            )
-            store.active_session_id = session_id
-            store.active_session_key = session_key
-            await db.record_session_event(
-                session_id,
-                "skipped_at_target",
-                {"soc": soc, "target": target, "tripMode": store.trip_mode_enabled},
-            )
+        _stage_pending_session(
+            vehicle_name=_string_or_none(client.current_vehicle),
+            soc_percent=soc,
+            target_percent=target,
+            topup_percent=0,
+            action="skipped_at_target",
+            odometer_miles=vehicle.odometer_miles,
+            soh_percent=vehicle.soh_percent,
+            session_key=session_key,
+            vehicle_id=vehicle.vehicle_id,
+            vin=vehicle.vin,
+            charger_id=(
+                client.serial
+                if isinstance(getattr(client, "serial", None), str)
+                else None
+            ),
+            source_observed_at=vehicle.observed_at,
+            plugged_in_at=plugged_in_at,
+            initial_event_type="skipped_at_target",
+            initial_event_details={
+                "soc": soc,
+                "target": target,
+                "tripMode": store.trip_mode_enabled,
+            },
+        )
+        await ensure_pending_sessions(active_session_key=session_key)
         store.plugin_failure_notified = False
         store.record_automation_attempt("configured")
         return True
@@ -144,10 +371,41 @@ async def handle_plugin_event(
             # while still holding the lock, so a concurrent charge-summary read
             # on the shared client can't rebuild client.slots between the
             # set_target write and these reads.
-            vehicle_name = client.current_vehicle or "EV"
+            vehicle_name = _string_or_none(client.current_vehicle) or "EV"
             slots = list(client.slots)
             next_slot_start = client.next_slot_start
             next_slot_end = client.next_slot_end
+        _stage_pending_session(
+            vehicle_name=vehicle_name,
+            soc_percent=soc,
+            target_percent=target,
+            topup_percent=target - soc,
+            action="configured",
+            odometer_miles=vehicle.odometer_miles,
+            soh_percent=vehicle.soh_percent,
+            session_key=session_key,
+            vehicle_id=vehicle.vehicle_id,
+            vin=vehicle.vin,
+            charger_id=(
+                client.serial
+                if isinstance(getattr(client, "serial", None), str)
+                else None
+            ),
+            source_observed_at=vehicle.observed_at,
+            plugged_in_at=plugged_in_at,
+            initial_event_type="target_configured",
+            initial_event_details={
+                "soc": soc,
+                "target": target,
+                "tripMode": store.trip_mode_enabled,
+            },
+            initial_schedule={
+                "slots": _slot_payloads(slots),
+                "nextSlotStart": _outbox_timestamp(next_slot_start),
+                "nextSlotEnd": _outbox_timestamp(next_slot_end),
+            },
+        )
+        await ensure_pending_sessions(active_session_key=session_key)
         # Multi-line body so each fact is on its own line — far easier to scan on
         # a phone than one run-on sentence. The vehicle name goes in the title.
         lines = [f"Charging {soc}% → {target}%"]
@@ -161,35 +419,6 @@ async def handle_plugin_event(
         if store.notification_preferences.plug_in:
             await ntfy.send(
                 "\n".join(lines), title=f"{vehicle_name} plugged in", tags="electric_plug"
-            )
-        if db.is_available():
-            session_id = await db.record_session(
-                vehicle_name=vehicle_name,
-                soc_percent=soc,
-                target_percent=target,
-                topup_percent=target - soc,
-                action="configured",
-                odometer_miles=vehicle.odometer_miles,
-                soh_percent=vehicle.soh_percent,
-                session_key=session_key,
-                vehicle_id=vehicle.vehicle_id,
-                vin=vehicle.vin,
-                charger_id=client.serial if isinstance(getattr(client, "serial", None), str) else None,
-                source_observed_at=vehicle.observed_at,
-                plugged_in_at=plugged_in_at,
-            )
-            store.active_session_id = session_id
-            store.active_session_key = session_key
-            await db.record_session_event(
-                session_id,
-                "target_configured",
-                {"soc": soc, "target": target, "tripMode": store.trip_mode_enabled},
-            )
-            await db.record_schedule(
-                session_id=session_id,
-                slots=[s.to_dict() for s in slots],
-                next_slot_start=next_slot_start,
-                next_slot_end=next_slot_end,
             )
         store.plugin_failure_notified = False
         store.record_automation_attempt("configured")
@@ -217,6 +446,11 @@ async def _notify_plugin_failure(message: str) -> None:
         await ntfy.send(message, title="Autocharge problem", priority="high", tags="warning")
 
 
+UnplugHook = Callable[
+    [str | None, int | None, float | None], Awaitable[None]
+]
+
+
 class PlugInDetector:
     """Tracks plug/unplug transitions and fires :func:`handle_plugin_event` once
     per plug-in session.
@@ -227,11 +461,12 @@ class PlugInDetector:
     :meth:`update`, which owns the once-per-session and unplug logic.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, on_unplug: UnplugHook | None = None) -> None:
         self.was_connected = False
         self.session_handled = False
         self.session_key: str | None = None
         self.plugged_in_at: datetime.datetime | None = None
+        self.on_unplug = on_unplug
 
     def prime(self, status) -> None:
         """Seed the initial connection state from a startup snapshot.
@@ -241,9 +476,9 @@ class PlugInDetector:
         consult the persisted ``sessionActive`` marker:
 
         * connected + ``sessionActive`` True → the session was already configured
-          and recorded before the restart. Treat it as handled so we don't
-          re-record a duplicate ``charge_sessions`` row or re-send a notification.
-          Ohme keeps its charge rule server-side, so nothing needs reconfiguring.
+          before the restart. Treat it as handled so we don't re-send a
+          notification or repeat the Ohme write; any queued database row is
+          replayed independently from its durable outbox.
         * connected + not ``sessionActive`` → the car was plugged in while the
           container was down; the session was never configured. Leave it
           unhandled so the next poll configures, records and notifies once.
@@ -276,6 +511,7 @@ class PlugInDetector:
         if now_connected and not self.was_connected:
             # Transition: disconnected → connected (car just plugged in)
             self.session_handled = False
+            store.last_session_energy_wh = None
             self.session_key = uuid.uuid4().hex
             self.plugged_in_at = datetime.datetime.now(datetime.timezone.utc)
             # Persist the key before any upstream/DB work. If the process dies
@@ -283,6 +519,11 @@ class PlugInDetector:
             settings.save_session_marker(self.session_key, handled=False)
             store.active_session_key = self.session_key
             store.record_automation_attempt("pending")
+
+        if now_connected:
+            # Capture the cumulative counter before a later DISCONNECTED refresh
+            # resets ``client.energy`` to zero inside the Ohme library.
+            store.record_session_energy(getattr(client, "energy", None))
 
         if now_connected and not self.session_handled:
             if self.session_key is None:
@@ -292,19 +533,59 @@ class PlugInDetector:
             self.session_handled = await handle_plugin_event(
                 client, session_key=self.session_key, plugged_in_at=self.plugged_in_at
             )
-            # Persist once the session is configured/recorded so a restart
-            # mid-session doesn't re-record a duplicate row or re-notify.
+            # Persist once the target is configured and its row outbox is staged,
+            # so a restart doesn't repeat the Ohme write or re-notify.
             if self.session_handled:
                 settings.save_session_marker(self.session_key, handled=True)
 
+        # Retry durable row creation independently of target configuration. In
+        # particular, a successful Ohme write while Postgres is down must not be
+        # repeated just to recover its history row.
+        if now_connected:
+            await ensure_pending_sessions(active_session_key=self.session_key)
+
         if not now_connected and self.was_connected:
             logger.info("Car unplugged (status=%s). Waiting for next session.", status)
+            session_key = self.session_key or settings.load_session_key()
+            session_id = store.active_session_id
             raw_energy = getattr(client, "energy", None)
-            await db.close_session(
-                self.session_key or settings.load_session_key(),
-                actual_energy_wh=float(raw_energy) if isinstance(raw_energy, (int, float)) else None,
-                end_soc_percent=store.last_soc,
+            fallback_energy = (
+                float(raw_energy)
+                if (
+                    isinstance(raw_energy, (int, float))
+                    and not isinstance(raw_energy, bool)
+                    and math.isfinite(float(raw_energy))
+                    and float(raw_energy) >= 0
+                )
+                else None
             )
+            final_energy = (
+                store.last_session_energy_wh
+                if store.last_session_energy_wh is not None
+                else fallback_energy
+            )
+            if session_key is not None:
+                # Persist the close command before clear_soc() discards the only
+                # final counter/SOC copy. The outbox acknowledges it only after
+                # close_session confirms that the durable row was updated.
+                _stage_pending_session_close(
+                    session_key,
+                    final_energy_wh=final_energy,
+                    end_soc_percent=store.last_soc,
+                )
+                recovered_id = await ensure_pending_sessions(
+                    active_session_key=session_key
+                )
+                session_id = recovered_id or store.active_session_id or session_id
+            # The API injects its tariff/telemetry reconciliation here. Run it
+            # after the durable close but before clear_soc() discards the active
+            # id, key and final counter. A reporting failure must never prevent
+            # the detector from clearing the physical session boundary.
+            if self.on_unplug is not None:
+                try:
+                    await self.on_unplug(session_key, session_id, final_energy)
+                except Exception:  # noqa: BLE001 - best-effort reporting hook
+                    logger.warning("Unplug reconciliation failed", exc_info=True)
             if store.trip_mode_enabled:
                 await db.record_session_event(
                     store.active_session_id,
@@ -320,6 +601,10 @@ class PlugInDetector:
             store.clear_soc()
             self.session_key = None
             self.plugged_in_at = None
+        elif not now_connected:
+            # Drain close commands left by a database outage that continued past
+            # the physical unplug boundary.
+            await ensure_pending_sessions()
 
         self.was_connected = now_connected
         return now_connected

@@ -4,16 +4,30 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 import { Dashboard } from '../../components/Dashboard';
 import { server } from '../mocks/server';
-import { statisticsFixture, statusFixture } from '../fixtures';
+import { scheduleFixture, sessionsFixture, statisticsFixture, statusFixture } from '../fixtures';
 
 describe('Dashboard integration', () => {
+  it('does not fetch fleet data for the single-vehicle dashboard', async () => {
+    let vehicleListHits = 0;
+    server.use(
+      http.get('*/api/vehicles', () => {
+        vehicleListHits += 1;
+        return HttpResponse.json({ vehicles: [], selected: null });
+      }),
+    );
+
+    render(<Dashboard />);
+    await screen.findByText('Hyundai IONIQ 5');
+    expect(vehicleListHits).toBe(0);
+  });
+
   it('renders all three sections wired to the API', async () => {
     render(<Dashboard />);
 
     // Section 1: status
     expect(await screen.findByText('Hyundai IONIQ 5')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: /state of charge 62%/i })).toBeInTheDocument();
-    expect(screen.getByText('Charging')).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: /charger status: charging/i })).toBeInTheDocument();
     expect(screen.getByText('7.4 kW')).toBeInTheDocument();
 
     // Section 2: schedule
@@ -133,6 +147,41 @@ describe('Dashboard integration', () => {
 
     await waitFor(() => expect(refreshHits).toBe(1));
     await waitFor(() => expect(statusHits).toBeGreaterThan(initialStatusHits));
+  });
+
+  it('refreshes every dashboard data source from the header action', async () => {
+    const hits = { schedule: 0, stats: 0, sessions: 0, quality: 0, tariff: 0, soh: 0, energy: 0 };
+    server.use(
+      http.get('*/api/schedule', () => { hits.schedule += 1; return HttpResponse.json(scheduleFixture); }),
+      http.get('*/api/statistics', () => { hits.stats += 1; return HttpResponse.json(statisticsFixture); }),
+      http.get('*/api/sessions', () => { hits.sessions += 1; return HttpResponse.json(sessionsFixture); }),
+      http.get('*/api/data-quality', () => {
+        hits.quality += 1;
+        return HttpResponse.json({
+          status: 'ok', generatedAt: statusFixture.updatedAt, persistenceAvailable: false,
+          actualCostExpected: false, sessions: null, telemetry: null, consumption: null, daily: null,
+          statisticsCache: { available: true, ageSeconds: 30 },
+        });
+      }),
+      http.get('*/api/tariff', () => { hits.tariff += 1; return HttpResponse.json({ enabled: false, rates: [], cheapest: [] }); }),
+      http.get('*/api/soh-history', () => { hits.soh += 1; return HttpResponse.json({ enabled: false, history: [] }); }),
+      http.get('*/api/energy-usage', () => {
+        hits.energy += 1;
+        return HttpResponse.json({ enabled: false, date: null, slots: [], totals: null });
+      }),
+    );
+
+    render(<Dashboard />);
+    await waitFor(() => expect(Object.values(hits).every((count) => count > 0)).toBe(true));
+    const before = { ...hits };
+
+    await userEvent.click(screen.getByRole('button', { name: /refresh now/i }));
+
+    await waitFor(() => {
+      for (const key of Object.keys(hits) as Array<keyof typeof hits>) {
+        expect(hits[key]).toBeGreaterThan(before[key]);
+      }
+    });
   });
 
   it('switches the daily chart to the Cost metric', async () => {

@@ -7,6 +7,7 @@ import {
   formatPower,
   formatPricePerKwh,
   formatPricePerMile,
+  formatTime,
   relativeTime,
   statusLabel,
 } from './format';
@@ -24,6 +25,13 @@ describe('formatFinishTime', () => {
     const now = new Date('2026-06-02T23:30:00');
     // 2026-06-03 is a Wednesday.
     expect(formatFinishTime('2026-06-03T06:30:00', now)).toMatch(/^Wed.*06:30/);
+  });
+});
+
+describe('home timezone formatting', () => {
+  it('renders schedule timestamps in the configured home timezone', () => {
+    expect(formatTime('2026-07-01T12:00:00Z', 'Europe/London')).toBe('13:00');
+    expect(formatTime('2026-01-01T12:00:00Z', 'Europe/London')).toBe('12:00');
   });
 });
 

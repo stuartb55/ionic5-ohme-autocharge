@@ -176,6 +176,22 @@ def test_record_soc_sets_value_and_timestamp():
     assert s.last_soc_at is not None
 
 
+def test_session_energy_is_monotonic_and_cleared_with_session_state():
+    s = AppState()
+    s.record_session_energy(18_500)
+    s.record_session_energy(0)
+    s.record_session_energy(float("nan"))
+    assert s.last_session_energy_wh == 18_500
+
+    # Snapshot updates share the same monotonic boundary used by the detector.
+    s.update(StatusSnapshot(connected=True, session_energy_wh=19_250))
+    s.update(StatusSnapshot(connected=True, session_energy_wh=10))
+    assert s.last_session_energy_wh == 19_250
+
+    s.clear_soc()
+    assert s.last_session_energy_wh is None
+
+
 def test_record_and_clear_vehicle_state():
     s = AppState()
     vstate = SimpleNamespace(

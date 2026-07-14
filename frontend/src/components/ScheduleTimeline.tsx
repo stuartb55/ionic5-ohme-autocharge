@@ -6,8 +6,16 @@ const H = 64;
 const TRACK_Y = 16;
 const TRACK_H = 28;
 
-export function ScheduleTimeline({ slots, now = new Date() }: { slots: ChargeSlot[]; now?: Date }) {
-  const timeline = buildTimeline(slots);
+export function ScheduleTimeline({
+  slots,
+  now = new Date(),
+  timeZone,
+}: {
+  slots: ChargeSlot[];
+  now?: Date;
+  timeZone?: string;
+}) {
+  const timeline = buildTimeline(slots, 5, timeZone);
   if (!timeline) return null;
   const nowMs = now.getTime();
   const showNow = nowMs >= timeline.startMs && nowMs <= timeline.endMs;
@@ -36,7 +44,8 @@ export function ScheduleTimeline({ slots, now = new Date() }: { slots: ChargeSlo
             rx={8}
           >
             <title>
-              {new Date(seg.slot.start).toLocaleTimeString()} – {new Date(seg.slot.end).toLocaleTimeString()} ·{' '}
+              {new Date(seg.slot.start).toLocaleTimeString('en-GB', timeZone ? { timeZone } : {})} –{' '}
+              {new Date(seg.slot.end).toLocaleTimeString('en-GB', timeZone ? { timeZone } : {})} ·{' '}
               {seg.slot.energy} kWh
             </title>
           </rect>

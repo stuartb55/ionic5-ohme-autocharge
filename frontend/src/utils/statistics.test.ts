@@ -51,6 +51,21 @@ describe('deriveInsights', () => {
     expect(insights.estimatedMiles).toBe(0);
   });
 
+  it('derives daily averages only from reported buckets when coverage is partial', () => {
+    const partial: StatisticsResponse = {
+      ...statisticsFixture,
+      daily: statisticsFixture.daily.filter((day) => day.date !== '2026-05-30'),
+      metadata: {
+        ...statisticsFixture.metadata,
+        daily: { ...statisticsFixture.metadata.daily, quality: 'partial' },
+      },
+    };
+
+    const insights = deriveInsights(partial);
+    expect(insights.chargingDays).toBe(4);
+    expect(insights.avgPerChargingDay).toBeCloseTo((42 - 12.1) / 4, 5);
+  });
+
   it('falls back to the assumed efficiency when none is measured', () => {
     const insights = deriveInsights(statisticsFixture); // efficiency: null
     expect(insights.efficiencyIsReal).toBe(false);

@@ -1,21 +1,99 @@
+import type { ReactNode } from 'react';
 import type { StatusResponse } from '../api/types';
 import { useNow } from '../hooks/useNow';
-import { formatFinishTime, formatKwh, formatMiles, formatMoney, formatPower } from '../utils/format';
+import {
+  formatFinishTime,
+  formatKwh,
+  formatMiles,
+  formatMoney,
+  formatPower,
+  statusLabel,
+} from '../utils/format';
 import { BatteryRing } from './BatteryRing';
 import { ChargeControls } from './ChargeControls';
 import { ConnectionBadge } from './ConnectionBadge';
+import { Icon, type IconName } from './Icon';
 import { VehicleHealth } from './VehicleHealth';
 
-function Tile({ label, value, unit }: { label: string; value: string; unit?: string }) {
+function Metric({
+  icon,
+  label,
+  value,
+  detail,
+}: {
+  icon: IconName;
+  label: string;
+  value: string;
+  detail: ReactNode;
+}) {
   return (
-    <div className="tile">
-      <div className="label">{label}</div>
-      <div className="value">
-        {value}
-        {unit ? <small> {unit}</small> : null}
+    <div className="metric-tile">
+      <span className="metric-icon"><Icon name={icon} /></span>
+      <div>
+        <span className="metric-label">{label}</span>
+        <strong className="metric-value">{value}</strong>
+        <span className="metric-detail">{detail}</span>
       </div>
     </div>
   );
+}
+
+function chargingCopy(
+  status: StatusResponse,
+  target: number,
+  finish: string | null,
+): { eyebrow: string; title: string; description: string } {
+  const { charger, vehicle } = status;
+  const remaining = vehicle.batteryPercent == null
+    ? null
+    : Math.max(0, target - Math.round(vehicle.batteryPercent));
+
+  switch (charger.status) {
+    case 'charging':
+      return {
+        eyebrow: 'Charging now',
+        title: finish ? `On track for ${finish}` : `Charging to ${target}%`,
+        description: remaining != null && remaining > 0
+          ? `${remaining} percentage points left to reach your target.`
+          : 'The vehicle is at its target and the session is finishing up.',
+      };
+    case 'paused':
+      return {
+        eyebrow: 'Charge paused',
+        title: `Target remains ${target}%`,
+        description: 'Resume when you are ready. Your smart schedule is still available.',
+      };
+    case 'finished':
+      return {
+        eyebrow: 'Charge complete',
+        title: `Ready at ${vehicle.batteryPercent == null ? target : Math.round(vehicle.batteryPercent)}%`,
+        description: 'The vehicle can stay connected until you need it.',
+      };
+    case 'plugged_in':
+      return {
+        eyebrow: 'Connected',
+        title: finish ? `Ready by ${finish}` : 'Waiting for the next smart slot',
+        description: `Autocharge is managing the session to a ${target}% target.`,
+      };
+    case 'pending_approval':
+      return {
+        eyebrow: 'Action needed',
+        title: 'Approve the charge in Ohme',
+        description: 'The vehicle is connected, but the charger is waiting for approval.',
+      };
+    case 'unplugged':
+      return {
+        eyebrow: 'Ready for next time',
+        title: 'Plug in and Autocharge takes over',
+        description: `Your default target is ${target}%. No action is needed right now.`,
+      };
+    default:
+      return {
+        eyebrow: 'Checking status',
+        title: 'Waiting for charger data',
+        description: 'The dashboard will update automatically when a reading arrives.',
+      };
+  }
 }
 
 export function StatusSection({
@@ -27,97 +105,102 @@ export function StatusSection({
   onChargeChanged?: () => void;
 }) {
   const { vehicle, charger } = status;
-  // The base target is what the editor sets; the effective target (which may be
-  // today's per-weekday override) is what the ring and Ohme actually use.
   const baseTarget = status.config.chargeTarget;
   const target = charger.targetPercent ?? baseTarget;
-  // Tick once a minute so the projection hides itself when the finish time
-  // passes, without reading the impure Date.now() during render.
   const now = useNow(60_000);
-  // Show the projected finish only while it's still ahead of us and the
-  // session hasn't already completed.
   const showFinish =
     charger.connected &&
     charger.status !== 'finished' &&
     charger.projectedFinish != null &&
     new Date(charger.projectedFinish).getTime() > now;
-
-  const statusMessage = charger.status === 'charging'
-    ? `Charging to ${target}%${showFinish ? ` · finishes ${formatFinishTime(charger.projectedFinish as string, new Date(now))}` : ''}`
-    : charger.status === 'paused'
-      ? `Charging paused · target ${target}%`
-      : charger.connected
-        ? `Connected · target ${target}%`
-        : `Not connected · target ${target}%`;
+  const finish = showFinish
+    ? formatFinishTime(charger.projectedFinish as string, new Date(now), status.config.timezone)
+    : null;
+  const copy = chargingCopy(status, target, finish);
+  const hasPower = charger.power.watts > 0;
 
   return (
-    <section className="card status-card" aria-labelledby="status-heading">
-      <header>
+    <section className="card status-card" id="overview" aria-labelledby="status-heading">
+      <header className="status-header">
         <div>
-          <p className="eyebrow">Live status</p>
-          <h2 id="status-heading">Vehicle &amp; charger</h2>
+          <p className="eyebrow">Live vehicle</p>
+          <h2 id="status-heading">{vehicle.name ?? 'Your vehicle'}</h2>
         </div>
         <ConnectionBadge status={charger.status} />
       </header>
 
-      <p className="status-message">{statusMessage}</p>
-
-      {/* Zone A — Live telemetry (read-only) */}
-      <div className="status-grid">
-        <div className="battery-wrap">
-          <BatteryRing percent={vehicle.batteryPercent} target={target} />
-          <div className="battery-caption">
-            <div className="vehicle">
-              {vehicle.name ?? 'Vehicle'}
-              {vehicle.rangeMiles != null && (
-                <span className="range"> · {formatMiles(vehicle.rangeMiles)}</span>
-              )}
-            </div>
-            {vehicle.sohPercent != null && (
-              <div className="soh">Battery health {vehicle.sohPercent}%</div>
-            )}
-            {(vehicle.isLocked != null || vehicle.location) && (
-              <div className="vehicle-meta">
-                {vehicle.isLocked != null && (
-                  <span className={vehicle.isLocked ? 'locked' : 'unlocked'}>
-                    <span aria-hidden="true">{vehicle.isLocked ? '🔒' : '🔓'}</span>{' '}
-                    {vehicle.isLocked ? 'Locked' : 'Unlocked'}
-                  </span>
-                )}
-                {vehicle.location && (
-                  <a
-                    href={`https://www.google.com/maps?q=${vehicle.location.latitude},${vehicle.location.longitude}`}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                  >
-                    View location
-                  </a>
-                )}
-              </div>
-            )}
-            <VehicleHealth health={vehicle.health} />
-            {showFinish && (
-              <div className="finish-eta">
-                Finishes ~{formatFinishTime(charger.projectedFinish as string, new Date(now))}
-              </div>
-            )}
-            <div className="target">Target {target}%</div>
+      <div className="status-hero">
+        <div className="battery-panel">
+          <BatteryRing percent={vehicle.batteryPercent} target={target} size={240} />
+          <div className="battery-target" aria-label={`Charge target ${target}%`}>
+            <span>Target</span>
+            <strong>{target}%</strong>
           </div>
         </div>
 
-        <div className="tiles">
-          {charger.power.watts > 0 && <Tile label="Charging rate" value={formatPower(charger.power.watts)} />}
-          {charger.power.amps > 0 && <Tile label="Current" value={charger.power.amps.toFixed(0)} unit="A" />}
-          <Tile label="Added this session" value={formatKwh(charger.sessionEnergyKwh)} />
-          {charger.projectedCost != null && (
-            <Tile
-              label={charger.projectedCostMethod === 'agile' ? 'Est. cost · Agile' : 'Est. cost'}
-              value={formatMoney(charger.projectedCost, charger.projectedCostCurrency)}
-              unit={`· ${formatKwh(charger.plannedEnergyKwh)}`}
-            />
-          )}
-          <Tile label="Charger" value={charger.model ?? '—'} unit={charger.online ? '· online' : '· offline'} />
+        <div className="charge-story">
+          <span className="charge-story-eyebrow">{copy.eyebrow}</span>
+          <h3>{copy.title}</h3>
+          <p>{copy.description}</p>
+          <div className="vehicle-facts">
+            {vehicle.rangeMiles != null && (
+              <span><Icon name="route" size={17} /> {formatMiles(vehicle.rangeMiles)} range</span>
+            )}
+            {vehicle.isLocked != null && (
+              <span className={vehicle.isLocked ? '' : 'fact-warning'}>
+                {vehicle.isLocked ? 'Locked' : 'Unlocked'}
+              </span>
+            )}
+            {vehicle.location && (
+              <a
+                href={`https://www.google.com/maps?q=${vehicle.location.latitude},${vehicle.location.longitude}`}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                View location
+              </a>
+            )}
+          </div>
+          <VehicleHealth health={vehicle.health} />
         </div>
+      </div>
+
+      <div className="metric-grid" aria-label="Current charging metrics">
+        <Metric
+          icon="bolt"
+          label="Charge speed"
+          value={hasPower ? formatPower(charger.power.watts) : 'Idle'}
+          detail={hasPower && charger.power.amps > 0 ? `${charger.power.amps.toFixed(0)} A` : 'No power draw'}
+        />
+        <Metric
+          icon="energy"
+          label="Added so far"
+          value={formatKwh(charger.sessionEnergyKwh)}
+          detail={charger.plannedEnergyKwh > 0 ? `${formatKwh(charger.plannedEnergyKwh)} planned` : 'This session'}
+        />
+        <Metric
+          icon="wallet"
+          label={charger.projectedCostMethod === 'agile' ? 'Estimated cost · Agile' : 'Estimated cost'}
+          value={charger.projectedCost != null
+            ? formatMoney(charger.projectedCost, charger.projectedCostCurrency)
+            : '—'}
+          detail={charger.projectedCost != null ? 'For this charge plan' : 'Price unavailable'}
+        />
+        <Metric
+          icon="plug"
+          label="Charger state"
+          value={statusLabel(charger.status)}
+          detail={`${charger.model ?? 'Ohme'} · ${charger.online ? 'Online' : 'Offline'}`}
+        />
+      </div>
+
+      <div className="vehicle-summary">
+        <span>
+          <span className={`summary-dot ${charger.online ? 'online' : 'offline'}`} aria-hidden="true" />
+          Charger {charger.online ? 'online' : 'offline'}
+        </span>
+        {vehicle.sohPercent != null && <span>Battery health {vehicle.sohPercent}%</span>}
+        {status.config.tripMode.enabled && <span className="trip-active">Trip charge active</span>}
       </div>
 
       {onChargeChanged && <ChargeControls status={status} onChanged={onChargeChanged} />}

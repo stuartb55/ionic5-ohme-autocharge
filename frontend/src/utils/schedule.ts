@@ -14,9 +14,7 @@ export interface Timeline {
 }
 
 function floorToHour(ms: number): number {
-  const d = new Date(ms);
-  d.setMinutes(0, 0, 0);
-  return d.getTime();
+  return Math.floor(ms / 3600_000) * 3600_000;
 }
 function ceilToHour(ms: number): number {
   const floored = floorToHour(ms);
@@ -28,7 +26,7 @@ function ceilToHour(ms: number): number {
  * of the first slot to the end of the last (padded to whole hours). The gaps
  * between active segments are the paused / off-peak periods.
  */
-export function buildTimeline(slots: ChargeSlot[], maxTicks = 7): Timeline | null {
+export function buildTimeline(slots: ChargeSlot[], maxTicks = 7, timeZone?: string): Timeline | null {
   // Drop slots with an unparseable start/end so a single bad timestamp can't
   // turn the whole window into NaN and render a broken/empty SVG.
   const valid = slots.filter((s) => {
@@ -62,7 +60,11 @@ export function buildTimeline(slots: ChargeSlot[], maxTicks = 7): Timeline | nul
   for (let t = startMs; t <= endMs; t += step * 3600_000) {
     hourTicks.push({
       frac: (t - startMs) / span,
-      label: new Date(t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }),
+      label: new Date(t).toLocaleTimeString('en-GB', {
+        hour: '2-digit',
+        minute: '2-digit',
+        ...(timeZone ? { timeZone } : {}),
+      }),
     });
   }
 

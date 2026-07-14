@@ -223,6 +223,7 @@ class VehicleProfileModel(ContractModel):
 class StatusConfigModel(ContractModel):
     chargeTarget: int
     pollIntervalSeconds: int
+    timezone: str
     targetMin: int
     targetMax: int
     readyBy: Optional[str]
@@ -262,6 +263,7 @@ class ScheduleResponseModel(ContractModel):
     nextSlotEnd: Optional[str]
     connected: bool
     updatedAt: Optional[str]
+    timezone: str
 
 
 class ChargeSessionEntryModel(ContractModel):
@@ -366,7 +368,7 @@ class MetricProvenanceModel(BaseModel):
     calculationType: str
     observedAt: Optional[datetime.datetime]
     completeThrough: datetime.datetime
-    quality: Literal["complete", "measured", "actual", "unavailable", "stale"]
+    quality: Literal["complete", "partial", "measured", "actual", "unavailable", "stale"]
     coverage: dict[str, Any]
 
 

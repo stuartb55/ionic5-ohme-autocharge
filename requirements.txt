@@ -1,9 +1,9 @@
-# Pinned exactly so image builds are reproducible: the GHCR image is rebuilt on
-# every push to main, and a floating range here would let an upstream release
-# change what ships without any code change. Renovate proposes upgrades as PRs,
-# which run the test suite before automerging.
+# Direct dependencies are pinned exactly so their upgrades are reviewed through
+# Renovate. Transitive resolution is still handled by pip; the built container
+# image remains the immutable deployment artifact.
 hyundai-kia-connect-api==4.24.1
 ohme==1.9.1
+aiohttp==3.14.1
 python-dotenv==1.2.2
 fastapi==0.139.0
 uvicorn[standard]==0.51.0

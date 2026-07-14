@@ -1,10 +1,9 @@
 """Runtime-adjustable settings, persisted to a small JSON file.
 
-Holds the dashboard-adjustable settings — the charge target and an optional
-"ready-by" departure time — written to ``SETTINGS_PATH`` so they survive
-container restarts. If the file can't be read or written the app degrades
-gracefully: settings fall back to env defaults / off and live in memory for the
-process lifetime.
+Holds dashboard-adjustable settings and the small durable session-write outbox,
+written to ``SETTINGS_PATH`` so they survive container restarts. If the file
+can't be read or written the app degrades gracefully: settings fall back to env
+defaults / off and live in memory for the process lifetime.
 
 All keys live in one JSON object, so each setter does a read-modify-write to
 avoid clobbering the others.
@@ -350,4 +349,52 @@ def clear_session_marker() -> bool:
     data = _load()
     data.pop("sessionKey", None)
     data["sessionActive"] = False
+    return _save(data)
+
+
+def load_pending_sessions() -> dict[str, dict]:
+    """Return durable charge-session rows waiting to be written to Postgres.
+
+    The mapping is keyed by the same idempotency key used by
+    :func:`db.record_session`.  Invalid entries are ignored rather than allowing
+    a damaged settings file to stall the charging loop.
+    """
+    raw = _load().get("pendingSessions")
+    if not isinstance(raw, dict):
+        return {}
+    pending: dict[str, dict] = {}
+    for key, payload in raw.items():
+        if not isinstance(key, str) or not key or not isinstance(payload, dict):
+            continue
+        if payload.get("sessionKey") != key:
+            continue
+        pending[key] = dict(payload)
+    return pending
+
+
+def save_pending_session(payload: dict) -> bool:
+    """Add or replace one durable session-outbox payload."""
+    session_key = payload.get("sessionKey")
+    if not isinstance(session_key, str) or not session_key:
+        raise ValueError("pending session requires a non-empty sessionKey")
+    data = _load()
+    raw = data.get("pendingSessions")
+    pending = dict(raw) if isinstance(raw, dict) else {}
+    pending[session_key] = dict(payload)
+    data["pendingSessions"] = pending
+    return _save(data)
+
+
+def clear_pending_session(session_key: str) -> bool:
+    """Acknowledge one outbox item after its database row exists."""
+    data = _load()
+    raw = data.get("pendingSessions")
+    if not isinstance(raw, dict) or session_key not in raw:
+        return True
+    pending = dict(raw)
+    pending.pop(session_key, None)
+    if pending:
+        data["pendingSessions"] = pending
+    else:
+        data.pop("pendingSessions", None)
     return _save(data)

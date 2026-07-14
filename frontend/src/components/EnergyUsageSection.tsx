@@ -1,5 +1,4 @@
 import type { EnergyUsageResponse } from '../api/types';
-import { useNow } from '../hooks/useNow';
 import { formatKwh } from '../utils/format';
 
 const W = 720;
@@ -24,11 +23,16 @@ function formatDay(iso: string): string {
   });
 }
 
-/** "00:30" label for a slot start ISO. */
-function slotLabel(iso: string | null): string {
+/** "00:30" label for a slot start ISO in the home's configured timezone. */
+function slotLabel(iso: string | null, timeZone?: string | null): string {
   if (!iso) return '';
   const d = new Date(iso);
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    ...(timeZone ? { timeZone } : {}),
+  }).format(d);
 }
 
 /**
@@ -43,14 +47,10 @@ export function EnergyUsageSection({
   data: EnergyUsageResponse;
   onDateChange: (date: string) => void;
 }) {
-  // Tick each minute so "yesterday" (the latest navigable day) stays correct
-  // across a midnight boundary without an impure Date.now() in render.
-  const now = useNow(60_000);
   if (!data.enabled || !data.date || !data.totals) return null;
 
   const date = data.date;
-  // Octopus consumption lags ~a day, so yesterday is the most recent full day.
-  const latest = shiftDate(new Date(now).toISOString().slice(0, 10), -1);
+  const latest = data.latestDate ?? date;
   const canGoNext = date < latest;
 
   const slots = data.slots;
@@ -136,24 +136,24 @@ export function EnergyUsageSection({
                   <rect x={x} y={houseY} width={barW} height={Math.max(0, houseH)} rx={2}
                     fill="var(--success)" fillOpacity={0.7}>
                     <title>
-                      {slotLabel(s.start)} · house {formatKwh(house)} · car {formatKwh(car)} · total {formatKwh(imp)}
+                      {slotLabel(s.start, data.timezone)} · house {formatKwh(house)} · car {formatKwh(car)} · total {formatKwh(imp)}
                     </title>
                   </rect>
                   <rect x={x} y={unattributedY} width={barW} height={Math.max(0, unattributedH)} rx={2}
-                    fill="var(--muted)" fillOpacity={0.7}>
+                    fill="var(--unattributed)" fillOpacity={0.7}>
                     <title>
-                      {slotLabel(s.start)} · unattributed {formatKwh(unattributed)} · quality {s.quality}
+                      {slotLabel(s.start, data.timezone)} · unattributed {formatKwh(unattributed)} · quality {s.quality}
                     </title>
                   </rect>
                   <rect x={x} y={carY} width={barW} height={Math.max(0, carH)} rx={2}
                     fill="var(--brand)">
                     <title>
-                      {slotLabel(s.start)} · car {formatKwh(car)} · house {formatKwh(house)} · total {formatKwh(imp)}
+                      {slotLabel(s.start, data.timezone)} · car {formatKwh(car)} · house {formatKwh(house)} · total {formatKwh(imp)}
                     </title>
                   </rect>
                   {i % labelStep === 0 && (
                     <text className="axis" x={i * slotW + slotW / 2} y={H - 8} textAnchor="middle">
-                      {slotLabel(s.start)}
+                      {slotLabel(s.start, data.timezone)}
                     </text>
                   )}
                 </g>
@@ -167,6 +167,34 @@ export function EnergyUsageSection({
               <span className="legend-item"><span className="swatch swatch-unattributed" /> Unattributed</span>
             )}
           </div>
+          <details className="chart-data">
+            <summary>View half-hourly data</summary>
+            <div className="chart-data-wrap">
+              <table>
+                <caption>House and car energy for {formatDay(date)}</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Time</th>
+                    <th scope="col">Total</th>
+                    <th scope="col">Car</th>
+                    <th scope="col">House</th>
+                    <th scope="col">Quality</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {slots.map((slot, index) => (
+                    <tr key={slot.start ?? index}>
+                      <td>{slotLabel(slot.start, data.timezone)}</td>
+                      <td>{formatKwh(slot.importKwh ?? 0)}</td>
+                      <td>{formatKwh(slot.carKwh ?? 0)}</td>
+                      <td>{formatKwh(slot.houseKwh ?? 0)}</td>
+                      <td>{slot.quality.replace(/_/g, ' ')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
         </div>
       )}
     </section>

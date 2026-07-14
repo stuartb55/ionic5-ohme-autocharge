@@ -71,6 +71,8 @@ def reset_state():
     store.automation_last_attempt_at = None
     store.active_session_id = None
     store.active_session_key = None
+    store.pending_sessions = {}
+    store.last_session_energy_wh = None
     store.last_digest_date = None
     api._last_telemetry_sig = None
     api._summary_cache.update(key=None, value=None, at=0.0)
@@ -381,6 +383,7 @@ def test_schedule_returns_slots(client):
     assert body["slots"][0]["power"] == 7.4
     assert body["nextSlotStart"] == "2026-06-02T01:00:00+01:00"
     assert body["connected"] is True
+    assert body["timezone"] == config.TIMEZONE
 
 
 def test_security_headers_present(client):
@@ -435,16 +438,18 @@ def test_statistics_parses_summary(client):
     # 7.284p/kWh -> £0.07284, rounded to 4dp. The frontend renders this as "7.3p".
     assert body["totals"]["averageKwhPrice"] == 0.0728
     assert body["totals"]["carbonSavedKgVsGasCar"] == 12.0
-    assert len(body["daily"]) == 7
-    charged_day = next(day for day in body["daily"] if day["energyKwh"] > 0)
+    assert len(body["daily"]) == 1
+    charged_day = body["daily"][0]
     assert charged_day["energyKwh"] == 18.5
     assert charged_day["cost"] == 2.3
     assert charged_day["savings"] == 3.7
     assert all(day["isComplete"] for day in body["daily"])
     assert body["metadata"]["summary"]["source"] == "ohme_charge_summary"
     assert body["metadata"]["summary"]["quality"] == "complete"
-    assert body["metadata"]["daily"]["coverage"]["completeDays"] == 7
-    assert body["metadata"]["daily"]["completeThrough"] == body["window"]["completeThrough"]
+    assert body["metadata"]["daily"]["quality"] == "partial"
+    assert body["metadata"]["daily"]["coverage"]["completeDays"] == 1
+    assert body["metadata"]["daily"]["coverage"]["missingDays"] == 6
+    assert body["metadata"]["daily"]["completeThrough"] != body["window"]["completeThrough"]
 
 
 def _summary_client(energy_wh=42000):
@@ -623,6 +628,36 @@ def test_parse_summary_buckets_days_in_account_timezone():
     assert parsed["daily"][0]["date"] == "2025-06-02"
 
 
+def test_parse_summary_preserves_exact_daily_base_and_minor_units():
+    parsed = api.parse_summary(
+        {
+            "totalStats": {},
+            "stats": [
+                {
+                    "energyChargedTotalWh": 1234,
+                    "costStats": {
+                        "moneySavedVsStandardTariff": {
+                            "currencyCode": "GBP",
+                            "amount": "123",
+                        },
+                        "moneyCostTotal": {"currencyCode": "GBP", "amount": "46"},
+                    },
+                }
+            ],
+        },
+        7,
+    )
+
+    day = parsed["daily"][0]
+    assert day["energyKwh"] == 1.23
+    assert day["savings"] == 1.23
+    assert day["cost"] == 0.46
+    assert day["energyWh"] == 1234
+    assert day["savingsMinor"] == 123
+    assert day["costMinor"] == 46
+    assert day["currency"] == "GBP"
+
+
 @pytest.mark.parametrize(
     ("now", "expected_hours"),
     [
@@ -642,7 +677,7 @@ def test_statistics_window_uses_complete_local_days_across_dst(now, expected_hou
     assert elapsed == dt.timedelta(hours=expected_hours)
 
 
-def test_complete_daily_series_fills_only_the_requested_complete_days():
+def test_complete_daily_series_keeps_only_reported_days_in_requested_window():
     from zoneinfo import ZoneInfo
 
     with patch.object(api, "_STATS_TZ", ZoneInfo("Europe/London")):
@@ -654,8 +689,8 @@ def test_complete_daily_series_fills_only_the_requested_complete_days():
         window,
     )
 
-    assert [row["date"] for row in rows] == ["2026-06-07", "2026-06-08", "2026-06-09"]
-    assert [row["energyKwh"] for row in rows] == [0.0, 2.5, 0.0]
+    assert [row["date"] for row in rows] == ["2026-06-08"]
+    assert [row["energyKwh"] for row in rows] == [2.5]
     assert all(row["isComplete"] is True for row in rows)
 
 
@@ -919,7 +954,12 @@ def test_soh_history_returns_points_and_passes_limit(client):
 def test_energy_usage_disabled_when_consumption_off(client):
     with patch("octopus.consumption_is_enabled", return_value=False):
         body = client.get("/api/energy-usage").json()
-    assert body == {"enabled": False, "slots": [], "totals": None, "date": None}
+    assert body["enabled"] is False
+    assert body["slots"] == []
+    assert body["totals"] is None
+    assert body["date"] is None
+    assert body["latestDate"] is None
+    assert body["timezone"]
 
 
 def test_energy_usage_disabled_when_persistence_off(client):
@@ -943,6 +983,8 @@ def test_energy_usage_returns_slots_and_totals(client):
 
     assert body["enabled"] is True
     assert body["date"] == "2026-06-01"
+    assert body["latestDate"]
+    assert body["timezone"]
     assert body["slots"] == slots
     assert body["totals"] == {
         "importKwh": 1.9, "carKwh": 1.0, "houseKwh": 0.9, "unattributedKwh": 0.0,
@@ -1015,8 +1057,6 @@ def test_soh_history_validates_limit(client):
 
 
 async def test_notifies_when_charging_finishes():
-    store.active_session_key = "session-1"
-    store.active_session_id = 42
     snap = StatusSnapshot(
         vehicle_name="IONIQ 5", charger_status="finished", connected=True,
         session_energy_wh=18500.0,
@@ -1033,11 +1073,42 @@ async def test_notifies_when_charging_finishes():
     assert "18.5 kWh" in msg
     assert mock_notify.call_args.kwargs["title"] == "Charging finished"
     assert mock_notify.call_args.kwargs["tags"] == "white_check_mark"
-    complete.assert_awaited_once_with(
-        "session-1", actual_energy_wh=18500.0, end_soc_percent=None
+    # Notification edges no longer own durable correctness.
+    complete.assert_not_awaited()
+    event.assert_not_awaited()
+    reconcile.assert_not_awaited()
+
+
+async def test_finished_session_finalizes_without_an_in_memory_transition():
+    """A refresh may already have replaced store.status with ``finished``."""
+    store.active_session_key = "session-1"
+    store.active_session_id = 42
+    snap = StatusSnapshot(
+        vehicle_name="IONIQ 5", charger_status="finished", connected=True,
+        battery_percent=80, session_energy_wh=18500.0,
     )
-    event.assert_awaited_once()
-    assert event.call_args.args[:2] == (42, "charging_finished")
+    with patch(
+        "db.complete_session", new=AsyncMock(side_effect=[42, None])
+    ) as complete, patch(
+        "db.record_session_event", new=AsyncMock()
+    ) as event, patch(
+        "api._reconcile_finished_session", new=AsyncMock()
+    ) as reconcile, patch("ntfy.send", new=AsyncMock()) as notify:
+        # The edge was consumed by an on-demand snapshot update, so no alert is
+        # emitted; durable processing must still proceed from the current state.
+        await api._maybe_notify_finished("finished", snap)
+        # Level-triggered finalisation is safe on finished→finished polls.
+        await api._finalize_finished_session(snap)
+        await api._finalize_finished_session(snap)
+
+    notify.assert_not_awaited()
+    assert complete.await_count == 2
+    complete.assert_awaited_with(
+        "session-1", actual_energy_wh=18500.0, end_soc_percent=80
+    )
+    event.assert_awaited_once_with(
+        42, "charging_finished", {"energyWh": 18500, "soc": 80}
+    )
     reconcile.assert_awaited_once_with(snap)
 
 
@@ -1079,6 +1150,16 @@ async def test_reconcile_finished_session_prices_measured_energy():
     assert priced.coverage == 1.0
     assert record.call_args.kwargs == {"counter_energy_wh": 500.0}
     assert event.call_args.args[1] == "session_reconciled"
+
+
+async def test_unplug_reconciliation_resolves_durable_session_after_restart():
+    with patch(
+        "db.get_session_id_by_key", new=AsyncMock(return_value=42)
+    ) as lookup, patch("api._reconcile_session", new=AsyncMock()) as reconcile:
+        await api._reconcile_unplugged_session("session-1", None, 18500.0)
+
+    lookup.assert_awaited_once_with("session-1")
+    reconcile.assert_awaited_once_with(42, 18500.0, trigger="unplugged")
 
 
 @pytest.mark.parametrize(
@@ -1130,7 +1211,7 @@ async def test_no_health_notification_when_warning_clears_on_unplug():
     mock_notify.assert_not_called()
 
 
-async def test_notification_preferences_suppress_delivery_but_not_session_completion():
+async def test_notification_preferences_suppress_delivery_only():
     store.notification_preferences = settings.NotificationPreferences(charge_complete=False)
     store.active_session_key = "session-1"
     snap = StatusSnapshot(
@@ -1143,7 +1224,7 @@ async def test_notification_preferences_suppress_delivery_but_not_session_comple
          patch("api._reconcile_finished_session", new=AsyncMock()):
         await api._maybe_notify_finished("charging", snap)
     notify.assert_not_called()
-    complete.assert_awaited_once()
+    complete.assert_not_awaited()
 
 
 async def test_completion_minimum_suppresses_only_small_charge_alert():
