@@ -24,12 +24,32 @@ describe('StatisticsSection insights', () => {
     expect(screen.getByText('Sources & methods')).toBeInTheDocument();
   });
 
-  it('discloses source methods and matched coverage', async () => {
+  it('explains the local evidence required when matched metrics are unavailable', async () => {
     renderSection();
     await userEvent.click(screen.getByText('Sources & methods'));
     expect(screen.getByText(/Ohme charge summary/)).toBeInTheDocument();
-    expect(screen.getByText(/0 matched home charges/)).toBeInTheDocument();
-    expect(screen.getByText(/reconciled tariff-interval cost/)).toBeInTheDocument();
+    expect(screen.getByText(/Efficiency unavailable/)).toHaveTextContent(
+      'charged energy and two odometer readings',
+    );
+    expect(screen.getByText(/Running cost unavailable/)).toHaveTextContent(
+      'fully reconciled tariff pricing',
+    );
+    expect(screen.queryByText(/0 matched/)).not.toBeInTheDocument();
+  });
+
+  it('discloses the measured local interval coverage when available', async () => {
+    renderSection({
+      ...statisticsFixture,
+      efficiency: { milesDriven: 168, milesPerKwh: 4, energyKwh: 42, intervalCount: 3, vehicleId: 'car-1', from: null, to: null, scope: 'matched_home_charging' },
+      runningCost: { costPerMile: 0.083, milesDriven: 168, costTotal: 13.94, currency: 'GBP', intervalCount: 2, scope: 'matched_actual_home_charging' },
+    });
+    await userEvent.click(screen.getByText('Sources & methods'));
+    expect(screen.getByText(/Efficiency: same-vehicle distance/)).toHaveTextContent(
+      '3 complete local charge-to-next-plug-in intervals',
+    );
+    expect(screen.getByText(/Running cost: reconciled tariff cost/)).toHaveTextContent(
+      '2 complete local charge-to-next-plug-in intervals',
+    );
   });
 
   it('labels a cached snapshot when the upstream is unavailable', () => {
