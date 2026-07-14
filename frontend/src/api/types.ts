@@ -86,6 +86,12 @@ export interface StatusResponse {
   };
   updatedAt: string | null;
   ready: boolean;
+  /** Last plug-in automation attempt, independent of charger polling health. */
+  automation: {
+    state: 'idle' | 'pending' | 'configured' | 'error';
+    errorCode: 'bluelink_read_failed' | 'ohme_target_failed' | string | null;
+    lastAttemptAt: string | null;
+  };
   /**
    * Why the backend's most recent Ohme poll failed (e.g. "poll_failed"), or
    * null when it succeeded. When set, the rest of the payload is the last
@@ -102,34 +108,38 @@ export interface ChargeActionResponse {
   maxCharge: boolean;
 }
 
-export interface TargetUpdateResponse {
-  targetPercent: number;
-  /** Whether the new target was written to the persistent settings file. */
-  persisted: boolean;
-  /** Whether the new target was pushed to Ohme immediately (car plugged in). */
-  applied: boolean;
+export interface RefreshResponse {
+  ok: boolean;
+  updatedAt: string | null;
+  ready: boolean;
 }
 
-export interface ReadyByUpdateResponse {
+export type PersistenceStatus = 'saved' | 'memory_only';
+export type ApplyStatus = 'applied' | 'not_connected' | 'already_at_target' | 'failed';
+
+export interface MutationOutcome {
+  persistenceStatus: PersistenceStatus;
+  applyStatus: ApplyStatus;
+}
+
+export interface TargetUpdateResponse extends MutationOutcome {
+  targetPercent: number;
+}
+
+export interface ReadyByUpdateResponse extends MutationOutcome {
   /** The new ready-by time ("HH:MM"), or null when cleared. */
   readyBy: string | null;
-  persisted: boolean;
-  applied: boolean;
 }
 
-export interface DayTargetsUpdateResponse {
+export interface DayTargetsUpdateResponse extends MutationOutcome {
   /** The new per-weekday overrides keyed by weekday string. */
   dayTargets: Record<string, number>;
-  persisted: boolean;
-  applied: boolean;
 }
 
-export interface TripModeUpdateResponse {
+export interface TripModeUpdateResponse extends MutationOutcome {
   enabled: boolean;
   targetPercent: number | null;
   readyBy: string | null;
-  persisted: boolean;
-  applied: boolean;
 }
 
 export interface NotificationPreferences {
@@ -145,13 +155,12 @@ export interface NotificationPreferences {
 }
 
 export interface NotificationPreferencesUpdateResponse extends NotificationPreferences {
-  persisted: boolean;
+  persistenceStatus: PersistenceStatus;
 }
 
 export interface Vehicle {
   id: string;
   name: string | null;
-  vin: string | null;
   model: string | null;
 }
 
@@ -161,19 +170,15 @@ export interface VehiclesResponse {
   selected: string | null;
 }
 
-export interface VehicleUpdateResponse {
+export interface VehicleUpdateResponse extends MutationOutcome {
   vehicleId: string | null;
-  persisted: boolean;
-  applied: boolean;
 }
 
-export interface VehicleProfileUpdateResponse {
+export interface VehicleProfileUpdateResponse extends MutationOutcome {
   vehicleId: string;
   enabled: boolean;
   targetPercent: number | null;
   readyBy: string | null;
-  persisted: boolean;
-  applied: boolean;
 }
 
 export interface ChargeSlot {
@@ -240,14 +245,10 @@ export interface SessionTelemetryResponse {
 export interface SessionAuditResponse {
   session: {
     id: number;
-    sessionKey: string | null;
     pluggedInAt: string;
     unpluggedAt: string | null;
     completedAt: string | null;
     vehicleName: string | null;
-    vehicleId: string | null;
-    vin: string | null;
-    chargerId: string | null;
     sourceObservedAt: string | null;
     socPercent: number | null;
     targetPercent: number | null;

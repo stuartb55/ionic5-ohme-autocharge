@@ -5,8 +5,9 @@ assert the SQL/params the helpers emit, plus the contract that every write is a
 no-op when disabled and swallows errors when the DB misbehaves.
 """
 
+import asyncio
 import datetime as dt
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -124,6 +125,50 @@ async def test_writes_are_noops_when_disabled():
     await db.record_schedule(session_id=None, slots=[], next_slot_start=None, next_slot_end=None)
     await db.record_telemetry(StatusSnapshot())
     await db.record_daily_stats([{"date": "2026-06-01", "energyKwh": 1}], "GBP")
+
+
+def test_availability_uses_live_pool_state():
+    pool = _FakePool(_FakeConn(_FakeCursor()))
+    pool.closed = False
+    db._pool = pool
+    assert db.is_available() is True
+    pool.closed = True
+    assert db.is_available() is False
+    db._pool = None
+
+
+async def test_reconnect_loop_recovers_after_startup_failure(monkeypatch):
+    monkeypatch.setattr(config, "DATABASE_URL", "postgresql://configured")
+    monkeypatch.setattr(config, "DATABASE_RECONNECT_INITIAL", 0.001)
+    monkeypatch.setattr(config, "DATABASE_RECONNECT_MAX", 0.002)
+    db._pool = None
+    stop = asyncio.Event()
+    calls = 0
+
+    async def attempt():
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            db._pool = _FakePool(_FakeConn(_FakeCursor()))
+            stop.set()
+
+    with patch("db.init", new=attempt):
+        await db.reconnect_loop(stop)
+    assert calls == 2
+    assert db.is_available() is True
+    db._pool = None
+
+
+async def test_init_closes_partially_opened_pool(monkeypatch):
+    monkeypatch.setattr(config, "DATABASE_URL", "postgresql://configured")
+    pool = _FakePool(_FakeConn(_FakeCursor()))
+    pool.open = AsyncMock(side_effect=RuntimeError("down"))
+    pool.close = AsyncMock()
+    db._pool = None
+    with patch("db._run_migrations"), patch("db.AsyncConnectionPool", return_value=pool):
+        await db.init()
+    pool.close.assert_awaited_once()
+    assert db.is_available() is False
 
 
 # --- charge session ------------------------------------------------------------

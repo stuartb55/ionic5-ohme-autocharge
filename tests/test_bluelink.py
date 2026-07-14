@@ -1,4 +1,6 @@
+import asyncio
 import datetime
+import threading
 import time
 from unittest.mock import MagicMock, patch
 import pytest
@@ -214,7 +216,7 @@ def test_list_vehicles_maps_fields():
     vm = _mock_manager({"a": v})
     with patch("bluelink._get_manager", return_value=vm):
         assert bluelink.list_vehicles() == [
-            {"id": "a", "name": "IONIQ 5", "vin": "VIN1", "model": "IONIQ 5"}
+            {"id": "a", "name": "IONIQ 5", "model": "IONIQ 5"}
         ]
 
 
@@ -247,6 +249,46 @@ async def test_get_vehicle_state_async_times_out(monkeypatch):
     monkeypatch.setattr(bluelink, "get_vehicle_state", slow)
     with pytest.raises(TimeoutError):
         await bluelink.get_vehicle_state_async()
+    # Let the unkillable SDK thread finish so it cannot leak into the next test.
+    await asyncio.sleep(0.35)
+
+
+async def test_repeated_timeouts_reuse_one_sdk_thread(monkeypatch):
+    monkeypatch.setattr(config, "UPSTREAM_TIMEOUT", 0.02)
+    release = threading.Event()
+    calls = 0
+
+    def slow(_vehicle_id):
+        nonlocal calls
+        calls += 1
+        release.wait(1)
+        return bluelink.VehicleState(soc=50)
+
+    monkeypatch.setattr(bluelink, "get_vehicle_state", slow)
+    with pytest.raises(TimeoutError):
+        await bluelink.get_vehicle_state_async("car-1")
+    with pytest.raises(TimeoutError):
+        await bluelink.get_vehicle_state_async("car-1")
+    assert calls == 1
+    release.set()
+    await asyncio.sleep(0.05)
+
+
+async def test_different_bluelink_operation_rejected_while_thread_active(monkeypatch):
+    monkeypatch.setattr(config, "UPSTREAM_TIMEOUT", 0.02)
+    release = threading.Event()
+
+    def slow(_vehicle_id):
+        release.wait(1)
+        return bluelink.VehicleState(soc=50)
+
+    monkeypatch.setattr(bluelink, "get_vehicle_state", slow)
+    with pytest.raises(TimeoutError):
+        await bluelink.get_vehicle_state_async("car-1")
+    with pytest.raises(bluelink.BluelinkBusyError):
+        await bluelink.list_vehicles_async()
+    release.set()
+    await asyncio.sleep(0.05)
 
 
 async def test_list_vehicles_async_returns_list(monkeypatch):

@@ -11,9 +11,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.14"
           cache: pip
@@ -26,7 +25,10 @@ jobs:
         run: ruff check .
 
       - name: Run tests
-        run: python -m pytest tests/ -v
+        run: pytest tests/ -v
+
+      - name: Audit Python dependencies
+        run: pip-audit -r requirements-dev.txt
 
   frontend-test:
     runs-on: ubuntu-latest
@@ -35,9 +37,8 @@ jobs:
         working-directory: frontend
 
     steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "24"
           cache: npm
@@ -52,6 +53,9 @@ jobs:
       - name: Unit & integration tests
         run: npm run test
 
+      - name: Audit frontend dependencies
+        run: npm audit --audit-level=high
+
       - name: Production build
         run: npm run build
 
@@ -59,7 +63,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:18-alpine
+        image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
         env:
           POSTGRES_DB: autocharge_test
           POSTGRES_USER: autocharge
@@ -80,8 +84,8 @@ jobs:
       OHME_EMAIL: ci@example.com
       OHME_PASSWORD: ci
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.14"
           cache: pip
@@ -90,7 +94,17 @@ jobs:
         run: pip install -r requirements.txt
       - name: Upgrade legacy schema and verify exact-unit backfill
         run: python tests/integration/check_migrations.py
+      - name: Exercise real persistence workflow and reconnect
+        run: python tests/integration/check_postgres_workflow.py
 
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
   # Build both images and confirm the containers actually boot and serve their
   # health endpoints. Polling is disabled so this needs no Ohme/Hyundai
   # credentials and makes no external calls — it only proves the app runs.
@@ -99,8 +113,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v7
-
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - name: Build backend image
         run: docker build -t autocharge-backend:ci .
 
@@ -154,16 +167,13 @@ jobs:
       packages: write
 
     steps:
-      - uses: actions/checkout@v7
-
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - name: Set up QEMU (multi-platform emulation)
-        uses: docker/setup-qemu-action@v4
-
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -173,7 +183,7 @@ jobs:
       # identifiable and a bad deploy can be rolled back to a known image.
       - name: Docker metadata
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/ionic5-ohme-autocharge
           tags: |
@@ -181,7 +191,7 @@ jobs:
             type=sha
 
       - name: Build and push backend
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           push: true
@@ -203,16 +213,13 @@ jobs:
       packages: write
 
     steps:
-      - uses: actions/checkout@v7
-
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - name: Set up QEMU (multi-platform emulation)
-        uses: docker/setup-qemu-action@v4
-
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -222,7 +229,7 @@ jobs:
       # identifiable and a bad deploy can be rolled back to a known image.
       - name: Docker metadata
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/ionic5-ohme-autocharge-ui
           tags: |
@@ -230,7 +237,7 @@ jobs:
             type=sha
 
       - name: Build and push frontend
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: ./frontend
           push: true

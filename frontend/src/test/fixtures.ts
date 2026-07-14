@@ -61,6 +61,7 @@ export const statusFixture: StatusResponse = {
   },
   updatedAt: '2026-06-02T00:05:00+01:00',
   ready: true,
+  automation: { state: 'configured', errorCode: null, lastAttemptAt: '2026-06-01T21:42:00+01:00' },
   lastError: null,
 };
 
@@ -120,14 +121,10 @@ export const sessionsFixture: SessionsResponse = {
 export const sessionAuditFixture: SessionAuditResponse = {
   session: {
     id: 3,
-    sessionKey: 'session-3',
     pluggedInAt: '2026-06-01T21:42:00+01:00',
     unpluggedAt: '2026-06-02T01:05:00+01:00',
     completedAt: '2026-06-02T01:00:00+01:00',
     vehicleName: 'Hyundai IONIQ 5',
-    vehicleId: 'car-1',
-    vin: 'VIN1',
-    chargerId: 'charger-1',
     sourceObservedAt: '2026-06-01T21:42:00+01:00',
     socPercent: 54,
     targetPercent: 80,

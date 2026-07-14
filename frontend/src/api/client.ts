@@ -6,6 +6,7 @@ import type {
   NotificationPreferences,
   NotificationPreferencesUpdateResponse,
   ReadyByUpdateResponse,
+  RefreshResponse,
   ScheduleResponse,
   SessionsResponse,
   SessionAuditResponse,
@@ -25,10 +26,9 @@ import type {
 // in dev Vite's proxy does the same. Override with VITE_API_BASE if needed.
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';
 
-// Sent on every request. The backend's CSRF guard requires it on the
-// body-less POST endpoints (pause/resume/refresh): a browser can't attach a
-// custom header to a cross-origin "simple request" without a CORS preflight,
-// so this stops another site from forging those actions against the LAN IP.
+// Sent on every request. The backend requires it on all mutations: a browser
+// can't attach a custom header cross-origin without a CORS preflight, so this
+// stops another site from forging actions against the LAN service.
 const REQUESTED_WITH = { 'X-Requested-With': 'autocharge-ui' } as const;
 
 export class ApiError extends Error {
@@ -92,12 +92,6 @@ async function postJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   return (await res.json()) as T;
 }
 
-
-export interface RefreshResponse {
-  ok: boolean;
-  updatedAt: string | null;
-  ready: boolean;
-}
 
 export interface VersionResponse {
   /** Build git SHA, or "dev" in local runs. */

@@ -49,12 +49,10 @@ When the car is plugged in, the app reads the real battery state-of-charge from 
 
 ## Security model
 
-The API has no user authentication — it assumes the **trusted LAN** it runs on. The
-state-changing endpoints that take no request body (`/api/charge/pause`, `/api/charge/resume`,
-`/api/refresh`) require an `X-Requested-With` header so another site the browser visits can't
-forge them as cross-origin "simple requests" against the LAN IP (CSRF); the dashboard sends it
-automatically. Don't expose the backend port directly to the internet — front it with a reverse
-proxy and authentication if you need remote access.
+The API has no user authentication — it assumes the **trusted LAN** it runs on. Every
+state-changing endpoint requires `X-Requested-With: autocharge-ui`, unknown request fields are
+rejected, CORS is same-origin by default, and `TRUSTED_HOSTS` rejects arbitrary Host headers to
+limit DNS-rebinding access.
 
 ## Setup
 
@@ -107,6 +105,8 @@ All settings come from environment variables (or `.env`). Only the five credenti
 |---|---|---|
 | `CHARGE_TARGET` | `80` | Initial/fallback target %. The dashboard can change it at runtime (persisted). |
 | `POLL_INTERVAL` | `180` | Seconds between Ohme polls. |
+| `UPSTREAM_TIMEOUT` | `30` | Maximum seconds for each individual Ohme or Bluelink network operation. |
+| `OHME_RECONNECT_FAILURES` | `3` | Consecutive session failures before replacing the authenticated Ohme client. |
 | `LIVE_SOC_INTERVAL` | `1800` | Seconds between mid-charge SOC re-reads (so the ring climbs). `0` disables. |
 | `MAX_SOC_AGE` | `1800` | Maximum age in seconds of a cached Bluelink SOC accepted for target-setting. `0` disables the freshness guard. |
 | `HYUNDAI_VEHICLE_ID` | *(first)* | Pin a specific vehicle when the account has more than one (id from `GET /api/vehicles`). The dashboard can override this. |
@@ -118,9 +118,11 @@ All settings come from environment variables (or `.env`). Only the five credenti
 | `OCTOPUS_API_KEY` / `OCTOPUS_ACCOUNT_NUMBER` | *(off)* | Octopus account API key + account number (e.g. `A-AAAA1111`) to enable the house-vs-car energy card. The import meter is auto-discovered. Needs `DATABASE_URL` too. |
 | `CONSUMPTION_BACKFILL_DAYS` | `90` | Initial Octopus consumption history to ingest. Later runs resume from a durable cursor with overlap for corrections. |
 | `DATABASE_URL` | *(off)* | Postgres connection string for charging history. Blank runs entirely in memory. The compose files default this to the bundled Postgres. |
+| `DATABASE_RECONNECT_INITIAL` / `DATABASE_RECONNECT_MAX` | `5` / `300` | Bounded background reconnect backoff when optional Postgres is unavailable. |
 | `DAILY_STATS_INTERVAL` | `21600` | Seconds between background refreshes of Ohme's daily totals into Postgres (6h). |
 | `TELEMETRY_RETENTION_DAYS` | `365` | How long to keep per-poll telemetry rows. `0` keeps forever. |
 | `CORS_ORIGINS` | *(same-origin)* | Comma-separated allowed origins; blank means same-origin only (the default deployment). |
+| `TRUSTED_HOSTS` | localhost + Docker names | Allowed HTTP Host headers. Add direct LAN names/IPs only if used. |
 | `POSTGRES_PASSWORD` | `autocharge` | Password for the bundled compose Postgres service. |
 
 ## Usage
@@ -184,10 +186,11 @@ npm run build    # type-check + production build to dist/
 | Endpoint | Description |
 |---|---|
 | `GET /api/health` | Liveness probe (503 if the poll loop has died) |
+| `GET /api/ready` | Operational readiness (Ohme/poll status plus optional persistence availability) |
 | `GET /api/data-quality` | Read-only persistence completeness counters, ingestion freshness, and statistics-cache age for monitoring |
 | `GET /api/reports/monthly?month=YYYY-MM&format=json\|csv` | Calendar-month persisted account/day and measured home-session evidence; defaults to the previous month (404 when persistence is off) |
 | `GET /api/version` | Build git SHA (`dev` when unset) |
-| `GET /api/status` | Vehicle SOC, range, SoH, lock/location, health (12V battery, tyre/washer/key warnings, anything left open), connection, charge rate, target, session energy + estimated cost, ready-by, per-day targets |
+| `GET /api/status` | Vehicle/charger data plus independent plug-in automation state (`idle`, `pending`, `configured`, or `error`) |
 | `GET /api/schedule` | Allocated charge slots + next slot times |
 | `GET /api/statistics?days=N` | Typed complete-calendar-day totals plus provenance and coverage; serves the last validated snapshot with explicit `stale` quality during a temporary Ohme outage (N = 1–90) |
 | `GET /api/sessions?limit=N` | Recent plug-in sessions from Postgres (N = 1–50; `enabled: false` when persistence is off) |
@@ -241,11 +244,11 @@ idempotently. Physical plug-ins have durable session keys, lifecycle timestamps,
 vehicle/charger identity, quality state, schedule revisions and an event audit
 trail so retries cannot create duplicate sessions.
 
-GitHub CI upgrades a legacy revision against PostgreSQL 16, verifies exact-unit
-backfill and the current Alembic head, then repeats the upgrade to prove startup
-migrations remain idempotent. This database test runs remotely, not on the host.
+GitHub CI upgrades a legacy revision against PostgreSQL 18, verifies exact-unit
+backfill and the current Alembic head, then exercises session idempotency, linked
+telemetry, completion, reconciliation, report queries, and reconnect behaviour.
 
-Set `DATABASE_URL` (the compose files default it to the bundled Postgres) to persist per-plug-in sessions, schedule snapshots, per-poll telemetry, and daily totals. Daily energy is stored exactly in Wh and money in integer minor units; legacy floating columns remain for compatibility. This powers the dashboard's recent-sessions card and lets you build Grafana panels (energy/cost/savings over time, driving efficiency, battery-health trend). See [`docs/grafana.md`](docs/grafana.md) for the schema and example queries. With `DATABASE_URL` blank, the app runs entirely in memory — every history feature simply switches off.
+Set `DATABASE_URL` (the compose files default it to the bundled Postgres) to persist per-plug-in sessions, schedule snapshots, per-poll telemetry, and daily totals. A startup outage leaves charging operational and triggers bounded background reconnect attempts. Daily energy is stored exactly in Wh and money in integer minor units; legacy floating columns remain for compatibility. This powers the dashboard's recent-sessions card and lets you build Grafana panels (energy/cost/savings over time, driving efficiency, battery-health trend). See [`docs/grafana.md`](docs/grafana.md) for the schema and example queries. With `DATABASE_URL` blank, the app runs entirely in memory — every history feature simply switches off.
 
 ## Progressive web app
 
@@ -282,6 +285,7 @@ docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compo
 ```
 ├── main.py                        # Async poll loop, plug-in handler, PlugInDetector (CLI + shared)
 ├── api.py                         # FastAPI app: runs the poll loop + serves /api
+├── api_contracts.py               # Typed dashboard response contracts exposed through OpenAPI
 ├── state.py                       # In-memory snapshot + runtime settings shared by loop and API
 ├── settings.py                    # Persisted runtime settings (charging, alerts, vehicle, session marker)
 ├── bluelink.py                    # Hyundai Bluelink wrapper (SOC, range, odometer, SoH, lock/location)

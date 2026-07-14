@@ -5,8 +5,8 @@ import type { Vehicle } from '../api/types';
 import { VehiclePicker } from './VehiclePicker';
 
 const FLEET: Vehicle[] = [
-  { id: 'car-1', name: 'IONIQ 5', vin: 'VIN1', model: 'IONIQ 5' },
-  { id: 'car-2', name: 'Kona', vin: 'VIN2', model: 'Kona' },
+  { id: 'car-1', name: 'IONIQ 5', model: 'IONIQ 5' },
+  { id: 'car-2', name: 'Kona', model: 'Kona' },
 ];
 
 describe('VehiclePicker', () => {

@@ -58,6 +58,13 @@ POLL_INTERVAL = _int_setting("POLL_INTERVAL", 180, minimum=10)
 # interval. Default 30s.
 UPSTREAM_TIMEOUT = _int_setting("UPSTREAM_TIMEOUT", 30, minimum=1, maximum=300)
 
+# Replace a stale authenticated Ohme client after this many consecutive session
+# poll failures.  The plug-in detector and durable session marker live outside
+# the client, so reconnecting cannot create a second physical charging session.
+OHME_RECONNECT_FAILURES = _int_setting(
+    "OHME_RECONNECT_FAILURES", 3, minimum=1, maximum=20
+)
+
 # Upper bound (seconds) on the poll loop's back-off when upstreams are failing.
 # After a run of consecutive failed polls the loop waits POLL_INTERVAL * 2**(n-1),
 # capped here, so a sustained Ohme/Bluelink outage isn't hammered every interval;
@@ -90,6 +97,16 @@ WEEKLY_DIGEST_HOUR = int(os.getenv("WEEKLY_DIGEST_HOUR", "8"))
 # blank, history persistence is disabled and the app runs entirely in memory as
 # before. Example: postgresql://autocharge:secret@postgres:5432/autocharge
 DATABASE_URL = os.getenv("DATABASE_URL", "")
+
+# Optional Postgres reconnect cadence after a failed startup.  Persistence is
+# never required for charging, so retries happen in the background with bounded
+# exponential backoff.
+DATABASE_RECONNECT_INITIAL = _int_setting(
+    "DATABASE_RECONNECT_INITIAL", 5, minimum=1, maximum=300
+)
+DATABASE_RECONNECT_MAX = _int_setting(
+    "DATABASE_RECONNECT_MAX", 300, minimum=DATABASE_RECONNECT_INITIAL, maximum=3600
+)
 
 # Optional Octopus Agile (dynamic tariff) awareness. Both must be set to enable;
 # blank disables the tariff card. PRODUCT_CODE is the Agile product (e.g.

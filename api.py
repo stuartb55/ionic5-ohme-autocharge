@@ -33,10 +33,39 @@ from zoneinfo import ZoneInfo
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 import bluelink
+from api_contracts import (
+    ApplyStatus,
+    ChargeActionResponseModel,
+    DataQualityResponseModel,
+    DayTargetsUpdate,
+    DayTargetsUpdateResponseModel,
+    MaxChargeUpdate,
+    MonthlyReportResponseModel,
+    NotificationPreferencesUpdate,
+    NotificationPreferencesUpdateResponseModel,
+    PersistenceStatus,
+    ReadyByUpdate,
+    ReadyByUpdateResponseModel,
+    RefreshResponseModel,
+    ScheduleResponseModel,
+    SessionAuditResponseModel,
+    SessionsResponseModel,
+    StatisticsResponseModel,
+    StatusResponseModel,
+    TargetUpdate,
+    TargetUpdateResponseModel,
+    TripModeUpdate,
+    TripModeUpdateResponseModel,
+    VehicleProfileUpdate,
+    VehicleProfileUpdateResponseModel,
+    VehiclesResponseModel,
+    VehicleUpdate,
+    VehicleUpdateResponseModel,
+)
 import config
 import db
 import energy
@@ -96,6 +125,16 @@ _quiet_access_filter = _QuietAccessLogFilter()
 # Comma-separated list of allowed CORS origins. Empty (default) means same-origin
 # only — which is the production setup, where nginx serves the SPA and proxies /api.
 CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+# Host-header allowlist protects an anonymous LAN service from DNS rebinding.
+# Production deployments must add their real hostname and LAN IP explicitly.
+TRUSTED_HOSTS = [
+    host.strip()
+    for host in os.getenv(
+        "TRUSTED_HOSTS",
+        "localhost,127.0.0.1,[::1],backend,autocharge-backend,autocharge",
+    ).split(",")
+    if host.strip()
+]
 # Set to "1" in tests to construct the app without starting the background loop.
 DISABLE_POLLING = os.getenv("AUTOCHARGE_DISABLE_POLLING") == "1"
 
@@ -261,6 +300,22 @@ async def _make_client_with_retry() -> Any:
             logger.exception("Ohme login failed — retrying in %.0fs", delay)
             await asyncio.sleep(delay)
             delay = min(delay * 2, LOGIN_RETRY_MAX)
+
+
+async def _recreate_ohme_client(current: Any) -> Any:
+    """Authenticate and atomically swap a stale client, cleaning both paths."""
+    replacement = None
+    try:
+        replacement = await ohme_client.make_client()
+        await ohme_client.update_device_info(replacement)
+        async with store.client_lock:
+            store.client = replacement
+        await ohme_client.close_client(current)
+        return replacement
+    except BaseException:
+        if replacement is not None:
+            await ohme_client.close_client(replacement)
+        raise
 
 
 # Prior charger statuses that represent a live, in-progress session. A move from
@@ -478,7 +533,7 @@ async def poll_loop() -> None:
 
     # Populate vehicle name / model / serial once up front.
     try:
-        await client.async_update_device_info()
+        await ohme_client.update_device_info(client)
     except Exception:
         logger.warning("Could not fetch device info on startup", exc_info=True)
 
@@ -492,11 +547,20 @@ async def poll_loop() -> None:
 
     last_daily_sync = 0.0  # monotonic time of the last daily-stats persist (0 = never)
     last_tariff_sync = 0.0
+    ohme_session_failures = 0
     try:
         while True:
             try:
-                async with store.client_lock:
-                    status = await ohme_client.get_charger_status(client)
+                try:
+                    async with store.client_lock:
+                        status = await ohme_client.get_charger_status(client)
+                except Exception:
+                    ohme_session_failures += 1
+                    raise
+                else:
+                    # Only authentication/session refresh failures justify
+                    # replacing the client. Optional integration failures do not.
+                    ohme_session_failures = 0
                 # detector.update may call handle_plugin_event, which makes a slow
                 # Bluelink SOC fetch (in a thread) that doesn't use the Ohme client —
                 # so it runs OUTSIDE client_lock to avoid stalling /api/statistics for
@@ -541,7 +605,7 @@ async def poll_loop() -> None:
 
                 # Refresh Ohme's daily totals into Postgres on a slow cadence so
                 # the history is populated even when nobody opens the dashboard.
-                if db.is_enabled():
+                if db.is_available():
                     if now_mono - last_daily_sync >= config.DAILY_STATS_INTERVAL:
                         await _persist_daily_stats(client)
                         # Pull recent Octopus household consumption and break out
@@ -560,6 +624,18 @@ async def poll_loop() -> None:
                 # the snapshot's updatedAt simply stops advancing.
                 logger.exception("Error during poll — will retry next interval")
                 store.record_poll_failure("poll_failed")
+                # A stale token/session object may never recover on its own.
+                # Recreate only after a bounded failure run, preserving the
+                # detector and durable session key outside the client.
+                if ohme_session_failures >= config.OHME_RECONNECT_FAILURES:
+                    try:
+                        client = await _recreate_ohme_client(client)
+                        ohme_session_failures = 0
+                        logger.info("Recreated Ohme client after repeated session failures")
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        logger.warning("Could not recreate Ohme client yet", exc_info=True)
                 # Alert exactly once when the failure streak crosses the
                 # threshold; ntfy.send swallows its own errors, so this can
                 # never make the poll failure worse.
@@ -580,7 +656,8 @@ async def poll_loop() -> None:
             # Back off when upstreams are failing; normal cadence when healthy.
             await asyncio.sleep(_next_poll_delay(store.consecutive_poll_failures))
     finally:
-        await client.close()
+        store.client = None
+        await ohme_client.close_client(client)
 
 
 @asynccontextmanager
@@ -592,6 +669,8 @@ async def lifespan(app: FastAPI):
         access_logger.addFilter(_quiet_access_filter)
 
     await db.init()
+    db_stop = asyncio.Event()
+    db_reconnect_task = asyncio.create_task(db.reconnect_loop(db_stop))
 
     global _poll_task
     task: Optional[asyncio.Task] = None
@@ -611,6 +690,8 @@ async def lifespan(app: FastAPI):
             except Exception:  # noqa: BLE001 - already logged by _on_poll_task_done
                 pass
             _poll_task = None
+        db_stop.set()
+        await db_reconnect_task
         await db.close()
 
 
@@ -631,22 +712,17 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 async def require_csrf_header(
     x_requested_with: Optional[str] = Header(default=None),
 ) -> None:
-    """CSRF guard for state-changing requests that carry no JSON body.
+    """Require the SPA's custom header on every state-changing request.
 
-    ``POST /api/charge/pause`` … ``/resume`` … ``/refresh`` take no body, so a
-    browser treats them as CORS "simple requests" and performs no preflight —
-    any web page the user visits could ``fetch()`` them against the LAN IP and
-    the side effect would execute (CORS only blocks *reading* the response).
-    Requiring a custom header closes this: a browser cannot attach one to a
-    cross-origin simple request without triggering a preflight, which the CORS
-    policy then gates. The JSON-body PUT endpoints are already preflighted by
-    their non-simple content type, so they don't need this. The SPA sends the
-    header on every request (see frontend ``api/client.ts``).
+    A browser cannot attach this header cross-origin without a CORS preflight,
+    which the same-origin policy rejects. Applying the rule uniformly also
+    keeps JSON mutations protected if their content type or payload changes.
+    The SPA sends the header on every request (see frontend ``api/client.ts``).
     """
-    if not x_requested_with:
+    if x_requested_with != "autocharge-ui":
         raise HTTPException(
             status_code=403,
-            detail="Missing X-Requested-With header (CSRF protection)",
+            detail="X-Requested-With must be autocharge-ui (CSRF protection)",
         )
 
 
@@ -657,6 +733,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=TRUSTED_HOSTS)
 if CORS_ORIGINS:
     app.add_middleware(
         CORSMiddleware,
@@ -782,285 +859,6 @@ def parse_summary(summary: dict[str, Any], days: int) -> dict[str, Any]:
 
 
 # --- endpoints -----------------------------------------------------------------
-
-
-class TargetUpdate(BaseModel):
-    """Request body for PUT /api/settings/target."""
-
-    targetPercent: int = Field(ge=settings.TARGET_MIN, le=settings.TARGET_MAX)
-
-
-class ReadyByUpdate(BaseModel):
-    """Request body for PUT /api/settings/ready-by.
-
-    ``readyBy`` is a 24h ``HH:MM`` string, or null to clear it (charge ASAP on
-    Ohme's smart schedule).
-    """
-
-    readyBy: Optional[str] = Field(default=None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
-
-
-class DayTargetsUpdate(BaseModel):
-    """Request body for PUT /api/settings/day-targets.
-
-    ``dayTargets`` maps weekday (0=Mon … 6=Sun) to a target percent. The map is
-    a full replacement; omit a day to fall back to the base target.
-    """
-
-    dayTargets: dict[int, int]
-
-    @field_validator("dayTargets")
-    @classmethod
-    def _check_bounds(cls, value: dict[int, int]) -> dict[int, int]:
-        for day, pct in value.items():
-            if not 0 <= day <= 6:
-                raise ValueError("weekday must be 0 (Mon) to 6 (Sun)")
-            if not settings.TARGET_MIN <= pct <= settings.TARGET_MAX:
-                raise ValueError(f"target must be {settings.TARGET_MIN}–{settings.TARGET_MAX}")
-        return value
-
-
-class TripModeUpdate(BaseModel):
-    """Enable/update or cancel a one-physical-session charge override."""
-
-    enabled: bool
-    targetPercent: int = Field(default=100, ge=settings.TARGET_MIN, le=settings.TARGET_MAX)
-    readyBy: Optional[str] = Field(default=None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
-
-
-class NotificationPreferencesUpdate(BaseModel):
-    """Full replacement of ntfy categories and alert thresholds."""
-
-    plugIn: bool
-    chargeComplete: bool
-    problems: bool
-    vehicleHealth: bool
-    weeklyDigest: bool
-    failurePolls: int = Field(ge=1, le=20)
-    minimumChargeKwh: float = Field(ge=0, le=100)
-    auxBatteryBelowPercent: Optional[int] = Field(default=None, ge=1, le=100)
-
-    def to_settings(self) -> settings.NotificationPreferences:
-        return settings.NotificationPreferences(
-            plug_in=self.plugIn,
-            charge_complete=self.chargeComplete,
-            problems=self.problems,
-            vehicle_health=self.vehicleHealth,
-            weekly_digest=self.weeklyDigest,
-            failure_polls=self.failurePolls,
-            minimum_charge_kwh=self.minimumChargeKwh,
-            aux_battery_below_percent=self.auxBatteryBelowPercent,
-        )
-
-
-class VehicleUpdate(BaseModel):
-    """Request body for PUT /api/settings/vehicle (null selects the first vehicle)."""
-
-    vehicleId: Optional[str] = None
-
-
-class VehicleProfileUpdate(BaseModel):
-    """Create/update or remove charging defaults for one Hyundai vehicle."""
-
-    vehicleId: str = Field(min_length=1, max_length=200)
-    enabled: bool
-    targetPercent: int = Field(default=80, ge=settings.TARGET_MIN, le=settings.TARGET_MAX)
-    readyBy: Optional[str] = Field(default=None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
-
-
-class StatisticsWindowModel(BaseModel):
-    """Exact, half-open local-calendar window represented by the response."""
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    from_: datetime.datetime = Field(alias="from")
-    toExclusive: datetime.datetime
-    completeThrough: datetime.datetime
-    timezone: str
-
-
-class StatisticsTotalsModel(BaseModel):
-    energyKwh: float
-    savingsVsStandard: float
-    costTotal: float
-    averageKwhPrice: float
-    carbonSavedKgVsGasCar: float
-
-
-class DailyStatModel(BaseModel):
-    date: datetime.date
-    energyKwh: float
-    savings: float
-    cost: float
-    isComplete: bool
-
-
-class EfficiencyModel(BaseModel):
-    milesDriven: int
-    milesPerKwh: float
-    energyKwh: float
-    intervalCount: int
-    vehicleId: str
-    model_config = ConfigDict(populate_by_name=True)
-    from_: Optional[datetime.datetime] = Field(alias="from")
-    to: Optional[datetime.datetime]
-    scope: Literal["matched_home_charging"]
-
-
-class RunningCostModel(BaseModel):
-    costPerMile: float
-    milesDriven: int
-    costTotal: float
-    currency: str
-    intervalCount: int
-    scope: Literal["matched_actual_home_charging"]
-
-
-class PreviousTotalsModel(BaseModel):
-    energyKwh: float
-    costTotal: float
-    savingsVsStandard: float
-
-
-class ComparisonModel(BaseModel):
-    previous: PreviousTotalsModel
-
-
-class StatisticsScopeModel(BaseModel):
-    summary: Literal["ohme_account"]
-    vehicleId: Optional[str]
-
-
-class MetricProvenanceModel(BaseModel):
-    """Where a metric came from and how much evidence supports it."""
-
-    source: str
-    calculationType: str
-    observedAt: Optional[datetime.datetime]
-    completeThrough: datetime.datetime
-    quality: Literal["complete", "measured", "actual", "unavailable", "stale"]
-    coverage: dict[str, Any]
-
-
-class StatisticsMetadataModel(BaseModel):
-    summary: MetricProvenanceModel
-    daily: MetricProvenanceModel
-    efficiency: MetricProvenanceModel
-    runningCost: MetricProvenanceModel
-    comparison: MetricProvenanceModel
-
-
-class StatisticsResponseModel(BaseModel):
-    rangeDays: int
-    stale: bool = False
-    currency: Optional[str]
-    window: StatisticsWindowModel
-    scope: StatisticsScopeModel
-    totals: StatisticsTotalsModel
-    daily: list[DailyStatModel]
-    efficiency: Optional[EfficiencyModel]
-    runningCost: Optional[RunningCostModel]
-    comparison: Optional[ComparisonModel]
-    metadata: StatisticsMetadataModel
-
-
-class SessionQualityModel(BaseModel):
-    total: int
-    completed: int
-    missingActualEnergy: int
-    missingActualCost: int
-
-
-class TelemetryQualityModel(BaseModel):
-    unlinkedLast24h: int
-
-
-class ConsumptionQualityModel(BaseModel):
-    uncertainLast30d: int
-    ingestedThrough: Optional[datetime.datetime]
-
-
-class DailyQualityModel(BaseModel):
-    completeThrough: Optional[datetime.date]
-
-
-class StatisticsCacheQualityModel(BaseModel):
-    available: bool
-    ageSeconds: Optional[int]
-
-
-class DataQualityResponseModel(BaseModel):
-    status: Literal["ok", "attention", "unavailable"]
-    generatedAt: datetime.datetime
-    persistenceAvailable: bool
-    actualCostExpected: bool
-    sessions: Optional[SessionQualityModel]
-    telemetry: Optional[TelemetryQualityModel]
-    consumption: Optional[ConsumptionQualityModel]
-    daily: Optional[DailyQualityModel]
-    statisticsCache: StatisticsCacheQualityModel
-
-
-class MonthlyReportDailyModel(BaseModel):
-    date: datetime.date
-    energyWh: int
-    savingsMinor: int
-    costMinor: int
-    currency: Optional[str]
-    source: str
-    isComplete: bool
-    updatedAt: datetime.datetime
-
-
-class MonthlyReportSessionModel(BaseModel):
-    id: int
-    pluggedInAt: datetime.datetime
-    completedAt: Optional[datetime.datetime]
-    actualEnergyWh: Optional[int]
-    actualCostMinor: Optional[int]
-    currency: Optional[str]
-    quality: str
-    vehicleName: Optional[str]
-    action: Optional[str]
-
-
-class MonthlyAccountSummaryModel(BaseModel):
-    energyWh: int
-    savingsMinor: Optional[int]
-    costMinor: Optional[int]
-    currency: Optional[str]
-    completeDays: int
-    expectedDays: int
-    missingDays: int
-    quality: Literal["complete", "partial", "unavailable", "mixed_currency"]
-
-
-class MonthlySessionSummaryModel(BaseModel):
-    total: int
-    configuredCompleted: int
-    measuredEnergyCount: int
-    measuredEnergyWh: int
-    actualCostCount: int
-    actualCostMinor: Optional[int]
-    costCurrency: Optional[str]
-    actualCostExpected: bool
-    missingActualEnergy: int
-    missingActualCost: int
-    qualityCounts: dict[str, int]
-
-
-class MonthlyReportResponseModel(BaseModel):
-    month: str
-    timezone: str
-    from_: datetime.datetime = Field(alias="from")
-    toExclusive: datetime.datetime
-    generatedAt: datetime.datetime
-    account: MonthlyAccountSummaryModel
-    homeSessions: MonthlySessionSummaryModel
-    daily: list[MonthlyReportDailyModel]
-    sessions: list[MonthlyReportSessionModel]
-
-    model_config = ConfigDict(populate_by_name=True)
 
 
 def _monthly_window(month: Optional[str]) -> tuple[str, datetime.datetime, datetime.datetime]:
@@ -1215,80 +1013,23 @@ def _monthly_report_csv(report: dict[str, Any]) -> str:
     return output.getvalue()
 
 
-class SessionAuditRecordModel(BaseModel):
-    id: int
-    sessionKey: Optional[str]
-    pluggedInAt: datetime.datetime
-    unpluggedAt: Optional[datetime.datetime]
-    completedAt: Optional[datetime.datetime]
-    vehicleName: Optional[str]
-    vehicleId: Optional[str]
-    vin: Optional[str]
-    chargerId: Optional[str]
-    sourceObservedAt: Optional[datetime.datetime]
-    socPercent: Optional[int]
-    targetPercent: Optional[int]
-    endSocPercent: Optional[int]
-    topupPercent: Optional[int]
-    action: Optional[str]
-    odometerMiles: Optional[int]
-    sohPercent: Optional[int]
-    actualEnergyWh: Optional[int]
-    actualCostMinor: Optional[int]
-    costCurrency: Optional[str]
-    costMethod: Optional[str]
-    tariffCoverage: Optional[float]
-    reconstructedEnergyWh: Optional[int]
-    reconciliationDeltaWh: Optional[int]
-    completionReason: Optional[str]
-    quality: str
-    updatedAt: datetime.datetime
+def _persistence_status(saved: bool) -> PersistenceStatus:
+    return "saved" if saved else "memory_only"
 
 
-class SessionAuditEventModel(BaseModel):
-    at: datetime.datetime
-    type: str
-    details: dict[str, Any]
-
-
-class SessionAuditScheduleModel(BaseModel):
-    recordedAt: datetime.datetime
-    nextSlotStart: Optional[datetime.datetime]
-    nextSlotEnd: Optional[datetime.datetime]
-    slots: list[dict[str, Any]]
-    revision: int
-    reason: str
-
-
-class SessionAuditIntervalModel(BaseModel):
-    start: datetime.datetime
-    end: datetime.datetime
-    energyWh: int
-    costMinor: Optional[int]
-    rateMinorPerKwh: Optional[float]
-    currency: Optional[str]
-    quality: str
-    source: str
-
-
-class SessionAuditResponseModel(BaseModel):
-    session: SessionAuditRecordModel
-    events: list[SessionAuditEventModel]
-    schedules: list[SessionAuditScheduleModel]
-    intervals: list[SessionAuditIntervalModel]
-
-
-async def _reapply_target_if_connected(*, allow_zero_topup: bool = False) -> bool:
+async def _reapply_target_if_connected(
+    *, allow_zero_topup: bool = False
+) -> ApplyStatus:
     """Push the current effective target/ready-by to Ohme if the car is plugged in.
 
     Reads the effective target and ready-by so any settings change — base,
     weekday, trip, or departure time — re-plans the active
-    session. Returns True only if Ohme was reconfigured. Best-effort: failure
-    here doesn't fail the request; the settings still apply on the next plug-in.
+    session. Returns an explicit result so the UI can distinguish an expected
+    disconnected charger from a failed live apply.
     """
     client = store.client
     if client is None or not store.status.connected:
-        return False
+        return "not_connected"
     # The SOC recorded at plug-in goes stale as the session charges, and the
     # top-up sent to Ohme is computed from it — so re-read the real SOC first.
     # Target changes are rare (someone clicking save), so the extra Bluelink
@@ -1314,7 +1055,7 @@ async def _reapply_target_if_connected(*, allow_zero_topup: bool = False) -> boo
             "target_reapply_skipped",
             {"soc": soc, "target": target},
         )
-        return False
+        return "failed" if soc is None else "already_at_target"
     try:
         async with store.client_lock:
             await ohme_client.set_target(
@@ -1343,10 +1084,10 @@ async def _reapply_target_if_connected(*, allow_zero_topup: bool = False) -> boo
             next_slot_end=next_slot_end,
             reason="target_reapplied",
         )
-        return True
+        return "applied"
     except Exception:  # noqa: BLE001 - never let an Ohme hiccup fail the settings write
         logger.warning("Could not re-apply charge target to Ohme", exc_info=True)
-        return False
+        return "failed"
 
 
 @app.get("/api/version")
@@ -1373,6 +1114,31 @@ async def health() -> JSONResponse:
             "lastError": store.last_poll_error,
         },
         status_code=200 if poll_alive else 503,
+    )
+
+
+@app.get("/api/ready")
+async def ready() -> JSONResponse:
+    """Operational readiness, separate from restart-oriented liveness."""
+    poll_alive = DISABLE_POLLING or (_poll_task is not None and not _poll_task.done())
+    operational = (
+        poll_alive
+        and store.ready
+        and (DISABLE_POLLING or store.client is not None)
+        and store.last_poll_error is None
+    )
+    return JSONResponse(
+        {
+            "status": "ready" if operational else "not_ready",
+            "pollAlive": poll_alive,
+            "ohmeConnected": store.client is not None,
+            "lastError": store.last_poll_error,
+            "persistence": {
+                "configured": db.is_enabled(),
+                "available": db.is_available(),
+            },
+        },
+        status_code=200 if operational else 503,
     )
 
 
@@ -1442,7 +1208,11 @@ def _reflect_effective_target() -> None:
         store.status.target_percent = store.effective_target
 
 
-@app.put("/api/settings/target")
+@app.put(
+    "/api/settings/target",
+    dependencies=[Depends(require_csrf_header)],
+    response_model=TargetUpdateResponseModel,
+)
 async def set_charge_target(update: TargetUpdate) -> JSONResponse:
     target = update.targetPercent
     store.set_charge_target(target)
@@ -1452,10 +1222,20 @@ async def set_charge_target(update: TargetUpdate) -> JSONResponse:
     logger.info(
         "Charge target set to %s%% (persisted=%s, applied=%s)", target, persisted, applied
     )
-    return JSONResponse({"targetPercent": target, "persisted": persisted, "applied": applied})
+    return JSONResponse(
+        {
+            "targetPercent": target,
+            "persistenceStatus": _persistence_status(persisted),
+            "applyStatus": applied,
+        }
+    )
 
 
-@app.put("/api/settings/ready-by")
+@app.put(
+    "/api/settings/ready-by",
+    dependencies=[Depends(require_csrf_header)],
+    response_model=ReadyByUpdateResponseModel,
+)
 async def set_ready_by(update: ReadyByUpdate) -> JSONResponse:
     """Set (or clear, with null) the ready-by departure time.
 
@@ -1469,10 +1249,20 @@ async def set_ready_by(update: ReadyByUpdate) -> JSONResponse:
     # now carries the ready-by time.
     applied = await _reapply_target_if_connected()
     logger.info("Ready-by time set to %s (persisted=%s, applied=%s)", ready_by, persisted, applied)
-    return JSONResponse({"readyBy": ready_by, "persisted": persisted, "applied": applied})
+    return JSONResponse(
+        {
+            "readyBy": ready_by,
+            "persistenceStatus": _persistence_status(persisted),
+            "applyStatus": applied,
+        }
+    )
 
 
-@app.put("/api/settings/day-targets")
+@app.put(
+    "/api/settings/day-targets",
+    dependencies=[Depends(require_csrf_header)],
+    response_model=DayTargetsUpdateResponseModel,
+)
 async def set_day_targets(update: DayTargetsUpdate) -> JSONResponse:
     """Replace the per-weekday target overrides (0=Mon … 6=Sun).
 
@@ -1489,13 +1279,17 @@ async def set_day_targets(update: DayTargetsUpdate) -> JSONResponse:
     return JSONResponse(
         {
             "dayTargets": {str(d): p for d, p in day_targets.items()},
-            "persisted": persisted,
-            "applied": applied,
+            "persistenceStatus": _persistence_status(persisted),
+            "applyStatus": applied,
         }
     )
 
 
-@app.put("/api/settings/trip-mode")
+@app.put(
+    "/api/settings/trip-mode",
+    dependencies=[Depends(require_csrf_header)],
+    response_model=TripModeUpdateResponseModel,
+)
 async def set_trip_mode(update: TripModeUpdate) -> JSONResponse:
     """Set a durable override that is automatically consumed on unplug."""
     if update.enabled:
@@ -1521,13 +1315,17 @@ async def set_trip_mode(update: TripModeUpdate) -> JSONResponse:
             "enabled": store.trip_mode_enabled,
             "targetPercent": store.trip_target,
             "readyBy": store.trip_ready_by,
-            "persisted": persisted,
-            "applied": applied,
+            "persistenceStatus": _persistence_status(persisted),
+            "applyStatus": applied,
         }
     )
 
 
-@app.put("/api/settings/notifications")
+@app.put(
+    "/api/settings/notifications",
+    dependencies=[Depends(require_csrf_header)],
+    response_model=NotificationPreferencesUpdateResponseModel,
+)
 async def set_notification_preferences(
     update: NotificationPreferencesUpdate,
 ) -> JSONResponse:
@@ -1536,11 +1334,15 @@ async def set_notification_preferences(
     store.set_notification_preferences(preferences)
     persisted = settings.save_notification_preferences(preferences)
     return JSONResponse(
-        {**preferences.to_json(), "configured": bool(config.NTFY_TOPIC), "persisted": persisted}
+        {
+            **preferences.to_json(),
+            "configured": bool(config.NTFY_TOPIC),
+            "persistenceStatus": _persistence_status(persisted),
+        }
     )
 
 
-@app.get("/api/vehicles")
+@app.get("/api/vehicles", response_model=VehiclesResponseModel)
 async def get_vehicles() -> JSONResponse:
     """List the Hyundai vehicles on the account, with the selected one flagged.
 
@@ -1552,22 +1354,52 @@ async def get_vehicles() -> JSONResponse:
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not list vehicles from Bluelink", exc_info=True)
         raise HTTPException(status_code=502, detail="Could not list vehicles from Bluelink") from exc
-    return JSONResponse({"vehicles": vehicles, "selected": store.selected_vehicle_id})
+    public_vehicles = [
+        {key: vehicle.get(key) for key in ("id", "name", "model")}
+        for vehicle in vehicles
+    ]
+    return JSONResponse({"vehicles": public_vehicles, "selected": store.selected_vehicle_id})
 
 
-@app.put("/api/settings/vehicle")
+@app.put(
+    "/api/settings/vehicle",
+    dependencies=[Depends(require_csrf_header)],
+    response_model=VehicleUpdateResponseModel,
+)
 async def set_vehicle(update: VehicleUpdate) -> JSONResponse:
     """Select which Hyundai vehicle to read (null = first). Persisted; re-reads
     the new vehicle's SOC and re-applies to an active session."""
     vehicle_id = update.vehicleId or None
+    try:
+        vehicles = await bluelink.list_vehicles_async()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not validate Hyundai vehicle selection", exc_info=True)
+        raise HTTPException(
+            status_code=502, detail="Could not validate vehicle with Bluelink"
+        ) from exc
+    if vehicle_id is not None and vehicle_id not in {str(v["id"]) for v in vehicles}:
+        raise HTTPException(
+            status_code=422,
+            detail="Vehicle is not present on this Hyundai account",
+        )
     store.set_vehicle_id(vehicle_id)
     persisted = settings.save_vehicle_id(vehicle_id)
     applied = await _reapply_target_if_connected()
     logger.info("Vehicle selection set to %s (persisted=%s, applied=%s)", vehicle_id, persisted, applied)
-    return JSONResponse({"vehicleId": vehicle_id, "persisted": persisted, "applied": applied})
+    return JSONResponse(
+        {
+            "vehicleId": vehicle_id,
+            "persistenceStatus": _persistence_status(persisted),
+            "applyStatus": applied,
+        }
+    )
 
 
-@app.put("/api/settings/vehicle-profile")
+@app.put(
+    "/api/settings/vehicle-profile",
+    dependencies=[Depends(require_csrf_header)],
+    response_model=VehicleProfileUpdateResponseModel,
+)
 async def set_vehicle_profile(update: VehicleProfileUpdate) -> JSONResponse:
     """Create/update or remove charging defaults for one vehicle."""
     profiles = dict(store.vehicle_profiles)
@@ -1582,7 +1414,7 @@ async def set_vehicle_profile(update: VehicleProfileUpdate) -> JSONResponse:
     active_vehicle_id = store.selected_vehicle_id or store.last_vehicle_id
     applied = (
         await _reapply_target_if_connected(allow_zero_topup=True)
-        if active_vehicle_id == update.vehicleId else False
+        if active_vehicle_id == update.vehicleId else "not_connected"
     )
     _reflect_effective_target()
     profile = profiles.get(update.vehicleId)
@@ -1592,13 +1424,13 @@ async def set_vehicle_profile(update: VehicleProfileUpdate) -> JSONResponse:
             "enabled": profile is not None,
             "targetPercent": profile.target_percent if profile else None,
             "readyBy": profile.ready_by if profile else None,
-            "persisted": persisted,
-            "applied": applied,
+            "persistenceStatus": _persistence_status(persisted),
+            "applyStatus": applied,
         }
     )
 
 
-@app.get("/api/status")
+@app.get("/api/status", response_model=StatusResponseModel)
 async def get_status() -> JSONResponse:
     payload = {
         "vehicle": {
@@ -1677,6 +1509,11 @@ async def get_status() -> JSONResponse:
         },
         "updatedAt": store.status.updated_at,
         "ready": store.ready,
+        "automation": {
+            "state": store.automation_state,
+            "errorCode": store.automation_error_code,
+            "lastAttemptAt": store.automation_last_attempt_at,
+        },
         # Why the most recent poll failed, or null when it succeeded. The data
         # above is the last good snapshot, so the UI can flag it as stale.
         "lastError": store.last_poll_error,
@@ -1684,7 +1521,7 @@ async def get_status() -> JSONResponse:
     return JSONResponse(payload)
 
 
-@app.get("/api/schedule")
+@app.get("/api/schedule", response_model=ScheduleResponseModel)
 async def get_schedule() -> JSONResponse:
     return JSONResponse(
         {
@@ -1750,7 +1587,7 @@ async def get_energy_usage(date: Optional[str] = Query(default=None)) -> JSONRes
     or persistence is off — the dashboard hides the card, mirroring
     ``/api/sessions`` and ``/api/tariff``.
     """
-    if not octopus.consumption_is_enabled() or not db.is_enabled():
+    if not octopus.consumption_is_enabled() or not db.is_available():
         return JSONResponse({"enabled": False, "slots": [], "totals": None, "date": None})
 
     tz = _STATS_TZ or datetime.timezone.utc
@@ -1787,7 +1624,7 @@ async def get_energy_usage(date: Optional[str] = Query(default=None)) -> JSONRes
     )
 
 
-@app.get("/api/sessions")
+@app.get("/api/sessions", response_model=SessionsResponseModel)
 async def get_sessions(limit: int = Query(default=10, ge=1, le=50)) -> JSONResponse:
     """Recent plug-in sessions from the Postgres history.
 
@@ -1858,7 +1695,7 @@ async def get_session_telemetry(session_id: int) -> JSONResponse:
     ``enabled`` is false when persistence is off (the sessions card itself is
     hidden then, so this is defensive). A 404 means the session id is unknown.
     """
-    if not db.is_enabled():
+    if not db.is_available():
         return JSONResponse({"enabled": False, "points": []})
     points = await db.get_session_telemetry(session_id)
     if points is None:
@@ -1869,7 +1706,7 @@ async def get_session_telemetry(session_id: int) -> JSONResponse:
 @app.get("/api/sessions/{session_id}/audit", response_model=SessionAuditResponseModel)
 async def get_session_audit(session_id: int) -> SessionAuditResponseModel:
     """Identity, lifecycle, schedule revisions and measured tariff intervals."""
-    if not db.is_enabled():
+    if not db.is_available():
         raise HTTPException(status_code=404, detail="History persistence is disabled")
     audit = await db.get_session_audit(session_id)
     if audit is None:
@@ -1897,12 +1734,13 @@ async def _persist_daily_stats(client: Any, days: int = 90) -> None:
     Best-effort and only does work when persistence is enabled. Used by the poll
     loop so Grafana's daily history stays current without the dashboard open.
     """
-    if not db.is_enabled():
+    if not db.is_available():
         return
     window = _statistics_window(days)
     try:
         async with store.client_lock:
-            summary = await client.async_get_charge_summary(
+            summary = await ohme_client.get_charge_summary(
+                client,
                 start_ts=window["startMs"], end_ts=window["endMs"]
             )
     except Exception:
@@ -1923,7 +1761,7 @@ async def _persist_grid_consumption(days: int = 3) -> None:
     into ``grid_consumption``. Best-effort and a no-op unless consumption and
     persistence are enabled. The cursor advances only after rows commit.
     """
-    if not octopus.consumption_is_enabled() or not db.is_enabled():
+    if not octopus.consumption_is_enabled() or not db.is_available():
         return
     now = datetime.datetime.now(datetime.timezone.utc)
     cursor = await db.get_ingestion_cursor("octopus_consumption")
@@ -2015,7 +1853,8 @@ async def _maybe_send_weekly_digest(client: Any) -> None:
     window = _statistics_window(7, now_local)
     try:
         async with store.client_lock:
-            summary = await client.async_get_charge_summary(
+            summary = await ohme_client.get_charge_summary(
+                client,
                 start_ts=window["startMs"], end_ts=window["endMs"]
             )
     except Exception:
@@ -2038,7 +1877,8 @@ async def _previous_period_totals(
     """
     try:
         async with store.client_lock:
-            summary = await client.async_get_charge_summary(
+            summary = await ohme_client.get_charge_summary(
+                client,
                 start_ts=window["previousStartMs"], end_ts=window["startMs"]
             )
     except Exception:  # noqa: BLE001
@@ -2056,7 +1896,7 @@ async def _previous_period_totals(
 
 async def _driving_metrics(window: dict[str, Any]) -> Optional[dict[str, Any]]:
     """Fully-contained, single-vehicle charge-to-drive intervals for this window."""
-    if not db.is_enabled():
+    if not db.is_available():
         return None
     vehicle_id = store.selected_vehicle_id or await db.get_single_vehicle_id()
     if not vehicle_id:
@@ -2212,7 +2052,8 @@ async def get_statistics(
 
     try:
         async with store.client_lock:
-            summary = await client.async_get_charge_summary(
+            summary = await ohme_client.get_charge_summary(
+                client,
                 start_ts=window["startMs"], end_ts=window["endMs"]
             )
     except Exception as exc:  # noqa: BLE001
@@ -2253,12 +2094,6 @@ async def get_statistics(
 # --- charge controls -------------------------------------------------------------
 
 
-class MaxChargeUpdate(BaseModel):
-    """Request body for PUT /api/charge/max-charge."""
-
-    enabled: bool
-
-
 async def _charge_action(name: str, action: Any) -> JSONResponse:
     """Run an Ohme charge-control call, then refresh the cached snapshot.
 
@@ -2294,19 +2129,31 @@ async def _charge_action(name: str, action: Any) -> JSONResponse:
     )
 
 
-@app.post("/api/charge/pause", dependencies=[Depends(require_csrf_header)])
+@app.post(
+    "/api/charge/pause",
+    dependencies=[Depends(require_csrf_header)],
+    response_model=ChargeActionResponseModel,
+)
 async def pause_charge() -> JSONResponse:
     """Pause the active charge session."""
-    return await _charge_action("pause charging", lambda c: c.async_pause_charge())
+    return await _charge_action("pause charging", ohme_client.pause_charge)
 
 
-@app.post("/api/charge/resume", dependencies=[Depends(require_csrf_header)])
+@app.post(
+    "/api/charge/resume",
+    dependencies=[Depends(require_csrf_header)],
+    response_model=ChargeActionResponseModel,
+)
 async def resume_charge() -> JSONResponse:
     """Resume a paused charge session."""
-    return await _charge_action("resume charging", lambda c: c.async_resume_charge())
+    return await _charge_action("resume charging", ohme_client.resume_charge)
 
 
-@app.put("/api/charge/max-charge")
+@app.put(
+    "/api/charge/max-charge",
+    dependencies=[Depends(require_csrf_header)],
+    response_model=ChargeActionResponseModel,
+)
 async def set_max_charge(update: MaxChargeUpdate) -> JSONResponse:
     """Toggle Ohme's max-charge (boost) mode.
 
@@ -2314,10 +2161,14 @@ async def set_max_charge(update: MaxChargeUpdate) -> JSONResponse:
     disabling returns to smart charging.
     """
     action = "enable max charge" if update.enabled else "disable max charge"
-    return await _charge_action(action, lambda c: c.async_max_charge(update.enabled))
+    return await _charge_action(action, lambda c: ohme_client.set_max_charge(c, update.enabled))
 
 
-@app.post("/api/refresh", dependencies=[Depends(require_csrf_header)])
+@app.post(
+    "/api/refresh",
+    dependencies=[Depends(require_csrf_header)],
+    response_model=RefreshResponseModel,
+)
 async def refresh() -> JSONResponse:
     """Force an immediate live re-read from Ohme and rebuild the cached snapshot.
 

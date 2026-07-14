@@ -22,13 +22,15 @@ export const handlers = [
   // Single vehicle by default, so the dashboard picker stays hidden in tests.
   http.get('*/api/vehicles', () =>
     HttpResponse.json({
-      vehicles: [{ id: 'car-1', name: 'IONIQ 5', vin: 'VIN1', model: 'IONIQ 5' }],
+      vehicles: [{ id: 'car-1', name: 'IONIQ 5', model: 'IONIQ 5' }],
       selected: null,
     }),
   ),
   http.put('*/api/settings/vehicle', async ({ request }) => {
     const body = (await request.json()) as { vehicleId: string | null };
-    return HttpResponse.json({ vehicleId: body.vehicleId, persisted: true, applied: false });
+    return HttpResponse.json({
+      vehicleId: body.vehicleId, persistenceStatus: 'saved', applyStatus: 'not_connected',
+    });
   }),
   http.put('*/api/settings/vehicle-profile', async ({ request }) => {
     const body = (await request.json()) as {
@@ -39,8 +41,8 @@ export const handlers = [
       enabled: body.enabled,
       targetPercent: body.enabled ? body.targetPercent : null,
       readyBy: body.enabled ? body.readyBy : null,
-      persisted: true,
-      applied: false,
+      persistenceStatus: 'saved',
+      applyStatus: 'not_connected',
     });
   }),
   http.get('*/api/schedule', () => HttpResponse.json(scheduleFixture)),
@@ -63,15 +65,21 @@ export const handlers = [
   }),
   http.put('*/api/settings/target', async ({ request }) => {
     const body = (await request.json()) as { targetPercent: number };
-    return HttpResponse.json({ targetPercent: body.targetPercent, persisted: true, applied: false });
+    return HttpResponse.json({
+      targetPercent: body.targetPercent, persistenceStatus: 'saved', applyStatus: 'not_connected',
+    });
   }),
   http.put('*/api/settings/ready-by', async ({ request }) => {
     const body = (await request.json()) as { readyBy: string | null };
-    return HttpResponse.json({ readyBy: body.readyBy, persisted: true, applied: false });
+    return HttpResponse.json({
+      readyBy: body.readyBy, persistenceStatus: 'saved', applyStatus: 'not_connected',
+    });
   }),
   http.put('*/api/settings/day-targets', async ({ request }) => {
     const body = (await request.json()) as { dayTargets: Record<string, number> };
-    return HttpResponse.json({ dayTargets: body.dayTargets, persisted: true, applied: false });
+    return HttpResponse.json({
+      dayTargets: body.dayTargets, persistenceStatus: 'saved', applyStatus: 'not_connected',
+    });
   }),
   http.put('*/api/settings/trip-mode', async ({ request }) => {
     const body = (await request.json()) as {
@@ -81,13 +89,13 @@ export const handlers = [
       enabled: body.enabled,
       targetPercent: body.enabled ? body.targetPercent : null,
       readyBy: body.enabled ? body.readyBy : null,
-      persisted: true,
-      applied: false,
+      persistenceStatus: 'saved',
+      applyStatus: 'not_connected',
     });
   }),
   http.put('*/api/settings/notifications', async ({ request }) => {
     const body = await request.json() as Record<string, unknown>;
-    return HttpResponse.json({ ...body, configured: true, persisted: true });
+    return HttpResponse.json({ ...body, configured: true, persistenceStatus: 'saved' });
   }),
   http.post('*/api/refresh', () =>
     HttpResponse.json({ ok: true, updatedAt: statusFixture.updatedAt, ready: true }),

@@ -49,6 +49,8 @@ async def test_returns_false_when_bluelink_fails():
     with patch("bluelink.get_vehicle_state", side_effect=RuntimeError("No vehicles found")):
         result = await handle_plugin_event(_mock_ohme_client())
     assert result is False
+    assert store.automation_state == "error"
+    assert store.automation_error_code == "bluelink_read_failed"
 
 
 async def test_returns_false_when_bluelink_times_out(monkeypatch):
@@ -64,6 +66,7 @@ async def test_returns_false_when_bluelink_times_out(monkeypatch):
     with patch("ntfy.send", new=AsyncMock()):
         result = await handle_plugin_event(_mock_ohme_client())
     assert result is False
+    await asyncio.sleep(0.35)
 
 
 async def test_returns_true_when_soc_already_at_target(monkeypatch):
@@ -161,7 +164,7 @@ async def test_records_session_and_schedule_when_db_enabled(monkeypatch):
     with patch("bluelink.get_vehicle_state", return_value=_vstate(62, soh_percent=98)), \
          patch("ohme_client.set_target", new=AsyncMock()), \
          patch("ntfy.send", new=AsyncMock()), \
-         patch("db.is_enabled", return_value=True), \
+         patch("db.is_available", return_value=True), \
          patch("db.record_session", new=AsyncMock(return_value=7)) as mock_session, \
          patch("db.record_schedule", new=AsyncMock()) as mock_schedule:
         plugged_at = dt.datetime(2026, 6, 1, 20, 0, tzinfo=dt.timezone.utc)
@@ -186,7 +189,7 @@ async def test_records_skipped_session_when_already_at_target(monkeypatch):
     client.current_vehicle = "IONIQ 5"
 
     with patch("bluelink.get_vehicle_state", return_value=_vstate(90, odometer_miles=12000, soh_percent=97)), \
-         patch("db.is_enabled", return_value=True), \
+         patch("db.is_available", return_value=True), \
          patch("db.record_session", new=AsyncMock(return_value=1)) as mock_session:
         plugged_at = dt.datetime(2026, 6, 1, 20, 0, tzinfo=dt.timezone.utc)
         result = await handle_plugin_event(
@@ -211,6 +214,8 @@ async def test_returns_false_when_ohme_fails_and_sends_only_failure_alert(monkey
         result = await handle_plugin_event(_mock_ohme_client())
 
     assert result is False
+    assert store.automation_state == "error"
+    assert store.automation_error_code == "ohme_target_failed"
     # The "plugged in → target set" success message must NOT be sent; the only
     # notification is the high-priority failure alert.
     mock_notify.assert_awaited_once()
@@ -296,6 +301,7 @@ async def test_restart_mid_handled_session_does_not_re_handle(monkeypatch):
             pass
 
     mock_handle.assert_not_called()
+    assert store.automation_state == "configured"
 
 
 async def test_connected_on_startup_without_prior_session_is_handled(monkeypatch):

@@ -33,7 +33,7 @@ def client():
     # The SPA sends X-Requested-With on every request; mirror that here so the
     # CSRF guard on the simple-request POST endpoints is satisfied by default.
     # Tests that assert the guard fires send their own request without it.
-    with TestClient(api.app, headers={"X-Requested-With": "test"}) as c:
+    with TestClient(api.app, headers={"X-Requested-With": "autocharge-ui"}) as c:
         yield c
 
 
@@ -66,6 +66,9 @@ def reset_state():
     store.consecutive_poll_failures = 0
     store.poll_failure_notified = False
     store.plugin_failure_notified = False
+    store.automation_state = "idle"
+    store.automation_error_code = None
+    store.automation_last_attempt_at = None
     store.active_session_id = None
     store.active_session_key = None
     store.last_digest_date = None
@@ -146,6 +149,23 @@ def test_health_reports_last_error(client):
     body = client.get("/api/health").json()
     assert body["lastError"] == "poll_failed"
     assert body["lastSuccessfulPoll"] == "2026-06-02T00:00:00+01:00"
+
+
+def test_ready_separates_operational_state_from_liveness(client):
+    alive = MagicMock()
+    alive.done.return_value = False
+    store.client = MagicMock()
+    _populate_snapshot()
+    with patch.object(api, "DISABLE_POLLING", False), patch.object(api, "_poll_task", alive):
+        assert client.get("/api/ready").status_code == 200
+        store.record_poll_failure("poll_failed")
+        assert client.get("/api/ready").status_code == 503
+        assert client.get("/api/health").status_code == 200
+
+
+def test_rejects_untrusted_host_header(client):
+    response = client.get("/api/health", headers={"Host": "attacker.example"})
+    assert response.status_code == 400
 
 
 def test_data_quality_reports_unavailable_without_persistence(client):
@@ -446,7 +466,7 @@ def test_statistics_includes_efficiency_when_data_available(client):
         "costMilesDriven": 0, "costMinor": None, "costIntervalCount": 0,
         "costCurrency": None,
     }
-    with patch("db.is_enabled", return_value=True), \
+    with patch("db.is_available", return_value=True), \
          patch("db.get_vehicle_driving_metrics", new=AsyncMock(return_value=metrics)):
         body = client.get("/api/statistics?days=30").json()
 
@@ -464,7 +484,7 @@ def test_statistics_includes_efficiency_when_data_available(client):
 
 def test_statistics_efficiency_null_when_persistence_disabled(client):
     store.client = _summary_client()
-    with patch("db.is_enabled", return_value=False):
+    with patch("db.is_available", return_value=False):
         body = client.get("/api/statistics?days=7").json()
     assert body["efficiency"] is None
     assert body["metadata"]["efficiency"]["quality"] == "unavailable"
@@ -509,7 +529,7 @@ def test_statistics_comparison_null_when_previous_fetch_fails(client):
 
 def test_statistics_efficiency_null_when_no_odometer_span(client):
     store.client = _summary_client()
-    with patch("db.is_enabled", return_value=True), \
+    with patch("db.is_available", return_value=True), \
          patch("db.get_single_vehicle_id", new=AsyncMock(return_value=None)):
         body = client.get("/api/statistics?days=90").json()
     assert body["efficiency"] is None
@@ -541,7 +561,7 @@ def test_statistics_includes_running_cost_when_data_available(client):
         "costMilesDriven": 210, "costMinor": 5250, "costIntervalCount": 4,
         "costCurrency": "GBP",
     }
-    with patch("db.is_enabled", return_value=True), \
+    with patch("db.is_available", return_value=True), \
          patch("db.get_vehicle_driving_metrics", new=AsyncMock(return_value=metrics)):
         body = client.get("/api/statistics?days=30").json()
     assert body["runningCost"]["costPerMile"] == 0.25
@@ -563,7 +583,7 @@ def test_statistics_response_contract_is_published_in_openapi(client):
 
 def test_statistics_running_cost_null_without_miles(client):
     store.client = _summary_client_with_cost()
-    with patch("db.is_enabled", return_value=True), \
+    with patch("db.is_available", return_value=True), \
          patch("db.get_single_vehicle_id", new=AsyncMock(return_value=None)):
         body = client.get("/api/statistics?days=30").json()
     assert body["runningCost"] is None
@@ -578,7 +598,7 @@ def test_statistics_running_cost_null_without_cost(client):
         "costCurrency": None,
     }
     store.set_vehicle_id("car-1")
-    with patch("db.is_enabled", return_value=True), \
+    with patch("db.is_available", return_value=True), \
          patch("db.get_vehicle_driving_metrics", new=AsyncMock(return_value=metrics)):
         body = client.get("/api/statistics?days=30").json()
     assert body["runningCost"] is None
@@ -807,14 +827,14 @@ def test_sessions_export_rejects_bad_format(client):
 
 
 def test_session_telemetry_disabled_when_persistence_off(client):
-    with patch("db.is_enabled", return_value=False):
+    with patch("db.is_available", return_value=False):
         body = client.get("/api/sessions/1/telemetry").json()
     assert body == {"enabled": False, "points": []}
 
 
 def test_session_telemetry_404_for_unknown_session(client):
     with (
-        patch("db.is_enabled", return_value=True),
+        patch("db.is_available", return_value=True),
         patch("db.get_session_telemetry", new=AsyncMock(return_value=None)),
     ):
         res = client.get("/api/sessions/999/telemetry")
@@ -825,7 +845,7 @@ def test_session_telemetry_returns_points(client):
     pts = [{"at": "2026-06-01T20:05:00+00:00", "socPercent": 62,
             "powerWatts": 7400.0, "sessionEnergyKwh": 1.5}]
     with (
-        patch("db.is_enabled", return_value=True),
+        patch("db.is_available", return_value=True),
         patch("db.get_session_telemetry", new=AsyncMock(return_value=pts)) as mock_get,
     ):
         body = client.get("/api/sessions/7/telemetry").json()
@@ -860,7 +880,7 @@ def test_session_audit_returns_typed_provenance(client):
             "quality": "priced", "source": "ohme_counter",
         }],
     }
-    with patch("db.is_enabled", return_value=True), \
+    with patch("db.is_available", return_value=True), \
          patch("db.get_session_audit", new=AsyncMock(return_value=audit)):
         response = client.get("/api/sessions/7/audit")
     assert response.status_code == 200
@@ -869,10 +889,11 @@ def test_session_audit_returns_typed_provenance(client):
     assert body["events"][0]["details"] == {"target": 80}
     assert body["schedules"][0]["revision"] == 1
     assert body["intervals"][0]["costMinor"] == 20
+    assert {"sessionKey", "vehicleId", "vin", "chargerId"}.isdisjoint(body["session"])
 
 
 def test_session_audit_404_when_unknown(client):
-    with patch("db.is_enabled", return_value=True), \
+    with patch("db.is_available", return_value=True), \
          patch("db.get_session_audit", new=AsyncMock(return_value=None)):
         assert client.get("/api/sessions/999/audit").status_code == 404
 
@@ -903,7 +924,7 @@ def test_energy_usage_disabled_when_consumption_off(client):
 
 def test_energy_usage_disabled_when_persistence_off(client):
     with patch("octopus.consumption_is_enabled", return_value=True), \
-        patch("db.is_enabled", return_value=False):
+        patch("db.is_available", return_value=False):
         body = client.get("/api/energy-usage").json()
     assert body["enabled"] is False
 
@@ -916,7 +937,7 @@ def test_energy_usage_returns_slots_and_totals(client):
          "importKwh": 0.4, "carKwh": 0.0, "houseKwh": 0.4},
     ]
     with patch("octopus.consumption_is_enabled", return_value=True), \
-        patch("db.is_enabled", return_value=True), \
+        patch("db.is_available", return_value=True), \
         patch("db.get_grid_consumption", new=AsyncMock(return_value=slots)):
         body = client.get("/api/energy-usage?date=2026-06-01").json()
 
@@ -936,7 +957,7 @@ async def test_consumption_backfill_advances_cursor_only_after_success(monkeypat
         "importKwh": 1.0,
     }]
     with patch("octopus.consumption_is_enabled", return_value=True), \
-         patch("db.is_enabled", return_value=True), \
+         patch("db.is_available", return_value=True), \
          patch("db.get_ingestion_cursor", new=AsyncMock(return_value=None)), \
          patch("octopus.fetch_consumption", new=AsyncMock(return_value=consumption)) as fetch, \
          patch("db.get_telemetry_between", new=AsyncMock(return_value=[])), \
@@ -965,7 +986,7 @@ def test_energy_usage_defaults_to_yesterday(client):
         return []
 
     with patch("octopus.consumption_is_enabled", return_value=True), \
-        patch("db.is_enabled", return_value=True), \
+        patch("db.is_available", return_value=True), \
         patch("db.get_grid_consumption", new=fake_get):
         body = client.get("/api/energy-usage").json()
 
@@ -981,7 +1002,7 @@ def test_energy_usage_defaults_to_yesterday(client):
 
 def test_energy_usage_rejects_bad_date(client):
     with patch("octopus.consumption_is_enabled", return_value=True), \
-        patch("db.is_enabled", return_value=True):
+        patch("db.is_available", return_value=True):
         assert client.get("/api/energy-usage?date=not-a-date").status_code == 400
 
 
@@ -1334,8 +1355,8 @@ def test_get_vehicles_lists_and_flags_selected(client, monkeypatch):
     monkeypatch.setattr(config, "HYUNDAI_VEHICLE_ID", "")
     store.set_vehicle_id("car-2")
     fleet = [
-        {"id": "car-1", "name": "IONIQ 5", "vin": "VIN1", "model": "IONIQ 5"},
-        {"id": "car-2", "name": "Kona", "vin": "VIN2", "model": "Kona"},
+        {"id": "car-1", "name": "IONIQ 5", "model": "IONIQ 5"},
+        {"id": "car-2", "name": "Kona", "model": "Kona"},
     ]
     with patch("bluelink.list_vehicles", return_value=fleet):
         body = client.get("/api/vehicles").json()
@@ -1349,7 +1370,8 @@ def test_get_vehicles_502_on_bluelink_error(client):
 
 
 def test_set_vehicle_updates_store_and_persists(client):
-    resp = client.put("/api/settings/vehicle", json={"vehicleId": "car-2"})
+    with patch("bluelink.list_vehicles", return_value=[{"id": "car-2"}]):
+        resp = client.put("/api/settings/vehicle", json={"vehicleId": "car-2"})
     assert resp.status_code == 200
     assert resp.json()["vehicleId"] == "car-2"
     assert store.selected_vehicle_id == "car-2"
@@ -1357,11 +1379,24 @@ def test_set_vehicle_updates_store_and_persists(client):
 
 
 def test_set_vehicle_clear_with_null(client):
-    client.put("/api/settings/vehicle", json={"vehicleId": "car-2"})
-    resp = client.put("/api/settings/vehicle", json={"vehicleId": None})
+    with patch("bluelink.list_vehicles", return_value=[{"id": "car-2"}]):
+        client.put("/api/settings/vehicle", json={"vehicleId": "car-2"})
+        resp = client.put("/api/settings/vehicle", json={"vehicleId": None})
     assert resp.status_code == 200
     assert store.vehicle_id_override is None
     assert settings.load_vehicle_id() is None
+
+
+def test_invalid_vehicle_selection_changes_nothing(client):
+    store.set_vehicle_id("car-1")
+    settings.save_vehicle_id("car-1")
+    with patch("bluelink.list_vehicles", return_value=[{"id": "car-1"}]), \
+         patch("api._reapply_target_if_connected", new=AsyncMock()) as reapply:
+        response = client.put("/api/settings/vehicle", json={"vehicleId": "stale-car"})
+    assert response.status_code == 422
+    assert store.selected_vehicle_id == "car-1"
+    assert settings.load_vehicle_id() == "car-1"
+    reapply.assert_not_awaited()
 
 
 def test_vehicle_profile_persists_and_appears_in_status(client):
@@ -1372,7 +1407,8 @@ def test_vehicle_profile_persists_and_appears_in_status(client):
     assert response.status_code == 200
     assert response.json() == {
         "vehicleId": "car-2", "enabled": True, "targetPercent": 95,
-        "readyBy": "05:45", "persisted": True, "applied": False,
+        "readyBy": "05:45", "persistenceStatus": "saved",
+        "applyStatus": "not_connected",
     }
     assert settings.load_vehicle_profiles() == {
         "car-2": settings.VehicleProfile(95, "05:45")
@@ -1408,7 +1444,7 @@ def test_active_vehicle_profile_reapplies_immediately(client):
             "vehicleId": "car-2", "enabled": True,
             "targetPercent": 90, "readyBy": "06:15",
         }).json()
-    assert body["applied"] is True
+    assert body["applyStatus"] == "applied"
     set_target.assert_awaited_once_with(
         store.client, current_soc=55, target_percent=90, target_time=(6, 15)
     )
@@ -1573,6 +1609,21 @@ def test_simple_post_endpoints_require_csrf_header(path):
 
 
 @pytest.mark.parametrize(
+    "path,payload",
+    [
+        ("/api/settings/target", {"targetPercent": 80}),
+        ("/api/charge/max-charge", {"enabled": True}),
+    ],
+)
+def test_all_mutations_require_exact_ui_header(path, payload):
+    with TestClient(api.app) as bare:
+        assert bare.put(path, json=payload).status_code == 403
+        assert bare.put(
+            path, json=payload, headers={"X-Requested-With": "some-client"}
+        ).status_code == 403
+
+
+@pytest.mark.parametrize(
     "method,path",
     [("post", "/api/charge/pause"), ("post", "/api/charge/resume")],
 )
@@ -1649,7 +1700,7 @@ def test_set_target_updates_store_and_persists(client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["targetPercent"] == 65
-    assert body["persisted"] is True
+    assert body["persistenceStatus"] == "saved"
     # The runtime override is now in effect…
     assert store.charge_target == 65
     # …and survives a "restart" (reload from the persisted file).
@@ -1679,7 +1730,7 @@ def test_set_ready_by_updates_store_and_persists(client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["readyBy"] == "07:30"
-    assert body["persisted"] is True
+    assert body["persistenceStatus"] == "saved"
     assert store.ready_by == "07:30"
     assert settings.load_ready_by() == "07:30"  # survives a restart
 
@@ -1707,6 +1758,13 @@ def test_set_ready_by_rejects_bad_time(client, bad):
     assert store.ready_by is None
 
 
+def test_nullable_setting_rejects_unknown_field_without_clearing(client):
+    store.set_ready_by("07:30")
+    response = client.put("/api/settings/ready-by", json={"ready_by": None})
+    assert response.status_code == 422
+    assert store.ready_by == "07:30"
+
+
 def test_set_ready_by_passes_target_time_to_ohme(client):
     mock_client = MagicMock()
     store.client = mock_client
@@ -1718,7 +1776,7 @@ def test_set_ready_by_passes_target_time_to_ohme(client):
          patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
         body = client.put("/api/settings/ready-by", json={"readyBy": "07:30"}).json()
 
-    assert body["applied"] is True
+    assert body["applyStatus"] == "applied"
     # The (hour, minute) tuple must be threaded through to Ohme.
     assert mock_set_target.await_args.kwargs["target_time"] == (7, 30)
 
@@ -1731,7 +1789,7 @@ def test_set_day_targets_updates_store_and_persists(client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["dayTargets"] == {"4": 100, "5": 90}
-    assert body["persisted"] is True
+    assert body["persistenceStatus"] == "saved"
     assert store.day_targets == {4: 100, 5: 90}
     assert settings.load_day_targets() == {4: 100, 5: 90}  # survives a restart
 
@@ -1773,8 +1831,8 @@ def test_trip_mode_persists_and_is_reflected_in_status(client):
         "enabled": True,
         "targetPercent": 100,
         "readyBy": "06:30",
-        "persisted": True,
-        "applied": False,
+        "persistenceStatus": "saved",
+        "applyStatus": "not_connected",
     }
     assert settings.load_trip_mode() == (100, "06:30")
     assert client.get("/api/status").json()["config"]["tripMode"] == {
@@ -1791,7 +1849,7 @@ def test_trip_mode_applies_immediately_when_connected(client):
             "/api/settings/trip-mode",
             json={"enabled": True, "targetPercent": 100, "readyBy": "05:45"},
         ).json()
-    assert body["applied"] is True
+    assert body["applyStatus"] == "applied"
     assert set_target.await_args.kwargs == {
         "current_soc": 55, "target_percent": 100, "target_time": (5, 45)
     }
@@ -1824,7 +1882,7 @@ def test_trip_mode_cancel_stops_higher_schedule_when_normal_target_reached(clien
             "/api/settings/trip-mode",
             json={"enabled": False, "targetPercent": 100, "readyBy": None},
         ).json()
-    assert body["applied"] is True
+    assert body["applyStatus"] == "applied"
     set_target.assert_awaited_once_with(
         store.client, current_soc=90, target_percent=80, target_time=None
     )
@@ -1857,7 +1915,7 @@ def test_notification_preferences_persist_and_appear_in_status(client, monkeypat
     )
     response = client.put("/api/settings/notifications", json=payload)
     assert response.status_code == 200
-    assert response.json()["persisted"] is True
+    assert response.json()["persistenceStatus"] == "saved"
     assert response.json()["configured"] is True
     assert settings.load_notification_preferences().plug_in is False
     config_body = client.get("/api/status").json()["config"]["notifications"]
@@ -1908,7 +1966,7 @@ def test_set_target_reapplies_to_ohme_with_fresh_soc(client):
          patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
         body = client.put("/api/settings/target", json={"targetPercent": 90}).json()
 
-    assert body["applied"] is True
+    assert body["applyStatus"] == "applied"
     # The top-up must be computed from the fresh reading, not the plug-in one.
     mock_set_target.assert_awaited_once_with(
         mock_client, current_soc=68, target_percent=90, target_time=None
@@ -1928,7 +1986,7 @@ def test_set_target_falls_back_to_plugin_soc_when_bluelink_fails(client):
          patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
         body = client.put("/api/settings/target", json={"targetPercent": 90}).json()
 
-    assert body["applied"] is True
+    assert body["applyStatus"] == "applied"
     mock_set_target.assert_awaited_once_with(
         mock_client, current_soc=50, target_percent=90, target_time=None
     )
@@ -1944,7 +2002,7 @@ def test_set_target_does_not_reapply_when_fresh_soc_at_target(client):
          patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
         body = client.put("/api/settings/target", json={"targetPercent": 85}).json()
 
-    assert body["applied"] is False
+    assert body["applyStatus"] == "already_at_target"
     mock_set_target.assert_not_called()
 
 
@@ -1957,10 +2015,48 @@ def test_set_target_does_not_reapply_when_disconnected(client):
          patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
         body = client.put("/api/settings/target", json={"targetPercent": 90}).json()
 
-    assert body["applied"] is False
+    assert body["applyStatus"] == "not_connected"
     mock_set_target.assert_not_called()
     # No point waking Bluelink when the car isn't even plugged in.
     mock_soc.assert_not_called()
+
+
+def test_failed_live_apply_is_explicit_and_releases_client_lock(client):
+    store.client = MagicMock()
+    store.last_soc = 50
+    store.status = StatusSnapshot(connected=True)
+    store.ready = True
+    with patch("bluelink.get_vehicle_state", return_value=_vstate(55)), \
+         patch("ohme_client.set_target", new=AsyncMock(side_effect=TimeoutError)):
+        body = client.put("/api/settings/target", json={"targetPercent": 90}).json()
+    assert body["persistenceStatus"] == "saved"
+    assert body["applyStatus"] == "failed"
+    assert store.client_lock.locked() is False
+
+
+def test_status_keeps_plugin_error_visible_after_successful_poll(client):
+    store.record_automation_attempt("error", "ohme_target_failed")
+    store.update(StatusSnapshot(updated_at="2026-07-14T08:00:00Z"))
+    body = client.get("/api/status").json()
+    assert body["lastError"] is None
+    assert body["automation"]["state"] == "error"
+    assert body["automation"]["errorCode"] == "ohme_target_failed"
+
+
+async def test_recreate_ohme_client_preserves_session_identity():
+    previous = MagicMock()
+    replacement = MagicMock()
+    store.active_session_id = 42
+    store.active_session_key = "durable-key"
+    with patch("ohme_client.make_client", new=AsyncMock(return_value=replacement)), \
+         patch("ohme_client.update_device_info", new=AsyncMock()), \
+         patch("ohme_client.close_client", new=AsyncMock()) as close:
+        result = await api._recreate_ohme_client(previous)
+    assert result is replacement
+    assert store.client is replacement
+    assert store.active_session_id == 42
+    assert store.active_session_key == "durable-key"
+    close.assert_awaited_once_with(previous)
 
 
 # --- snapshot builder ----------------------------------------------------------

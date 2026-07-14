@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 # Created in init() when DATABASE_URL is set and reachable; stays None otherwise,
 # which is the signal every write helper checks to decide whether it is a no-op.
 _pool: Optional[AsyncConnectionPool] = None
+_init_lock = asyncio.Lock()
 
 
 def _minor_factor(currency: Optional[str]) -> int:
@@ -47,7 +48,7 @@ def is_enabled() -> bool:
 
 def is_available() -> bool:
     """True only when Postgres was configured *and* initialised successfully."""
-    return _pool is not None
+    return _pool is not None and getattr(_pool, "closed", False) is not True
 
 
 def _run_migrations() -> None:
@@ -73,20 +74,51 @@ async def init() -> None:
     global _pool
     if not is_enabled():
         return
-    try:
-        # Alembic/SQLAlchemy uses a synchronous connection; keep it off the event
-        # loop before opening the application's async psycopg pool.
-        await asyncio.to_thread(_run_migrations)
-        pool = AsyncConnectionPool(config.DATABASE_URL, min_size=1, max_size=4, open=False)
-        await pool.open(wait=True, timeout=10)
-        _pool = pool
-        logger.info("Postgres history persistence enabled; schema is at Alembic head")
-    except Exception:
-        logger.warning(
-            "Could not initialise Postgres — history persistence disabled for this run",
-            exc_info=True,
-        )
-        _pool = None
+    async with _init_lock:
+        if is_available():
+            return
+        pool: Optional[AsyncConnectionPool] = None
+        try:
+            # Alembic/SQLAlchemy uses a synchronous connection; keep it off the event
+            # loop before opening the application's async psycopg pool.
+            await asyncio.to_thread(_run_migrations)
+            pool = AsyncConnectionPool(
+                config.DATABASE_URL, min_size=1, max_size=4, open=False
+            )
+            await pool.open(wait=True, timeout=10)
+            _pool = pool
+            logger.info("Postgres history persistence enabled; schema is at Alembic head")
+        except Exception:
+            if pool is not None:
+                try:
+                    await pool.close()
+                except Exception:  # noqa: BLE001 - cleanup after failed open
+                    logger.debug("Failed to close partial Postgres pool", exc_info=True)
+            logger.warning(
+                "Could not initialise Postgres — retrying in the background",
+                exc_info=True,
+            )
+            _pool = None
+
+
+async def reconnect_loop(stop: asyncio.Event) -> None:
+    """Recover optional persistence after startup without blocking charging."""
+    if not is_enabled():
+        return
+    delay = float(config.DATABASE_RECONNECT_INITIAL)
+    while not stop.is_set():
+        if is_available():
+            delay = float(config.DATABASE_RECONNECT_INITIAL)
+        else:
+            await init()
+            if is_available():
+                delay = float(config.DATABASE_RECONNECT_INITIAL)
+            else:
+                delay = min(delay * 2, float(config.DATABASE_RECONNECT_MAX))
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=delay)
+        except TimeoutError:
+            pass
 
 
 async def close() -> None:

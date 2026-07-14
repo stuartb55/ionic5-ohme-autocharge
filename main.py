@@ -66,11 +66,13 @@ async def handle_plugin_event(
     session_key = session_key or uuid.uuid4().hex
     plugged_in_at = plugged_in_at or datetime.datetime.now(datetime.timezone.utc)
     logger.info("Plug-in detected (session=%s) — fetching vehicle state from Bluelink...", session_key)
+    store.record_automation_attempt("pending")
     try:
         # hyundai_kia_connect_api is synchronous; run it in a thread (bounded by
         # UPSTREAM_TIMEOUT) so a hung Bluelink call can't stall the loop.
         vehicle = await bluelink.get_vehicle_state_async(store.selected_vehicle_id)
     except Exception:
+        store.record_automation_attempt("error", "bluelink_read_failed")
         logger.exception("Failed to fetch SOC from Hyundai Bluelink — will retry next poll")
         await _notify_plugin_failure(
             "Couldn't read the battery SOC from Bluelink — this charge may not be "
@@ -93,7 +95,7 @@ async def handle_plugin_event(
             soc,
             target,
         )
-        if db.is_enabled():
+        if db.is_available():
             session_id = await db.record_session(
                 vehicle_name=client.current_vehicle,
                 soc_percent=soc,
@@ -117,6 +119,7 @@ async def handle_plugin_event(
                 {"soc": soc, "target": target, "tripMode": store.trip_mode_enabled},
             )
         store.plugin_failure_notified = False
+        store.record_automation_attempt("configured")
         return True
 
     logger.info(
@@ -159,7 +162,7 @@ async def handle_plugin_event(
             await ntfy.send(
                 "\n".join(lines), title=f"{vehicle_name} plugged in", tags="electric_plug"
             )
-        if db.is_enabled():
+        if db.is_available():
             session_id = await db.record_session(
                 vehicle_name=vehicle_name,
                 soc_percent=soc,
@@ -189,8 +192,10 @@ async def handle_plugin_event(
                 next_slot_end=next_slot_end,
             )
         store.plugin_failure_notified = False
+        store.record_automation_attempt("configured")
         return True
     except Exception:
+        store.record_automation_attempt("error", "ohme_target_failed")
         logger.exception("Failed to set Ohme charge target — will retry next poll")
         await _notify_plugin_failure(
             "Couldn't set the Ohme charge target — this charge may not be "
@@ -252,9 +257,11 @@ class PlugInDetector:
         store.active_session_key = self.session_key
         if settings.load_session_active():
             self.session_handled = True
+            store.record_automation_attempt("configured")
             logger.info("Car already connected on startup — session already handled before restart")
         else:
             self.session_handled = False
+            store.record_automation_attempt("pending")
             logger.info("Car connected on startup with no handled session — will configure on next poll")
 
     async def update(self, client, status) -> bool:
@@ -275,6 +282,7 @@ class PlugInDetector:
             # after inserting a row, the retry uses the same unique key.
             settings.save_session_marker(self.session_key, handled=False)
             store.active_session_key = self.session_key
+            store.record_automation_attempt("pending")
 
         if now_connected and not self.session_handled:
             if self.session_key is None:
@@ -337,7 +345,7 @@ async def run_loop() -> None:
     # Without it, current_vehicle is None until the first set_target call, so
     # the skipped-at-target session record would have no vehicle name.
     try:
-        await client.async_update_device_info()
+        await ohme_client.update_device_info(client)
     except Exception:
         logger.warning("Could not fetch device info on startup", exc_info=True)
 
@@ -352,16 +360,37 @@ async def run_loop() -> None:
         logger.warning("Could not determine initial charge state — will treat as disconnected")
 
     try:
+        session_failures = 0
         while True:
             try:
                 status = await ohme_client.get_charger_status(client)
                 await detector.update(client, status)
+                session_failures = 0
             except Exception:
                 logger.exception("Error during poll — will retry next interval")
+                session_failures += 1
+                if session_failures >= config.OHME_RECONNECT_FAILURES:
+                    replacement = None
+                    try:
+                        replacement = await ohme_client.make_client()
+                        await ohme_client.update_device_info(replacement)
+                        previous, client = client, replacement
+                        replacement = None
+                        await ohme_client.close_client(previous)
+                        session_failures = 0
+                        logger.info("Recreated Ohme client after repeated session failures")
+                    except asyncio.CancelledError:
+                        if replacement is not None:
+                            await ohme_client.close_client(replacement)
+                        raise
+                    except Exception:
+                        if replacement is not None:
+                            await ohme_client.close_client(replacement)
+                        logger.warning("Could not recreate Ohme client yet", exc_info=True)
 
             await asyncio.sleep(config.POLL_INTERVAL)
     finally:
-        await client.close()
+        await ohme_client.close_client(client)
         await db.close()
 
 
@@ -377,13 +406,13 @@ async def run_once() -> int:
     client = await ohme_client.make_client()
     try:
         try:
-            await client.async_update_device_info()
+            await ohme_client.update_device_info(client)
         except Exception:
             logger.warning("Could not fetch device info", exc_info=True)
         ok = await handle_plugin_event(client)
         return 0 if ok else 1
     finally:
-        await client.close()
+        await ohme_client.close_client(client)
         await db.close()
 
 

@@ -176,6 +176,11 @@ class AppState:
         # is failing, so the per-poll retries don't re-notify. Cleared when a
         # plug-in is handled successfully and when the car unplugs.
         self.plugin_failure_notified: bool = False
+        # Charging automation is deliberately independent of charger polling:
+        # a healthy Ohme read must not hide a failed Bluelink/target attempt.
+        self.automation_state: str = "idle"
+        self.automation_error_code: Optional[str] = None
+        self.automation_last_attempt_at: Optional[str] = None
         # Durable identity of the physically connected session. Telemetry and
         # session events use these instead of inferring boundaries from time.
         self.active_session_id: Optional[int] = None
@@ -282,6 +287,18 @@ class AppState:
         self.last_poll_error = reason
         self.consecutive_poll_failures += 1
 
+    def record_automation_attempt(
+        self, state: str, error_code: Optional[str] = None
+    ) -> None:
+        """Expose the durable outcome of plug-in configuration without secrets."""
+        if state not in {"idle", "pending", "configured", "error"}:
+            raise ValueError(f"Unknown automation state: {state}")
+        self.automation_state = state
+        self.automation_error_code = error_code
+        self.automation_last_attempt_at = datetime.datetime.now(
+            datetime.timezone.utc
+        ).isoformat()
+
     def record_soc(self, soc: int) -> None:
         """Remember the real vehicle SOC fetched from Bluelink at plug-in."""
         self.last_soc = soc
@@ -323,6 +340,7 @@ class AppState:
         self.plugin_failure_notified = False
         self.active_session_id = None
         self.active_session_key = None
+        self.record_automation_attempt("idle")
 
 
 # Module-level singleton imported by api.py and tests.

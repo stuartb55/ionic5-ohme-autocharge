@@ -66,7 +66,9 @@ describe('Dashboard integration', () => {
     server.use(
       http.put('*/api/settings/target', async ({ request }) => {
         putBody = (await request.json()) as { targetPercent: number };
-        return HttpResponse.json({ ...putBody, persisted: true, applied: false });
+        return HttpResponse.json({
+          ...putBody, persistenceStatus: 'saved', applyStatus: 'not_connected',
+        });
       }),
     );
 
@@ -78,6 +80,35 @@ describe('Dashboard integration', () => {
     await userEvent.click(screen.getByRole('button', { name: /save 85%/i }));
 
     await waitFor(() => expect(putBody).toEqual({ targetPercent: 85 }));
+  });
+
+  it('warns when a setting is only held in memory', async () => {
+    server.use(
+      http.put('*/api/settings/target', async ({ request }) => {
+        const body = await request.json();
+        return HttpResponse.json({
+          ...(body as object), persistenceStatus: 'memory_only', applyStatus: 'not_connected',
+        });
+      }),
+    );
+    render(<Dashboard />);
+    await screen.findByRole('button', { name: /charge target 80%/i });
+    await userEvent.click(screen.getByRole('button', { name: /increase target/i }));
+    await userEvent.click(screen.getByRole('button', { name: /save 85%/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/lost when the service restarts/i);
+  });
+
+  it('keeps a failed plug-in automation attempt visible', async () => {
+    server.use(
+      http.get('*/api/status', () => HttpResponse.json({
+        ...statusFixture,
+        automation: {
+          state: 'error', errorCode: 'ohme_target_failed', lastAttemptAt: statusFixture.updatedAt,
+        },
+      })),
+    );
+    render(<Dashboard />);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/could not configure this plug-in/i);
   });
 
   it('forces a backend refresh then refetches when the button is clicked', async () => {

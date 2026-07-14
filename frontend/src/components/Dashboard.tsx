@@ -15,7 +15,12 @@ import { StatusSection } from './StatusSection';
 import { TariffSection } from './TariffSection';
 import { ThemeToggle } from './ThemeToggle';
 import { VehiclePicker } from './VehiclePicker';
-import type { NotificationPreferences, VehiclesResponse } from '../api/types';
+import type {
+  ApplyStatus,
+  NotificationPreferences,
+  PersistenceStatus,
+  VehiclesResponse,
+} from '../api/types';
 
 const STATUS_INTERVAL = 15_000;
 const SCHEDULE_INTERVAL = 30_000;
@@ -29,6 +34,19 @@ const ENERGY_INTERVAL = 300_000;
 const QUALITY_INTERVAL = 300_000;
 // SoH only moves a fraction of a percent over months — refresh rarely.
 const SOH_INTERVAL = 1_800_000; // 30 min
+
+function outcomeWarning(result: {
+  persistenceStatus: PersistenceStatus;
+  applyStatus?: ApplyStatus;
+}): string | null {
+  if (result.persistenceStatus === 'memory_only') {
+    return 'The change is active only in memory and will be lost when the service restarts.';
+  }
+  if (result.applyStatus === 'failed') {
+    return 'The setting was saved, but it could not be applied to the connected charger.';
+  }
+  return null;
+}
 
 function SectionSkeleton({ height }: { height: number }) {
   return (
@@ -102,6 +120,7 @@ function SectionError({ message, onRetry }: { message: string; onRetry: () => vo
 
 export function Dashboard() {
   const [days, setDays] = useState(7);
+  const [mutationWarning, setMutationWarning] = useState<string | null>(null);
 
   // Build version for the footer — fetched once; it doesn't change at runtime.
   const [version, setVersion] = useState<string | null>(null);
@@ -166,7 +185,8 @@ export function Dashboard() {
   // Persist a new charge target, then refetch status so the UI reflects it.
   const handleSetTarget = useCallback(
     async (target: number) => {
-      await api.setTarget(target);
+      const result = await api.setTarget(target);
+      setMutationWarning(outcomeWarning(result));
       refetchStatus();
     },
     [refetchStatus],
@@ -175,7 +195,8 @@ export function Dashboard() {
   // Persist (or clear) the ready-by time, then refetch status.
   const handleSetReadyBy = useCallback(
     async (value: string | null) => {
-      await api.setReadyBy(value);
+      const result = await api.setReadyBy(value);
+      setMutationWarning(outcomeWarning(result));
       refetchStatus();
     },
     [refetchStatus],
@@ -184,7 +205,8 @@ export function Dashboard() {
   // Persist the per-weekday target overrides, then refetch status.
   const handleSetDayTargets = useCallback(
     async (map: Record<number, number>) => {
-      await api.setDayTargets(map);
+      const result = await api.setDayTargets(map);
+      setMutationWarning(outcomeWarning(result));
       refetchStatus();
     },
     [refetchStatus],
@@ -192,7 +214,8 @@ export function Dashboard() {
 
   const handleSetTripMode = useCallback(
     async (enabled: boolean, target: number, readyBy: string | null) => {
-      await api.setTripMode(enabled, target, readyBy);
+      const result = await api.setTripMode(enabled, target, readyBy);
+      setMutationWarning(outcomeWarning(result));
       refetchStatus();
       refetchSchedule();
     },
@@ -201,7 +224,8 @@ export function Dashboard() {
 
   const handleSetNotifications = useCallback(
     async (preferences: Omit<NotificationPreferences, 'configured'>) => {
-      await api.setNotificationPreferences(preferences);
+      const result = await api.setNotificationPreferences(preferences);
+      setMutationWarning(outcomeWarning(result));
       refetchStatus();
     },
     [refetchStatus],
@@ -209,7 +233,8 @@ export function Dashboard() {
 
   const handleSetVehicleProfile = useCallback(
     async (vehicleId: string, enabled: boolean, target: number, readyBy: string | null) => {
-      await api.setVehicleProfile(vehicleId, enabled, target, readyBy);
+      const result = await api.setVehicleProfile(vehicleId, enabled, target, readyBy);
+      setMutationWarning(outcomeWarning(result));
       refetchStatus();
       refetchSchedule();
     },
@@ -219,7 +244,8 @@ export function Dashboard() {
   // Switch the tracked Hyundai vehicle, then refresh vehicles + status.
   const handleSelectVehicle = useCallback(
     async (id: string) => {
-      await api.setVehicle(id);
+      const result = await api.setVehicle(id);
+      setMutationWarning(outcomeWarning(result));
       loadVehicles();
       refetchStatus();
     },
@@ -281,6 +307,15 @@ export function Dashboard() {
           Can&apos;t reach Ohme — showing the last known data. Retrying automatically…
         </Banner>
       )}
+      {status.data?.automation.state === 'pending' && (
+        <Banner variant="info">Configuring this plug-in session…</Banner>
+      )}
+      {status.data?.automation.state === 'error' && (
+        <Banner variant="error">
+          Charge automation could not configure this plug-in session. Retrying automatically…
+        </Banner>
+      )}
+      {mutationWarning && <Banner variant="error">{mutationWarning}</Banner>}
 
       {vehicles && vehicles.vehicles.length > 1 && (
         <div className="vehicle-bar">

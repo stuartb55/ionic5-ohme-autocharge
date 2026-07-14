@@ -104,6 +104,52 @@ def _to_miles(value, unit) -> Optional[int]:
 # two threads refreshing tokens / vehicle state on the same object at once.
 _lock = threading.Lock()
 
+# A Bluelink timeout only releases the async caller; Python cannot kill the SDK
+# worker thread.  Keep that task as a single flight so subsequent polls wait on
+# the same operation (or reject an incompatible one) rather than accumulating
+# more blocked threads behind ``_lock``.
+_inflight_task: asyncio.Task | None = None
+_inflight_key: tuple[str, Optional[str]] | None = None
+
+
+class BluelinkBusyError(RuntimeError):
+    """A different timed-out Bluelink SDK operation is still running."""
+
+
+def _consume_inflight_result(task: asyncio.Task) -> None:
+    """Retrieve background exceptions after all timed-out callers have left."""
+    if not task.cancelled():
+        try:
+            task.exception()
+        except Exception:  # pragma: no cover - retrieving cannot affect callers
+            pass
+
+
+async def _single_flight(name: str, argument: Optional[str], func, *args):
+    global _inflight_task, _inflight_key
+
+    key = (name, argument)
+    task = _inflight_task
+    if task is not None and not task.done():
+        if _inflight_key != key:
+            raise BluelinkBusyError(
+                f"Bluelink is still completing {_inflight_key[0] if _inflight_key else 'a request'}"
+            )
+    else:
+        task = asyncio.create_task(asyncio.to_thread(func, *args))
+        task.add_done_callback(_consume_inflight_result)
+        _inflight_task = task
+        _inflight_key = key
+
+    try:
+        # Shielding is essential: wait_for may time out the caller, but the
+        # shared task must remain alive so another poll can reuse it.
+        return await asyncio.wait_for(asyncio.shield(task), config.UPSTREAM_TIMEOUT)
+    finally:
+        if task.done() and _inflight_task is task:
+            _inflight_task = None
+            _inflight_key = None
+
 
 def _get_manager() -> VehicleManager:
     global _manager
@@ -159,13 +205,13 @@ def _validated_observed_at(value) -> Optional[datetime.datetime]:
 
 
 def list_vehicles() -> list[dict]:
-    """Return all vehicles on the account as {id, name, vin, model} dicts."""
+    """Return non-sensitive vehicle choices for the dashboard."""
     with _lock:
         vm = _get_manager()
         vm.check_and_refresh_token()
         vm.update_all_vehicles_with_cached_state()
         return [
-            {"id": v.id, "name": v.name, "vin": v.VIN, "model": v.model}
+            {"id": v.id, "name": v.name, "model": v.model}
             for v in vm.vehicles.values()
         ]
 
@@ -247,11 +293,9 @@ async def get_vehicle_state_async(vehicle_id: Optional[str] = None) -> VehicleSt
     is acceptable: the module lock is released when that thread finishes and the
     next read re-acquires it.
     """
-    return await asyncio.wait_for(
-        asyncio.to_thread(get_vehicle_state, vehicle_id), config.UPSTREAM_TIMEOUT
-    )
+    return await _single_flight("vehicle state", vehicle_id, get_vehicle_state, vehicle_id)
 
 
 async def list_vehicles_async() -> list[dict]:
     """Async wrapper around :func:`list_vehicles`, bounded by ``config.UPSTREAM_TIMEOUT``."""
-    return await asyncio.wait_for(asyncio.to_thread(list_vehicles), config.UPSTREAM_TIMEOUT)
+    return await _single_flight("vehicle list", None, list_vehicles)

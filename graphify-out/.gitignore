@@ -1,6 +1,7 @@
 # Machine-specific paths resolved at run time — regenerated locally, not shared.
 .graphify_python
 .graphify_root
+cache/
 
 # Dated archive snapshots written by `graphify update` (created on every run by
 # the auto-update hook) — redundant duplicates of the top-level graph, would

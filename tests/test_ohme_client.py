@@ -50,6 +50,23 @@ async def test_get_charger_status_times_out(monkeypatch):
         await ohme_client.get_charger_status(client)
 
 
+async def test_make_client_times_out_login_and_closes_partial_client(monkeypatch):
+    monkeypatch.setattr(config, "UPSTREAM_TIMEOUT", 0.01)
+    client = _mock_client()
+    client.close = AsyncMock()
+
+    async def hung_login():
+        await asyncio.sleep(1)
+
+    client.async_login = hung_login
+    monkeypatch.setattr(ohme_client, "OhmeApiClient", lambda *_: client)
+
+    with pytest.raises(TimeoutError):
+        await ohme_client.make_client()
+
+    client.close.assert_awaited_once()
+
+
 @pytest.mark.parametrize(
     "status",
     [
@@ -110,3 +127,45 @@ async def test_set_target_clamps_a_lower_restored_target_to_zero_topup():
     client = _mock_client()
     await ohme_client.set_target(client, current_soc=90, target_percent=80)
     client.async_set_target.assert_called_once_with(target_percent=0, target_time=None)
+
+
+async def test_set_target_times_out_a_hung_write(monkeypatch):
+    monkeypatch.setattr(config, "UPSTREAM_TIMEOUT", 0.01)
+    client = _mock_client()
+
+    async def hung_write(**_):
+        await asyncio.sleep(1)
+
+    client.async_set_target = hung_write
+    with pytest.raises(TimeoutError):
+        await ohme_client.set_target(client, current_soc=50, target_percent=80)
+
+
+async def test_set_target_reports_partial_write_when_refresh_hangs(monkeypatch):
+    monkeypatch.setattr(config, "UPSTREAM_TIMEOUT", 0.01)
+    client = _mock_client()
+    refreshes = 0
+
+    async def refresh():
+        nonlocal refreshes
+        refreshes += 1
+        if refreshes == 2:
+            await asyncio.sleep(1)
+
+    client.async_get_charge_session = refresh
+    with pytest.raises(TimeoutError):
+        await ohme_client.set_target(client, current_soc=50, target_percent=80)
+
+    client.async_set_target.assert_awaited_once()
+
+
+async def test_charge_summary_is_bounded(monkeypatch):
+    monkeypatch.setattr(config, "UPSTREAM_TIMEOUT", 0.01)
+    client = _mock_client()
+
+    async def hung_summary(**_):
+        await asyncio.sleep(1)
+
+    client.async_get_charge_summary = hung_summary
+    with pytest.raises(TimeoutError):
+        await ohme_client.get_charge_summary(client, start_ts=1, end_ts=2)
