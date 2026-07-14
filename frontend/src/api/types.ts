@@ -60,6 +60,8 @@ export interface StatusResponse {
   config: {
     chargeTarget: number;
     pollIntervalSeconds: number;
+    /** IANA timezone used by the charger and home schedule. */
+    timezone: string;
     /** Inclusive bounds for the charge target, enforced by the backend. */
     targetMin: number;
     targetMax: number;
@@ -194,6 +196,8 @@ export interface ScheduleResponse {
   nextSlotEnd: string | null;
   connected: boolean;
   updatedAt: string | null;
+  /** IANA timezone used for the home charging plan. */
+  timezone: string;
 }
 
 export interface ChargeSessionEntry {
@@ -342,6 +346,10 @@ export interface EnergyUsageResponse {
   enabled: boolean;
   /** The day shown (YYYY-MM-DD), or null when disabled. */
   date: string | null;
+  /** Most recent complete local day that can be requested. */
+  latestDate?: string | null;
+  /** IANA timezone used for day boundaries and interval labels. */
+  timezone?: string | null;
   currency?: string | null;
   /** Half-hourly slots for the day, chronological. */
   slots: EnergyUsageSlot[];
@@ -434,7 +442,7 @@ export interface MetricProvenance {
   calculationType: string;
   observedAt: string | null;
   completeThrough: string;
-  quality: 'complete' | 'measured' | 'actual' | 'unavailable' | 'stale';
+  quality: 'complete' | 'partial' | 'measured' | 'actual' | 'unavailable' | 'stale';
   coverage: Record<string, unknown>;
 }
 

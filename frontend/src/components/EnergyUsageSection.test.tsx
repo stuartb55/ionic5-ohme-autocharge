@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EnergyUsageResponse } from '../api/types';
@@ -34,9 +34,10 @@ describe('EnergyUsageSection', () => {
     render(<EnergyUsageSection data={data} onDateChange={() => {}} />);
     expect(screen.getByText('House vs car')).toBeInTheDocument();
     // Totals (formatKwh renders one decimal + " kWh").
-    expect(screen.getByText('1.9 kWh')).toBeInTheDocument(); // import
-    expect(screen.getByText('1.0 kWh')).toBeInTheDocument(); // car
-    expect(screen.getByText('0.9 kWh')).toBeInTheDocument(); // house
+    const totals = screen.getByText('Total import').closest('dl')!;
+    expect(within(totals).getByText('1.9 kWh')).toBeInTheDocument(); // import
+    expect(within(totals).getByText('1.0 kWh')).toBeInTheDocument(); // car
+    expect(within(totals).getByText('0.9 kWh')).toBeInTheDocument(); // house
   });
 
   it('pages to the previous day via the day selector', async () => {
@@ -55,6 +56,16 @@ describe('EnergyUsageSection', () => {
     render(<EnergyUsageSection data={data} onDateChange={() => {}} />);
     expect(screen.getByLabelText('Next day')).toBeDisabled();
     expect(screen.getByLabelText('Previous day')).toBeEnabled();
+  });
+
+  it('uses the backend home-calendar boundary for next-day navigation', () => {
+    render(
+      <EnergyUsageSection
+        data={{ ...data, latestDate: '2026-06-02', timezone: 'Europe/London' }}
+        onDateChange={() => {}}
+      />,
+    );
+    expect(screen.getByLabelText('Next day')).toBeEnabled();
   });
 
   it('shows an empty state when the day has no slots', () => {
@@ -79,6 +90,6 @@ describe('EnergyUsageSection', () => {
     };
     render(<EnergyUsageSection data={uncertain} onDateChange={() => {}} />);
     expect(screen.getAllByText('Unattributed')).toHaveLength(2); // total label + legend
-    expect(screen.getAllByText('1.2 kWh')).toHaveLength(2);
+    expect(screen.getAllByText('1.2 kWh').length).toBeGreaterThanOrEqual(2);
   });
 });

@@ -26,7 +26,8 @@ export function EnergyBarChart({ daily, metric, currency, title }: Props) {
     return <p className="empty">No charging history in this period yet.</p>;
   }
 
-  const values = daily.map((d) => d[metric] ?? 0);
+  const reported = daily.filter((day) => day.isComplete);
+  const values = reported.map((d) => d[metric] ?? 0);
   const max = Math.max(...values, 0.0001);
   const peak = Math.max(...values);
   const n = daily.length;
@@ -35,10 +36,10 @@ export function EnergyBarChart({ daily, metric, currency, title }: Props) {
   const chartH = H - PAD_BOTTOM - PAD_TOP;
   const color = METRIC_COLOR[metric];
 
-  // Average across all days in the range (including zero days), drawn as a
-  // dashed reference line so peaks and troughs read against a baseline.
+  // Average across reported days in the range (including reported zero days),
+  // drawn as a dashed reference line. Missing buckets are never treated as zero.
   const total = values.reduce((sum, v) => sum + v, 0);
-  const avg = total / n;
+  const avg = reported.length ? total / reported.length : 0;
   const avgY = PAD_TOP + (chartH - (avg / max) * chartH);
   const showAvg = avg > 0;
 
@@ -53,8 +54,32 @@ export function EnergyBarChart({ daily, metric, currency, title }: Props) {
           const h = (v / max) * chartH;
           const x = i * slot + (slot - barW) / 2;
           const y = PAD_TOP + (chartH - h);
-          // Dim every bar except the peak, so the best day stands out.
-          const isPeak = v > 0 && v === peak;
+          // A cost peak is not a "best" day, so cost bars use equal emphasis.
+          // Energy and savings retain a peak cue because the maximum is useful.
+          const isPeak = metric !== 'cost' && v > 0 && v === peak;
+          if (!d.isComplete) {
+            return (
+              <g key={d.date ?? i}>
+                <rect
+                  x={x}
+                  y={PAD_TOP}
+                  width={barW}
+                  height={chartH}
+                  rx={4}
+                  fill="var(--surface-3)"
+                  stroke="var(--border-strong)"
+                  strokeDasharray="4 4"
+                >
+                  <title>{d.date ?? ''}: Not reported</title>
+                </rect>
+                {i % labelStep === 0 && (
+                  <text className="axis" x={i * slot + slot / 2} y={H - 8} textAnchor="middle">
+                    {formatDateShort(d.date)}
+                  </text>
+                )}
+              </g>
+            );
+          }
           return (
             <g key={d.date ?? i}>
               <rect
@@ -64,7 +89,7 @@ export function EnergyBarChart({ daily, metric, currency, title }: Props) {
                 height={Math.max(0, h)}
                 rx={4}
                 fill={color}
-                fillOpacity={isPeak ? 1 : 0.55}
+                fillOpacity={metric === 'cost' ? 0.78 : isPeak ? 1 : 0.55}
               >
                 <title>
                   {d.date ?? ''}: {formatMetric(v, metric, currency)}
@@ -100,7 +125,7 @@ export function EnergyBarChart({ daily, metric, currency, title }: Props) {
               {daily.map((day, index) => (
                 <tr key={day.date ?? index}>
                   <td>{formatDateShort(day.date)}</td>
-                  <td>{formatMetric(day[metric] ?? 0, metric, currency)}</td>
+                  <td>{day.isComplete ? formatMetric(day[metric] ?? 0, metric, currency) : 'Not reported'}</td>
                 </tr>
               ))}
             </tbody>

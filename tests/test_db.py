@@ -121,6 +121,9 @@ async def test_writes_are_noops_when_disabled():
     assert await db.record_session(
         vehicle_name="EV", soc_percent=50, target_percent=80, topup_percent=30, action="configured"
     ) is None
+    assert await db.close_session(
+        "session-1", actual_energy_wh=1000, end_soc_percent=80
+    ) is False
     # None of these should raise.
     await db.record_schedule(session_id=None, slots=[], next_slot_start=None, next_slot_end=None)
     await db.record_telemetry(StatusSnapshot())
@@ -210,21 +213,42 @@ async def test_record_session_uses_idempotency_key_and_identity(fake_pool):
 
 async def test_close_session_is_idempotent_update(fake_pool):
     conn, _ = fake_pool
-    await db.close_session("session-1", actual_energy_wh=4321.4, end_soc_percent=80)
+    assert await db.close_session(
+        "session-1", actual_energy_wh=4321.4, end_soc_percent=80
+    ) is True
     sql, params = conn.executed[0]
     assert "UPDATE charge_sessions" in sql
     assert "COALESCE(unplugged_at, now())" in sql
+    assert "actual_energy_wh = GREATEST(actual_energy_wh, %s)" in sql
+    assert "end_soc_percent = GREATEST(end_soc_percent, %s)" in sql
+    assert "'reconciled', 'energy_mismatch', 'tariff_incomplete'" in sql
+    assert "RETURNING id" in sql
     assert params == (80, 4321, "unplugged", 4321, "session-1")
 
 
 async def test_complete_session_records_final_measurements(fake_pool):
     conn, _ = fake_pool
-    await db.complete_session(
+    assert await db.complete_session(
         "session-1", actual_energy_wh=4321.4, end_soc_percent=80
-    )
+    ) == 42
     sql, params = conn.executed[0]
-    assert "completed_at = COALESCE(completed_at, now())" in sql
+    assert "completed_at = COALESCE(session.completed_at, now())" in sql
+    assert "actual_energy_wh = GREATEST(session.actual_energy_wh, %s)" in sql
+    assert "end_soc_percent = GREATEST(session.end_soc_percent, %s)" in sql
+    assert "'reconciled', 'energy_mismatch', 'tariff_incomplete'" in sql
+    assert "completed_at IS NULL AS newly_completed" in sql
+    assert "RETURNING CASE WHEN prior.newly_completed THEN session.id END" in sql
     assert params == (80, 4321, "finished", "session-1")
+
+
+async def test_complete_session_repeat_has_no_single_shot_work(fake_pool):
+    _, cursor = fake_pool
+    # PostgreSQL still applies the monotonic idempotent update, but returns null
+    # once completed_at was already present.
+    cursor._row = (None,)
+    assert await db.complete_session(
+        "session-1", actual_energy_wh=4321.4, end_soc_percent=80
+    ) is None
 
 
 async def test_record_session_event_wraps_details_as_jsonb(fake_pool):
@@ -234,6 +258,18 @@ async def test_record_session_event_wraps_details_as_jsonb(fake_pool):
     assert "INSERT INTO session_events" in sql
     assert params[:2] == (42, "target_configured")
     assert params[2].obj == {"target": 80}
+
+
+async def test_initial_session_event_is_idempotent_and_acknowledged(fake_pool):
+    conn, _ = fake_pool
+    assert await db.record_initial_session_event(
+        42, "target_configured", {"target": 80}
+    ) is True
+    sql, params = conn.executed[0]
+    assert "WHERE NOT EXISTS" in sql
+    assert params[:2] == (42, "target_configured")
+    assert params[2].obj == {"target": 80}
+    assert params[3:] == (42, "target_configured")
 
 
 async def test_get_session_id_by_key(fake_pool):
@@ -589,6 +625,23 @@ async def test_record_schedule_wraps_slots_as_jsonb(fake_pool):
     assert "MAX(revision)" in sql
 
 
+async def test_initial_schedule_is_idempotent_and_acknowledged(fake_pool):
+    conn, _ = fake_pool
+    slots = [{"start": "01:00", "end": "03:30", "power": 7.4}]
+    assert await db.record_initial_schedule(
+        session_id=42,
+        slots=slots,
+        next_slot_start=None,
+        next_slot_end=None,
+    ) is True
+    sql, params = conn.executed[0]
+    assert "WHERE NOT EXISTS" in sql
+    assert "reason = 'initial'" in sql
+    assert params[0] == 42
+    assert params[3].obj == slots
+    assert params[4:] == (42, 42)
+
+
 # --- telemetry -----------------------------------------------------------------
 
 
@@ -653,7 +706,8 @@ async def test_record_daily_stats_upserts_each_dated_row(fake_pool):
     daily = [
         {
             "date": "2026-06-01", "energyKwh": 18.5, "savings": 3.7,
-            "cost": 2.3, "isComplete": True,
+            "cost": 2.3, "energyWh": 18501, "savingsMinor": 371,
+            "costMinor": 231, "currency": "GBP", "isComplete": True,
         },
         {"date": None, "energyKwh": 0, "savings": 0, "cost": 0},  # skipped (no date)
         {
@@ -668,7 +722,7 @@ async def test_record_daily_stats_upserts_each_dated_row(fake_pool):
     assert "INSERT INTO daily_stats" in sql
     assert "ON CONFLICT (stat_date) DO UPDATE" in sql
     assert rows == [
-        ("2026-06-01", 18.5, 3.7, 2.3, "GBP", 18500, 370, 230, True),
+        ("2026-06-01", 18.501, 3.71, 2.31, "GBP", 18501, 371, 231, True),
         ("2026-06-02", 12.0, 2.1, 1.4, "GBP", 12000, 210, 140, True),
     ]
 
@@ -676,6 +730,21 @@ async def test_record_daily_stats_upserts_each_dated_row(fake_pool):
 async def test_record_daily_stats_empty_is_noop(fake_pool):
     _, cursor = fake_pool
     await db.record_daily_stats([], "GBP")
+    assert cursor.executemany_calls == []
+
+
+async def test_record_daily_stats_marks_missing_window_rows_incomplete(fake_pool):
+    conn, cursor = fake_pool
+    start = dt.date(2026, 6, 1)
+    end = dt.date(2026, 6, 8)
+
+    await db.record_daily_stats([], "GBP", window_start=start, window_end=end)
+
+    assert len(conn.executed) == 1
+    sql, params = conn.executed[0]
+    assert "UPDATE daily_stats SET is_complete = false" in sql
+    assert "source = 'ohme_summary'" in sql
+    assert params == (start, end)
     assert cursor.executemany_calls == []
 
 

@@ -188,24 +188,37 @@ async def close_session(
     actual_energy_wh: Optional[float],
     end_soc_percent: Optional[int] = None,
     completion_reason: str = "unplugged",
-) -> None:
-    """Close the durable session identified by ``session_key``. Idempotent."""
+) -> bool:
+    """Close the durable session identified by ``session_key``. Idempotent.
+
+    Returns True only when the row exists and the update committed.  Durable
+    callers use this acknowledgement to retain their close outbox across a
+    database outage instead of silently losing the final energy counter.
+    """
     if _pool is None or not session_key:
-        return
+        return False
     energy = round(actual_energy_wh) if actual_energy_wh is not None else None
     try:
         async with _pool.connection() as conn:
-            await conn.execute(
+            cur = await conn.execute(
                 "UPDATE charge_sessions SET unplugged_at = COALESCE(unplugged_at, now()), "
-                " completed_at = COALESCE(completed_at, now()), end_soc_percent = %s, "
-                " actual_energy_wh = COALESCE(%s, actual_energy_wh), "
+                " completed_at = COALESCE(completed_at, now()), "
+                " end_soc_percent = GREATEST(end_soc_percent, %s), "
+                " actual_energy_wh = GREATEST(actual_energy_wh, %s), "
                 " completion_reason = COALESCE(completion_reason, %s), "
-                " quality_status = CASE WHEN %s IS NULL THEN 'incomplete' ELSE 'complete' END, "
-                " updated_at = now() WHERE session_key = %s",
+                " quality_status = CASE "
+                "   WHEN quality_status IN "
+                "     ('reconciled', 'energy_mismatch', 'tariff_incomplete') "
+                "     THEN quality_status "
+                "   WHEN GREATEST(actual_energy_wh, %s) IS NULL THEN 'incomplete' "
+                "   ELSE 'complete' END, "
+                " updated_at = now() WHERE session_key = %s RETURNING id",
                 (end_soc_percent, energy, completion_reason, energy, session_key),
             )
+            return await cur.fetchone() is not None
     except Exception:
         logger.warning("Failed to close charge session in Postgres", exc_info=True)
+        return False
 
 
 async def complete_session(
@@ -214,21 +227,41 @@ async def complete_session(
     actual_energy_wh: float,
     end_soc_percent: Optional[int],
     completion_reason: str = "finished",
-) -> None:
-    """Record charge completion while the cable may remain connected."""
+) -> Optional[int]:
+    """Record charge completion while the cable may remain connected.
+
+    The update is safe to repeat for every observed ``finished`` snapshot.  The
+    return value is the session id only for the call that first sets
+    ``completed_at``; callers can therefore keep durable finalisation
+    level-triggered without repeating one-off audit/reconciliation work.
+    """
     if _pool is None or not session_key:
-        return
+        return None
     energy = max(0, round(actual_energy_wh))
     try:
         async with _pool.connection() as conn:
-            await conn.execute(
-                "UPDATE charge_sessions SET completed_at = COALESCE(completed_at, now()), "
-                "end_soc_percent = %s, actual_energy_wh = %s, completion_reason = %s, "
-                "quality_status = 'complete', updated_at = now() WHERE session_key = %s",
+            cur = await conn.execute(
+                "UPDATE charge_sessions AS session SET "
+                "completed_at = COALESCE(session.completed_at, now()), "
+                "end_soc_percent = GREATEST(session.end_soc_percent, %s), "
+                "actual_energy_wh = GREATEST(session.actual_energy_wh, %s), "
+                "completion_reason = COALESCE(session.completion_reason, %s), "
+                "quality_status = CASE "
+                "  WHEN session.quality_status IN "
+                "    ('reconciled', 'energy_mismatch', 'tariff_incomplete') "
+                "    THEN session.quality_status ELSE 'complete' END, "
+                "updated_at = now() FROM ("
+                "  SELECT id, completed_at IS NULL AS newly_completed "
+                "  FROM charge_sessions WHERE session_key = %s FOR UPDATE"
+                ") AS prior WHERE session.id = prior.id "
+                "RETURNING CASE WHEN prior.newly_completed THEN session.id END",
                 (end_soc_percent, energy, completion_reason, session_key),
             )
+            row = await cur.fetchone()
+            return int(row[0]) if row and row[0] is not None else None
     except Exception:
         logger.warning("Failed to complete charge session in Postgres", exc_info=True)
+        return None
 
 
 async def record_session_event(
@@ -245,6 +278,27 @@ async def record_session_event(
             )
     except Exception:
         logger.warning("Failed to record charge-session event", exc_info=True)
+
+
+async def record_initial_session_event(
+    session_id: Optional[int], event_type: str, details: Optional[dict[str, Any]] = None
+) -> bool:
+    """Persist one initial lifecycle event without duplicating outbox replays."""
+    if _pool is None or session_id is None:
+        return False
+    try:
+        async with _pool.connection() as conn:
+            await conn.execute(
+                "INSERT INTO session_events (session_id, event_type, details) "
+                "SELECT %s, %s, %s WHERE NOT EXISTS ("
+                " SELECT 1 FROM session_events WHERE session_id = %s AND event_type = %s"
+                ")",
+                (session_id, event_type, Jsonb(details or {}), session_id, event_type),
+            )
+        return True
+    except Exception:
+        logger.warning("Failed to record initial charge-session event", exc_info=True)
+        return False
 
 
 async def get_session_id_by_key(session_key: Optional[str]) -> Optional[int]:
@@ -514,6 +568,41 @@ async def record_schedule(
         logger.warning("Failed to record charge schedule to Postgres", exc_info=True)
 
 
+async def record_initial_schedule(
+    *,
+    session_id: Optional[int],
+    slots: list[dict[str, Any]],
+    next_slot_start: Optional[datetime.datetime],
+    next_slot_end: Optional[datetime.datetime],
+) -> bool:
+    """Persist the initial schedule exactly once across durable outbox retries."""
+    if _pool is None or session_id is None:
+        return False
+    try:
+        async with _pool.connection() as conn:
+            await conn.execute(
+                "INSERT INTO schedule_snapshots "
+                "(session_id, next_slot_start, next_slot_end, slots, revision, reason) "
+                "SELECT %s, %s, %s, %s, "
+                " (SELECT COALESCE(MAX(revision), 0) + 1 FROM schedule_snapshots "
+                "  WHERE session_id = %s), 'initial' "
+                "WHERE NOT EXISTS (SELECT 1 FROM schedule_snapshots "
+                " WHERE session_id = %s AND reason = 'initial')",
+                (
+                    session_id,
+                    next_slot_start,
+                    next_slot_end,
+                    Jsonb(slots),
+                    session_id,
+                    session_id,
+                ),
+            )
+        return True
+    except Exception:
+        logger.warning("Failed to record initial charge schedule", exc_info=True)
+        return False
+
+
 async def record_telemetry(snap: Any, *, session_id: Optional[int] = None) -> None:
     """Append one telemetry row from a :class:`state.StatusSnapshot`."""
     if _pool is None:
@@ -563,54 +652,110 @@ async def prune_telemetry(retention_days: int) -> None:
         logger.warning("Failed to prune old telemetry from Postgres", exc_info=True)
 
 
-async def record_daily_stats(daily: list[dict[str, Any]], currency: Optional[str]) -> None:
+async def record_daily_stats(
+    daily: list[dict[str, Any]],
+    currency: Optional[str],
+    *,
+    window_start: Optional[datetime.date] = None,
+    window_end: Optional[datetime.date] = None,
+) -> None:
     """Upsert Ohme's per-day totals (energy/savings/cost) keyed by date.
 
     ``daily`` is the list produced by :func:`api.parse_summary`. Rows without a
     date are skipped. Re-running for the same dates overwrites them so the latest
-    Ohme figures always win.
+    Ohme figures always win. Exact base/minor-unit fields are preferred over the
+    rounded display fields. When a fetched window is supplied, existing rows in
+    that window are first marked incomplete so a missing upstream bucket cannot
+    survive as trusted evidence from an older fetch.
     """
-    if _pool is None or not daily:
+    if _pool is None:
         return
-    factor = _minor_factor(currency)
     rows = []
     for day in daily:
         if not day.get("date"):
             continue
-        energy_kwh = Decimal(str(day.get("energyKwh") or 0))
-        savings = Decimal(str(day.get("savings") or 0))
-        cost = Decimal(str(day.get("cost") or 0))
+        row_currency = day.get("currency") or currency
+        factor = _minor_factor(row_currency)
+        if day.get("energyWh") is not None:
+            energy_wh = int(
+                Decimal(str(day["energyWh"])).quantize(
+                    Decimal("1"), rounding=ROUND_HALF_UP
+                )
+            )
+        else:
+            energy_wh = int(
+                (Decimal(str(day.get("energyKwh") or 0)) * 1000).quantize(
+                    Decimal("1"), rounding=ROUND_HALF_UP
+                )
+            )
+        if day.get("savingsMinor") is not None:
+            savings_minor = int(
+                Decimal(str(day["savingsMinor"])).quantize(
+                    Decimal("1"), rounding=ROUND_HALF_UP
+                )
+            )
+        else:
+            savings_minor = int(
+                (Decimal(str(day.get("savings") or 0)) * factor).quantize(
+                    Decimal("1"), rounding=ROUND_HALF_UP
+                )
+            )
+        if day.get("costMinor") is not None:
+            cost_minor = int(
+                Decimal(str(day["costMinor"])).quantize(
+                    Decimal("1"), rounding=ROUND_HALF_UP
+                )
+            )
+        else:
+            cost_minor = int(
+                (Decimal(str(day.get("cost") or 0)) * factor).quantize(
+                    Decimal("1"), rounding=ROUND_HALF_UP
+                )
+            )
+        energy_kwh = Decimal(energy_wh) / 1000
+        savings = Decimal(savings_minor) / factor
+        cost = Decimal(cost_minor) / factor
         rows.append(
             (
-                day["date"], float(energy_kwh), float(savings), float(cost), currency,
-                int((energy_kwh * 1000).quantize(Decimal("1"), rounding=ROUND_HALF_UP)),
-                int((savings * factor).quantize(Decimal("1"), rounding=ROUND_HALF_UP)),
-                int((cost * factor).quantize(Decimal("1"), rounding=ROUND_HALF_UP)),
+                day["date"], float(energy_kwh), float(savings), float(cost), row_currency,
+                energy_wh, savings_minor, cost_minor,
                 bool(day.get("isComplete", False)),
             )
         )
-    if not rows:
+    has_window = (
+        window_start is not None
+        and window_end is not None
+        and window_start < window_end
+    )
+    if not rows and not has_window:
         return
     try:
         async with _pool.connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.executemany(
-                    "INSERT INTO daily_stats "
-                    "(stat_date, energy_kwh, savings, cost, currency, energy_wh, "
-                    "savings_minor, cost_minor, is_complete) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
-                    "ON CONFLICT (stat_date) DO UPDATE SET "
-                    "  energy_kwh = EXCLUDED.energy_kwh, "
-                    "  savings    = EXCLUDED.savings, "
-                    "  cost       = EXCLUDED.cost, "
-                    "  currency   = EXCLUDED.currency, "
-                    "  energy_wh = EXCLUDED.energy_wh, "
-                    "  savings_minor = EXCLUDED.savings_minor, "
-                    "  cost_minor = EXCLUDED.cost_minor, "
-                    "  is_complete = EXCLUDED.is_complete, "
-                    "  updated_at = now()",
-                    rows,
+            if has_window:
+                await conn.execute(
+                    "UPDATE daily_stats SET is_complete = false, updated_at = now() "
+                    "WHERE source = 'ohme_summary' AND stat_date >= %s AND stat_date < %s",
+                    (window_start, window_end),
                 )
+            if rows:
+                async with conn.cursor() as cur:
+                    await cur.executemany(
+                        "INSERT INTO daily_stats "
+                        "(stat_date, energy_kwh, savings, cost, currency, energy_wh, "
+                        "savings_minor, cost_minor, is_complete) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                        "ON CONFLICT (stat_date) DO UPDATE SET "
+                        "  energy_kwh = EXCLUDED.energy_kwh, "
+                        "  savings    = EXCLUDED.savings, "
+                        "  cost       = EXCLUDED.cost, "
+                        "  currency   = EXCLUDED.currency, "
+                        "  energy_wh = EXCLUDED.energy_wh, "
+                        "  savings_minor = EXCLUDED.savings_minor, "
+                        "  cost_minor = EXCLUDED.cost_minor, "
+                        "  is_complete = EXCLUDED.is_complete, "
+                        "  updated_at = now()",
+                        rows,
+                    )
     except Exception:
         logger.warning("Failed to record daily stats to Postgres", exc_info=True)
 

@@ -221,6 +221,43 @@ def test_session_marker_round_trip_and_clear(settings_path):
     assert settings.load_session_active() is False
 
 
+def test_pending_sessions_round_trip_and_acknowledge_individually(settings_path):
+    first = {"sessionKey": "session-1", "socPercent": 62, "action": "configured"}
+    second = {
+        "sessionKey": "session-2",
+        "socPercent": 80,
+        "action": "skipped_at_target",
+    }
+
+    assert settings.save_pending_session(first) is True
+    assert settings.save_pending_session(second) is True
+    assert settings.load_pending_sessions() == {
+        "session-1": first,
+        "session-2": second,
+    }
+
+    assert settings.clear_pending_session("session-1") is True
+    assert settings.load_pending_sessions() == {"session-2": second}
+    assert settings.clear_pending_session("session-2") is True
+    assert settings.load_pending_sessions() == {}
+
+
+def test_pending_sessions_ignore_invalid_entries(settings_path):
+    _write_raw(
+        settings_path,
+        {
+            "pendingSessions": {
+                "good": {"sessionKey": "good", "action": "configured"},
+                "wrong-key": {"sessionKey": "other"},
+                "bad-shape": "not-an-object",
+            }
+        },
+    )
+    assert settings.load_pending_sessions() == {
+        "good": {"sessionKey": "good", "action": "configured"}
+    }
+
+
 # --- preservation & robustness ---------------------------------------------
 
 def test_setters_preserve_other_keys(settings_path):

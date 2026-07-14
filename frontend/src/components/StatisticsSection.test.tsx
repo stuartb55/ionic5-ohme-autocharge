@@ -20,7 +20,9 @@ describe('StatisticsSection insights', () => {
     expect(screen.getByText('Best day')).toBeInTheDocument();
     expect(screen.getByText('Est. range added')).toBeInTheDocument();
     expect(screen.getByText('Total cost')).toBeInTheDocument();
-    expect(screen.getByText(/Complete through/)).toHaveTextContent(/2/);
+    expect(screen.getByLabelText('Statistics coverage')).toHaveTextContent(
+      '7 of 7 daily breakdowns reported',
+    );
     expect(screen.getByText('Sources & methods')).toBeInTheDocument();
   });
 
@@ -55,6 +57,34 @@ describe('StatisticsSection insights', () => {
   it('labels a cached snapshot when the upstream is unavailable', () => {
     renderSection({ ...statisticsFixture, stale: true });
     expect(screen.getByRole('status')).toHaveTextContent('last validated statistics snapshot');
+  });
+
+  it('keeps omitted upstream days visible without treating them as zero', async () => {
+    const missingDate = '2026-05-30';
+    renderSection({
+      ...statisticsFixture,
+      daily: statisticsFixture.daily.filter((day) => day.date !== missingDate),
+      metadata: {
+        ...statisticsFixture.metadata,
+        daily: {
+          ...statisticsFixture.metadata.daily,
+          quality: 'partial',
+          coverage: { requestedDays: 7, completeDays: 6, missingDays: 1 },
+        },
+      },
+    });
+
+    expect(screen.getByLabelText('Statistics coverage')).toHaveTextContent(
+      '6 of 7 daily breakdowns reported',
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('not counted as zero usage');
+    expect(screen.getByText('Avg / reported charge day')).toBeInTheDocument();
+    expect(screen.getByText('7.5 kWh')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText('View chart data'));
+    const table = screen.getByRole('table', { name: 'Daily energy' });
+    expect(within(table).getAllByRole('row')).toHaveLength(8);
+    expect(within(table).getByText('Not reported')).toBeInTheDocument();
   });
 
   it('hides the Efficiency insight when none is measured', () => {

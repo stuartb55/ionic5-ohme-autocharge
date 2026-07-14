@@ -18,8 +18,7 @@ When the car is plugged in, the app reads the real battery state-of-charge from 
 - **Per-weekday targets** — e.g. 80% on weekdays, 100% before the weekend, applied automatically at plug-in.
 - **One-time trip charge** — temporarily raise the target and optionally set a departure time for the current or next session; the override survives restarts and clears automatically on unplug.
 - **Live SOC while charging** — the ring climbs through the session (re-reads Bluelink on a slow cadence; never wakes the car).
-- **Multi-vehicle** — pick which car on the Hyundai account to track.
-- **Per-vehicle profiles** — persist a target and optional ready-by default for each Hyundai vehicle; profiles resolve from Bluelink’s stable vehicle ID and trip mode still takes precedence.
+- **Single-vehicle focus** — one clear vehicle dashboard, without fleet selection or duplicate per-vehicle settings.
 - **Vehicle health** — read-only 12V auxiliary battery level plus the car's own tyre-pressure, washer-fluid and key-fob-battery warnings and anything left open (door/bonnet/boot), shown on the dashboard with an optional ntfy when a warning first appears.
 - **Configurable notifications** — optional [ntfy](https://ntfy.sh) alerts with dashboard controls for plug-in, completion, problems/recovery, vehicle health and weekly summaries; tune failure, minimum-energy and optional 12V-battery thresholds.
 - **Octopus Agile** *(optional)* — upcoming half-hourly prices and the cheapest slots, plus an Agile-accurate session cost (each charge slot priced against the rate it falls in, not a flat average).
@@ -49,10 +48,13 @@ When the car is plugged in, the app reads the real battery state-of-charge from 
 
 ## Security model
 
-The API has no user authentication — it assumes the **trusted LAN** it runs on. Every
+The API has no user authentication — it assumes the **trusted LAN or Tailscale tailnet** it runs on. Every
 state-changing endpoint requires `X-Requested-With: autocharge-ui`, unknown request fields are
 rejected, CORS is same-origin by default, and `TRUSTED_HOSTS` rejects arbitrary Host headers to
 limit DNS-rebinding access.
+
+For Tailscale, add the exact MagicDNS name used in the browser to `TRUSTED_HOSTS`, for example
+`autocharge.your-tailnet.ts.net`. Keep the backend port private; expose the nginx frontend only.
 
 ## Setup
 
@@ -109,7 +111,7 @@ All settings come from environment variables (or `.env`). Only the five credenti
 | `OHME_RECONNECT_FAILURES` | `3` | Consecutive session failures before replacing the authenticated Ohme client. |
 | `LIVE_SOC_INTERVAL` | `1800` | Seconds between mid-charge SOC re-reads (so the ring climbs). `0` disables. |
 | `MAX_SOC_AGE` | `1800` | Maximum age in seconds of a cached Bluelink SOC accepted for target-setting. `0` disables the freshness guard. |
-| `HYUNDAI_VEHICLE_ID` | *(first)* | Pin a specific vehicle when the account has more than one (id from `GET /api/vehicles`). The dashboard can override this. |
+| `HYUNDAI_VEHICLE_ID` | *(first)* | Pin the single tracked vehicle when the Hyundai account contains more than one (id from `GET /api/vehicles`). |
 | `TIMEZONE` / `TZ` | `Europe/London` | Zone for log timestamps, daily-stats bucketing, and per-weekday targets. |
 | `SETTINGS_PATH` | `/app/data/settings.json` | Where runtime settings (target, ready-by, per-day targets, selected vehicle) persist. A named volume is mounted here. |
 | `NTFY_TOPIC` / `NTFY_URL` / `NTFY_TOKEN` | *(off)* | [ntfy](https://ntfy.sh) notifications. Blank `NTFY_TOPIC` disables them. |
@@ -122,7 +124,7 @@ All settings come from environment variables (or `.env`). Only the five credenti
 | `DAILY_STATS_INTERVAL` | `21600` | Seconds between background refreshes of Ohme's daily totals into Postgres (6h). |
 | `TELEMETRY_RETENTION_DAYS` | `365` | How long to keep per-poll telemetry rows. `0` keeps forever. |
 | `CORS_ORIGINS` | *(same-origin)* | Comma-separated allowed origins; blank means same-origin only (the default deployment). |
-| `TRUSTED_HOSTS` | localhost + Docker names | Allowed HTTP Host headers. Add direct LAN names/IPs only if used. |
+| `TRUSTED_HOSTS` | localhost + Docker names | Allowed HTTP Host headers. Add the exact LAN or Tailscale MagicDNS names used to open the UI. |
 | `POSTGRES_PASSWORD` | `autocharge` | Password for the bundled compose Postgres service. |
 
 ## Usage
@@ -157,15 +159,15 @@ uvicorn api:app --host 0.0.0.0 --port 8000   # web API + poll loop (docs at /doc
 
 A React + TypeScript single-page app (in `frontend/`) served by a hardened, non-root nginx image. It polls the backend and renders:
 
-1. **Vehicle & charger status** — a state-of-charge ring with target marker; driving range, battery health (SoH), lock status + a "view location" link, and vehicle-health chips (12V battery, tyre/washer/key warnings, anything left open); connection state; live charge rate (kW / A); energy added and an estimated session cost. Controls: **target** stepper, **ready-by** time, **per-day targets**, a one-session **trip charge**, configurable **notifications**, **pause/resume**, and **max-charge (boost)**.
-2. **Schedule** — a timeline of the allocated charging slots (active vs paused / off-peak windows) plus a slot-by-slot breakdown.
-3. **Statistics & savings** — account-wide Ohme energy, savings and CO₂ for the last 7/30/90 **complete local calendar days**, plus vehicle-scoped home-energy efficiency and actual home running cost from complete charge-to-next-plug-in intervals. The UI shows the matched energy and interval count so these narrower metrics are not confused with whole-account totals. Daily charts include period-over-period deltas and CSV export; a month picker downloads auditable monthly JSON/CSV reports. DST days follow `TIMEZONE` rather than assuming every day is 24 hours.
+1. **At-a-glance live status** — one state-of-charge view with the active target, expected finish, range, charge speed, energy added, planned energy and estimated cost. Pause/resume and boost controls stay beside the live session.
+2. **Tonight’s plan & preferences** — a home-timezone schedule with start, ready-by time and charging windows, followed by the everyday target and departure time. Weekly targets, trip charge and notifications remain available under one disclosure.
+3. **Costs & energy** — account-wide Ohme cost, savings, energy and average unit price for the last 7/30/90 **complete local calendar days**, plus vehicle-scoped home-energy efficiency and actual home running cost from complete charge-to-next-plug-in intervals. Missing upstream daily buckets stay missing rather than being displayed as zero usage. Daily charts include period-over-period deltas and CSV export; a month picker downloads auditable monthly JSON/CSV reports. DST days follow `TIMEZONE` rather than assuming every day is 24 hours.
 4. **Recent sessions** *(when Postgres is enabled)* — the last plug-ins with SOC, target, top-up and odometer, with a CSV/JSON export of the full history.
    Each row expands into a **session audit**: measured energy/cost and reconciliation, lifecycle events, schedule revisions, tariff-priced intervals, and the SOC/power charge curve. Missing evidence stays explicitly unavailable rather than being estimated.
 5. **Agile prices** *(when Octopus is configured)* — the current price and cheapest upcoming slots.
 6. **House vs car** *(when Octopus consumption + Postgres are configured)* — a stacked half-hourly chart of whole-house import split into car charging vs the rest of the household, with a day selector.
 
-The header has a live-freshness indicator, a manual **refresh**, a **theme** toggle, a **vehicle picker** (when the account has more than one car), and the build version in the footer.
+The header has an explicit live/stale indicator, a full-dashboard **refresh**, a **theme** toggle, and the build version in the footer. Diagnostics and evidence remain available without competing with everyday metrics.
 
 > All figures come straight from the Ohme/Bluelink APIs. Metrics those APIs don't expose are intentionally omitted rather than faked.
 
@@ -248,7 +250,7 @@ GitHub CI upgrades a legacy revision against PostgreSQL 18, verifies exact-unit
 backfill and the current Alembic head, then exercises session idempotency, linked
 telemetry, completion, reconciliation, report queries, and reconnect behaviour.
 
-Set `DATABASE_URL` (the compose files default it to the bundled Postgres) to persist per-plug-in sessions, schedule snapshots, per-poll telemetry, and daily totals. A startup outage leaves charging operational and triggers bounded background reconnect attempts. Daily energy is stored exactly in Wh and money in integer minor units; legacy floating columns remain for compatibility. This powers the dashboard's recent-sessions card and lets you build Grafana panels (energy/cost/savings over time, driving efficiency, battery-health trend). See [`docs/grafana.md`](docs/grafana.md) for the schema and example queries. With `DATABASE_URL` blank, the app runs entirely in memory — every history feature simply switches off.
+Set `DATABASE_URL` (the compose files default it to the bundled Postgres) to persist per-plug-in sessions, schedule snapshots, per-poll telemetry, and daily totals. A startup outage leaves charging operational and triggers bounded background reconnect attempts; session rows are staged in the settings volume and replayed idempotently, so a plug-in during the outage is not lost. Daily energy is stored exactly in Wh and money in integer minor units; legacy floating columns remain for compatibility. This powers the dashboard's recent-sessions card and lets you build Grafana panels (energy/cost/savings over time, driving efficiency, battery-health trend). See [`docs/grafana.md`](docs/grafana.md) for the schema and example queries. With `DATABASE_URL` blank, the app runs entirely in memory — every history feature simply switches off.
 
 ## Progressive web app
 

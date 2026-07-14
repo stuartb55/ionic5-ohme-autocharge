@@ -4,27 +4,39 @@ import { formatDateShort, formatKwh, formatPower, formatTime, formatUntil } from
 import { ScheduleTimeline } from './ScheduleTimeline';
 
 export function ScheduleSection({ schedule }: { schedule: ScheduleResponse }) {
-  const hasSlots = schedule.slots.length > 0;
+  // Ohme does not promise slot ordering. Sort a copy so "starts" and "ready"
+  // are accurate even if an upstream response arrives out of order.
+  const slots = [...schedule.slots].sort(
+    (left, right) => new Date(left.start).getTime() - new Date(right.start).getTime(),
+  );
+  const hasSlots = slots.length > 0;
   // Tick each minute so the "in 2h" countdown on the next slot stays current.
   const now = useNow(60_000);
-  const totalEnergy = schedule.slots.reduce((total, slot) => total + slot.energy, 0);
-  const firstStart = schedule.slots[0]?.start ?? null;
-  const finalEnd = schedule.slots[schedule.slots.length - 1]?.end ?? null;
-  const crossesDay = firstStart && finalEnd
-    ? new Date(firstStart).toDateString() !== new Date(finalEnd).toDateString()
-    : false;
+  const totalEnergy = slots.reduce((total, slot) => total + slot.energy, 0);
+  const firstStart = slots[0]?.start ?? null;
+  const finalEnd = slots.reduce<string | null>((latest, slot) => {
+    if (!latest || new Date(slot.end).getTime() > new Date(latest).getTime()) return slot.end;
+    return latest;
+  }, null);
+  const homeDay = (value: string) => new Date(value).toLocaleDateString('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    ...(schedule.timezone ? { timeZone: schedule.timezone } : {}),
+  });
+  const crossesDay = firstStart && finalEnd ? homeDay(firstStart) !== homeDay(finalEnd) : false;
 
   return (
-    <section className="card" aria-labelledby="schedule-heading">
+    <section className="card schedule-card" aria-labelledby="schedule-heading">
       <header>
         <div>
-          <p className="eyebrow">Charge plan</p>
-          <h2 id="schedule-heading">Schedule</h2>
+          <p className="eyebrow">Smart schedule</p>
+          <h2 id="schedule-heading">Tonight&apos;s plan</h2>
         </div>
         {schedule.nextSlotStart && (
           <span className="badge plugged_in">
             <span className="pip" aria-hidden="true" />
-            Next slot {formatTime(schedule.nextSlotStart)}
+            Next charge {formatTime(schedule.nextSlotStart, schedule.timezone)}
             <span className="badge-rel"> · {formatUntil(schedule.nextSlotStart, new Date(now))}</span>
           </span>
         )}
@@ -34,27 +46,27 @@ export function ScheduleSection({ schedule }: { schedule: ScheduleResponse }) {
         <>
           <div className="schedule-summary" aria-label="Charge plan summary">
             <div>
-              <span>Starts</span>
-              <strong>{firstStart ? formatTime(firstStart) : '—'}</strong>
+              <span>First charge</span>
+              <strong>{firstStart ? formatTime(firstStart, schedule.timezone) : '—'}</strong>
             </div>
             <div>
-              <span>Ready</span>
-              <strong>{finalEnd ? formatTime(finalEnd) : '—'}</strong>
-              {crossesDay && finalEnd && <small>{formatDateShort(finalEnd)}</small>}
+              <span>Ready by</span>
+              <strong>{finalEnd ? formatTime(finalEnd, schedule.timezone) : '—'}</strong>
+              {crossesDay && finalEnd && <small>{formatDateShort(finalEnd, schedule.timezone)}</small>}
             </div>
             <div>
-              <span>Planned</span>
+              <span>Energy</span>
               <strong>{formatKwh(totalEnergy)}</strong>
             </div>
           </div>
-          <ScheduleTimeline slots={schedule.slots} now={new Date(now)} />
+          <ScheduleTimeline slots={slots} now={new Date(now)} timeZone={schedule.timezone} />
           <details className="slot-details">
-            <summary>{schedule.slots.length} charging {schedule.slots.length === 1 ? 'window' : 'windows'}</summary>
+            <summary>{slots.length} charging {slots.length === 1 ? 'window' : 'windows'}</summary>
             <div className="slot-list">
-              {schedule.slots.map((slot) => (
+              {slots.map((slot) => (
                 <div className="slot-row" key={slot.start}>
                   <span className="time">
-                    {formatTime(slot.start)} – {formatTime(slot.end)}
+                    {formatTime(slot.start, schedule.timezone)} – {formatTime(slot.end, schedule.timezone)}
                   </span>
                   <span className="detail">
                     {formatKwh(slot.energy)} · {formatPower(slot.power * 1000)}

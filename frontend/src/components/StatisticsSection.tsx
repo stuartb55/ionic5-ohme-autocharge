@@ -92,12 +92,37 @@ function Insight({ label, value, sub }: { label: string; value: string; sub?: Re
   );
 }
 
+function shiftDate(iso: string, days: number): string {
+  const value = new Date(`${iso}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+/** Keep missing upstream days in their real position without treating them as zero. */
+function chartWindow(stats: StatisticsResponse) {
+  const byDate = new Map(stats.daily.flatMap((day) => day.date ? [[day.date, day]] : []));
+  const firstDate = stats.window.from.slice(0, 10);
+  return Array.from({ length: stats.rangeDays }, (_, index) => {
+    const date = shiftDate(firstDate, index);
+    return byDate.get(date) ?? {
+      date,
+      energyKwh: 0,
+      savings: 0,
+      cost: 0,
+      isComplete: false,
+    };
+  });
+}
+
 export function StatisticsSection({ stats, days, onDaysChange }: Props) {
   const [metric, setMetric] = useState<ChartMetric>('energyKwh');
   const { totals, currency } = stats;
   const insights = useMemo(() => deriveInsights(stats), [stats]);
+  const chartDaily = useMemo(() => chartWindow(stats), [stats]);
   const prev = stats.comparison?.previous;
-  const lastCompleteDay = stats.daily[stats.daily.length - 1]?.date;
+  const reportedDays = Number(stats.metadata.daily.coverage.completeDays ?? stats.daily.length);
+  const missingDays = Math.max(0, stats.rangeDays - reportedDays);
+  const dailyIncomplete = stats.metadata.daily.quality !== 'complete';
   const defaultReportMonth = (() => {
     const [year, month] = stats.window.completeThrough.slice(0, 10).split('-').map(Number);
     const previous = new Date(Date.UTC(year!, month! - 2, 1));
@@ -109,8 +134,9 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
     <section className="card" aria-labelledby="stats-heading">
       <header>
         <div>
-          <p className="eyebrow">Performance</p>
+          <p className="eyebrow">Last {stats.rangeDays} complete days</p>
           <h2 id="stats-heading">Statistics &amp; savings</h2>
+          <p className="card-description">Your Ohme account totals, compared with the previous {stats.rangeDays} days.</p>
         </div>
         <div className="stats-actions">
           <button
@@ -162,9 +188,8 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
 
       <div className="stats-context" aria-label="Statistics coverage">
         <span>
-          {lastCompleteDay ? `Complete through ${formatDateShort(lastCompleteDay)}` : 'No complete days'}
-          {' · '}
-          {stats.window.timezone}
+          {reportedDays > 0 ? `${reportedDays} of ${stats.rangeDays} daily breakdowns reported` : 'No daily breakdowns reported'}
+          {' · '}{stats.window.timezone}
         </span>
         <details>
           <summary>Sources &amp; methods</summary>
@@ -200,6 +225,12 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
           Ohme is temporarily unavailable. Showing the last validated statistics snapshot.
         </p>
       )}
+      {dailyIncomplete && missingDays > 0 && (
+        <p className="stats-stale" role="status">
+          Ohme did not supply {missingDays} daily {missingDays === 1 ? 'breakdown' : 'breakdowns'}.
+          Missing days are marked as not reported, not counted as zero usage.
+        </p>
+      )}
 
       <div className="stat-cards">
         <StatCard
@@ -222,12 +253,12 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
           value={formatKwh(totals.energyKwh)}
           delta={prev && <DeltaBadge current={totals.energyKwh} previous={prev.energyKwh} goodWhen="neutral" />}
         />
+        <StatCard label="Average price / kWh" value={formatPricePerKwh(totals.averageKwhPrice, currency)} />
       </div>
 
       <details className="analytics-details">
         <summary>More performance insights</summary>
         <div className="secondary-stat-cards">
-          <StatCard label="Avg. price / kWh" value={formatPricePerKwh(totals.averageKwhPrice, currency)} />
           <StatCard label="CO₂ saved vs petrol" value={`${totals.carbonSavedKgVsGasCar} kg`} />
         </div>
         <p className="eyebrow insights-eyebrow">Breakdowns</p>
@@ -235,9 +266,14 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
           <Insight
             label="Charging days"
             value={`${insights.chargingDays}`}
-            sub={`of ${insights.totalDays} days`}
+            sub={dailyIncomplete
+              ? `among ${insights.totalDays} reported ${insights.totalDays === 1 ? 'day' : 'days'}`
+              : `of ${insights.totalDays} days`}
           />
-          <Insight label="Avg / charging day" value={formatKwh(insights.avgPerChargingDay)} />
+          <Insight
+            label={dailyIncomplete ? 'Avg / reported charge day' : 'Avg / charging day'}
+            value={formatKwh(insights.avgPerChargingDay)}
+          />
           <Insight
             label="Best day"
             value={insights.bestDay ? formatKwh(insights.bestDay.energyKwh) : '—'}
@@ -282,7 +318,7 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
       </header>
 
       <EnergyBarChart
-        daily={stats.daily}
+        daily={chartDaily}
         metric={metric}
         currency={currency}
         title={CHART_TITLE[metric]}

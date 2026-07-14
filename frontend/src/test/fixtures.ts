@@ -40,6 +40,7 @@ export const statusFixture: StatusResponse = {
   config: {
     chargeTarget: 80,
     pollIntervalSeconds: 180,
+    timezone: 'Europe/London',
     targetMin: 10,
     targetMax: 100,
     readyBy: null,
@@ -74,6 +75,7 @@ export const scheduleFixture: ScheduleResponse = {
   nextSlotEnd: '2026-06-02T03:30:00+01:00',
   connected: true,
   updatedAt: '2026-06-02T00:05:00+01:00',
+  timezone: 'Europe/London',
 };
 
 export const sessionsFixture: SessionsResponse = {

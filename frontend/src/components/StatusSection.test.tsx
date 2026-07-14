@@ -26,9 +26,9 @@ describe('StatusSection projected finish', () => {
 
   it('shows when the charge is projected to finish', () => {
     render(<StatusSection status={statusFixture} />);
-    // A time is rendered after "Finishes ~"; the exact value depends on the
+    // A time is rendered after "On track for"; the exact value depends on the
     // viewer's timezone, so don't pin it.
-    expect(screen.getByText(/finishes ~/i)).toHaveTextContent(/\d{1,2}:\d{2}/);
+    expect(screen.getByRole('heading', { name: /on track for/i })).toHaveTextContent(/\d{1,2}:\d{2}/);
   });
 
   it('hides the projection once the finish time has passed', () => {
@@ -66,39 +66,12 @@ describe('StatusSection trip mode', () => {
         onSetDayTargets={vi.fn()}
         onSetTripMode={vi.fn()}
         onSetNotifications={vi.fn()}
-        onSetVehicleProfile={vi.fn()}
       />,
     );
 
     expect(screen.getByText(/trip mode active/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/trip target percent/i)).toHaveValue(100);
     expect(screen.getByText(/clears automatically/i)).toBeInTheDocument();
-  });
-});
-
-describe('StatusSection vehicle profile', () => {
-  it('shows the active vehicle profile controls', () => {
-    const status: StatusResponse = {
-      ...statusFixture,
-      config: {
-        ...statusFixture.config,
-        vehicleProfiles: { 'car-1': { targetPercent: 90, readyBy: '06:15' } },
-      },
-    };
-    render(
-      <ChargeSettingsSection
-        status={status}
-        activeVehicle={{ id: 'car-1', name: 'IONIQ 5' }}
-        onSetTarget={vi.fn()}
-        onSetReadyBy={vi.fn()}
-        onSetDayTargets={vi.fn()}
-        onSetTripMode={vi.fn()}
-        onSetNotifications={vi.fn()}
-        onSetVehicleProfile={vi.fn()}
-      />,
-    );
-    expect(screen.getAllByText(/ioniq 5 profile/i)).toHaveLength(2);
-    expect(screen.getByLabelText(/profile target/i)).toHaveValue(90);
   });
 });
 
@@ -109,19 +82,20 @@ describe('StatusSection projected cost', () => {
 
   it('shows the estimated session cost when available', () => {
     render(<StatusSection status={withCharger({ projectedCost: 1.31, projectedCostCurrency: 'GBP' })} />);
-    expect(screen.getByText('Est. cost')).toBeInTheDocument();
+    expect(screen.getByText('Estimated cost')).toBeInTheDocument();
     expect(screen.getByText(/£1\.31/)).toBeInTheDocument();
   });
 
-  it('hides the cost tile when no estimate is available', () => {
+  it('makes an unavailable cost explicit', () => {
     render(<StatusSection status={withCharger({ projectedCost: null })} />);
-    expect(screen.queryByText('Est. cost')).not.toBeInTheDocument();
+    expect(screen.getByText('Estimated cost')).toBeInTheDocument();
+    expect(screen.getByText('Price unavailable')).toBeInTheDocument();
   });
 
   it('flags an Agile-priced cost', () => {
     render(<StatusSection status={withCharger({ projectedCost: 0.92, projectedCostMethod: 'agile' })} />);
-    expect(screen.getByText('Est. cost · Agile')).toBeInTheDocument();
-    expect(screen.queryByText('Est. cost')).not.toBeInTheDocument();
+    expect(screen.getByText('Estimated cost · Agile')).toBeInTheDocument();
+    expect(screen.queryByText('Estimated cost')).not.toBeInTheDocument();
   });
 });
 

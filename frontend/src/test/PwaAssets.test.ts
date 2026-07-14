@@ -10,13 +10,13 @@ const SCREENSHOTS = [
     file: 'screenshot-wide.png',
     width: 1280,
     height: 720,
-    sha256: '885ba4b004b0efbee09cad7a4bfc58b47b17d771f9d2d2b59444896be507b3a7',
+    sha256: 'bb466a74cd8d72f08742877f3e241b9e17435dc2a2fe34d2866f12bbdc82c2e5',
   },
   {
     file: 'screenshot-narrow.png',
     width: 720,
     height: 1280,
-    sha256: '46b20999d0f35eae052587408fd4d52aad181e844086b4a3bbb2e6a4f85b008d',
+    sha256: 'ff1fa453eba7dd5da4184372c8424b38b705d23740770570cd3d8033e6b3456c',
   },
 ];
 

@@ -40,6 +40,7 @@ export function deriveInsights(stats: StatisticsResponse): Insights {
   const daily = stats.daily;
   const active = daily.filter((d) => d.energyKwh > 0);
   const totalEnergy = stats.totals.energyKwh;
+  const reportedEnergy = active.reduce((sum, day) => sum + day.energyKwh, 0);
 
   const bestDay = daily.reduce<DailyStat | null>(
     (best, d) => (best === null || d.energyKwh > best.energyKwh ? d : best),
@@ -54,7 +55,10 @@ export function deriveInsights(stats: StatisticsResponse): Insights {
   return {
     chargingDays: active.length,
     totalDays: daily.length,
-    avgPerChargingDay: active.length ? totalEnergy / active.length : 0,
+    // Daily buckets can be partial even when Ohme supplies an account-level
+    // period total. Base this daily insight only on the buckets we can show,
+    // otherwise a missing active day would inflate the displayed average.
+    avgPerChargingDay: active.length ? reportedEnergy / active.length : 0,
     bestDay: bestDay && bestDay.energyKwh > 0 ? bestDay : null,
     estimatedMiles: efficiency?.milesDriven ?? totalEnergy * milesPerKwh,
     milesPerKwh,
