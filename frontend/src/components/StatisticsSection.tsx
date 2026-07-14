@@ -170,14 +170,28 @@ export function StatisticsSection({ stats, days, onDaysChange }: Props) {
           <summary>Sources &amp; methods</summary>
           <ul>
             <li>Account totals: Ohme charge summary for complete local days.</li>
-            <li>
-              Efficiency: same-vehicle distance after{' '}
-              {stats.metadata.efficiency.coverage.matchedIntervals as number} matched home charges.
-            </li>
-            <li>
-              Running cost: reconciled tariff-interval cost across{' '}
-              {stats.metadata.runningCost.coverage.matchedIntervals as number} matched intervals.
-            </li>
+            {stats.efficiency ? (
+              <li>
+                Efficiency: same-vehicle distance across {stats.efficiency.intervalCount}{' '}
+                complete local charge-to-next-plug-in intervals.
+              </li>
+            ) : (
+              <li>
+                Efficiency unavailable: requires complete local charge-to-next-plug-in
+                intervals with charged energy and two odometer readings.
+              </li>
+            )}
+            {stats.runningCost ? (
+              <li>
+                Running cost: reconciled tariff cost across {stats.runningCost.intervalCount}{' '}
+                complete local charge-to-next-plug-in intervals.
+              </li>
+            ) : (
+              <li>
+                Running cost unavailable: requires a complete local charge-to-next-plug-in
+                interval with fully reconciled tariff pricing.
+              </li>
+            )}
           </ul>
         </details>
       </div>
