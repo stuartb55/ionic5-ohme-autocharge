@@ -69,7 +69,7 @@ describe('SessionsSection', () => {
 
     await waitFor(() => expect(screen.getByText(/battery %/i)).toBeInTheDocument());
     expect(screen.getByText(/measured energy/i)).toBeInTheDocument();
-    expect(screen.getByText(/lifecycle/i)).toBeInTheDocument();
+    expect(screen.getByText(/charge timeline/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { expanded: true })).toBeInTheDocument();
   });
 });
