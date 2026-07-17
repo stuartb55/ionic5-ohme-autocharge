@@ -1,3 +1,4 @@
+import babelParser from '@babel/eslint-parser';
 import js from '@eslint/js';
 import globals from 'globals';
 import reactHooks from 'eslint-plugin-react-hooks';
@@ -20,8 +21,16 @@ export default [
   {
     files: ['**/*.{ts,tsx}'],
     languageOptions: {
+      parser: babelParser,
       ecmaVersion: 2020,
       globals: { ...globals.browser },
+      parserOptions: {
+        requireConfigFile: false,
+        babelOptions: {
+          plugins: ['@babel/plugin-syntax-jsx'],
+          presets: ['@babel/preset-typescript'],
+        },
+      },
     },
     plugins: {
       'react-hooks': reactHooks,
