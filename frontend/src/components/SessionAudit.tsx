@@ -5,13 +5,74 @@ import { formatDateShort, formatMoney, formatTime } from '../utils/format';
 import { SessionChargeCurve } from './SessionChargeCurve';
 
 const label = (value: string) =>
-  value.replace(/_/g, ' ').replace(/^./, (character) => character.toUpperCase());
+  value
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/^./, (character) => character.toUpperCase());
+
+const EVENT_LABELS: Record<string, string> = {
+  charge_control: 'Charging control requested',
+  charging_finished: 'Charging finished',
+  finished: 'Charging finished',
+  plugged_in: 'Vehicle plugged in',
+  reconciliation_skipped: 'Cost calculation skipped',
+  session_reconciled: 'Charging cost calculated',
+  skipped_at_target: 'Already at charge target',
+  target_configured: 'Charge target set',
+  target_reapplied: 'Charge target updated',
+  target_reapply_skipped: 'Charge target update skipped',
+  trip_mode_consumed: 'Trip charge cleared',
+};
+
+const DETAIL_LABELS: Record<string, string> = {
+  action: 'Action',
+  attributionIssues: 'Data gaps',
+  costMinor: 'Charging cost',
+  counterEnergyWh: 'Charger reading',
+  energyWh: 'Energy added',
+  maxCharge: 'Maximum charge',
+  readyBy: 'Ready by',
+  reason: 'Reason',
+  reconstructedEnergyWh: 'Calculated energy',
+  soc: 'Battery level',
+  soc_percent: 'Battery level',
+  status: 'Charger status',
+  tariffCoverage: 'Tariff data coverage',
+  target: 'Charge target',
+  trigger: 'Calculated after',
+  tripMode: 'Trip charge',
+};
+
+const eventLabel = (value: string) => EVENT_LABELS[value] ?? label(value);
+
+const detailLabel = (key: string) => DETAIL_LABELS[key] ?? label(key);
 
 const dateTime = (value: string | null) =>
   value ? `${formatDateShort(value)} ${formatTime(value)}` : '—';
 
-const detailValue = (value: unknown): string => {
+const DETAIL_VALUE_LABELS: Record<string, string> = {
+  finished: 'Charging finished',
+  no_energy_counter: 'No charger energy reading',
+  no_telemetry: 'No charging data',
+  plugged_in: 'Plugged in',
+  unplugged: 'Vehicle unplugged',
+};
+
+const ENERGY_DETAIL_KEYS = new Set(['counterEnergyWh', 'energyWh', 'reconstructedEnergyWh']);
+const PERCENT_DETAIL_KEYS = new Set(['soc', 'soc_percent', 'target']);
+
+const detailValue = (key: string, value: unknown, currency: string | null): string => {
   if (value == null) return '—';
+  if (typeof value === 'number') {
+    if (ENERGY_DETAIL_KEYS.has(key)) return `${(value / 1000).toFixed(2)} kWh`;
+    if (PERCENT_DETAIL_KEYS.has(key)) return `${value}%`;
+    if (key === 'costMinor') return formatMoney(value / 100, currency);
+    if (key === 'tariffCoverage') return `${Math.round(value * 100)}%`;
+  }
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'string' && DETAIL_VALUE_LABELS[value]) {
+    return DETAIL_VALUE_LABELS[value];
+  }
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return String(value);
   }
@@ -59,19 +120,19 @@ export function SessionAudit({ sessionId }: { sessionId: number }) {
       </div>
 
       <div className="audit-section">
-        <h3>Lifecycle</h3>
-        {events.length === 0 ? <p className="empty">No lifecycle events were recorded.</p> : (
+        <h3>Charge timeline</h3>
+        {events.length === 0 ? <p className="empty">No charging events were recorded.</p> : (
           <ol className="audit-events">
             {events.map((event, index) => (
               <li key={`${event.at}-${event.type}-${index}`}>
                 <time dateTime={event.at}>{dateTime(event.at)}</time>
-                <strong>{label(event.type)}</strong>
+                <strong>{eventLabel(event.type)}</strong>
                 {Object.keys(event.details).length > 0 && (
                   <dl>
                     {Object.entries(event.details)
                       .filter(([key]) => !PRIVATE_DETAIL_KEYS.has(key))
                       .map(([key, value]) => (
-                      <div key={key}><dt>{label(key)}</dt><dd>{detailValue(value)}</dd></div>
+                        <div key={key}><dt>{detailLabel(key)}</dt><dd>{detailValue(key, value, currency)}</dd></div>
                       ))}
                   </dl>
                 )}
