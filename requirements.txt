@@ -1,7 +1,7 @@
 # Direct dependencies are pinned exactly so their upgrades are reviewed through
 # Renovate. Transitive resolution is still handled by pip; the built container
 # image remains the immutable deployment artifact.
-hyundai-kia-connect-api==4.25.0
+hyundai-kia-connect-api==4.25.2
 ohme==1.9.1
 aiohttp==3.14.1
 python-dotenv==1.2.2
