@@ -33,7 +33,7 @@ In Grafana add a **PostgreSQL** datasource:
 | `daily_stats`        | every `DAILY_STATS_INTERVAL` + on dashboard views | complete local-day energy in Wh and money in integer minor units (legacy float mirrors retained) |
 | `grid_consumption`   | every `DAILY_STATS_INTERVAL` (when Octopus consumption is configured) | half-hourly whole-house import split into car vs rest-of-house |
 | `session_events`     | target changes and other session lifecycle events | audit trail for each physical plug-in |
-| `tariff_rates`       | every 30 minutes when Agile is enabled | durable tariff windows used for actual cost |
+| `tariff_rates`       | every 30 minutes when a tariff is enabled | durable tariff windows used for actual cost |
 | `charging_intervals` | when a session finishes and reconciles | measured session Wh and integer-minor-unit cost by tariff interval |
 | `ingestion_cursors`  | after a successful external-data upsert | resumable source progress and last-ingestion metadata |
 

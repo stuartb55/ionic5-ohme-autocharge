@@ -73,9 +73,9 @@ class StatusSnapshot:
     planned_energy_kwh: float = 0.0
     projected_cost: Optional[float] = None
     projected_cost_currency: Optional[str] = None
-    # How projected_cost was derived: "agile" (each slot priced against the
-    # half-hourly Octopus Agile rate) or "average" (flat recent £/kWh). None when
-    # there's no cost. Lets the dashboard label an Agile-accurate figure.
+    # How projected_cost was derived: "agile" (clock-time dynamic rates),
+    # "intelligent_go" (every Ohme slot at the cheaper rate), or "average" (flat
+    # recent £/kWh). None when there's no cost.
     projected_cost_method: Optional[str] = None
 
     # Schedule
@@ -157,11 +157,9 @@ class AppState:
         # without its own upstream call. None until the first summary is parsed.
         self.avg_price_per_kwh: Optional[float] = None
         self.price_currency: Optional[str] = None
-        # Most recent upcoming Octopus Agile half-hourly rates, cached so the
-        # synchronous build_snapshot can price the session's slots against the
-        # real per-slot rate. Populated by the /api/tariff fetch; None until then
-        # (or when the tariff feature is disabled) — build_snapshot then falls
-        # back to avg_price_per_kwh.
+        # Most recent upcoming Octopus unit rates, cached so synchronous snapshot
+        # building can price the session's slots. Populated by /api/tariff; None
+        # until then (or when disabled), when the recent average is the fallback.
         self.agile_rates: Optional[list[dict]] = None
         # Why the most recent poll failed ("poll_failed", "login_failed"), or
         # None when it succeeded. Failures keep the previous snapshot so the

@@ -59,7 +59,7 @@ export function DataQualitySection({ data }: { data: DataQualityResponse }) {
                   ? countLabel(costMissing, 'missing session')
                   : 'Complete'}
             </strong>
-            <small>Only reconciled Agile costs count</small>
+            <small>Only reconciled tariff costs count</small>
           </div>
           <div className={unlinked ? 'quality-item attention' : 'quality-item'}>
             <span>Session linkage</span>

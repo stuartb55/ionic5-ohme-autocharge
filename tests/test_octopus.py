@@ -76,6 +76,13 @@ def test_is_enabled_requires_both(monkeypatch):
     assert octopus.is_enabled() is True
 
 
+def test_intelligent_go_is_identified_from_product_code(monkeypatch):
+    monkeypatch.setattr(config, "OCTOPUS_PRODUCT_CODE", "INTELLI-FIX-12M-26-04-18")
+    assert octopus.is_intelligent_go() is True
+    monkeypatch.setattr(config, "OCTOPUS_PRODUCT_CODE", "AGILE-24-10-01")
+    assert octopus.is_intelligent_go() is False
+
+
 async def test_fetch_rates_none_when_disabled(monkeypatch):
     monkeypatch.setattr(config, "OCTOPUS_PRODUCT_CODE", "")
     with patch("aiohttp.ClientSession") as mock_cls:
@@ -200,6 +207,14 @@ def test_cost_for_slots_spans_multiple_rates():
     assert octopus.cost_for_slots([_slot(0, 2, 10)], rates) == 2.0
 
 
+def test_intelligent_go_prices_every_ohme_slot_at_cheaper_rate(monkeypatch):
+    monkeypatch.setattr(config, "OCTOPUS_PRODUCT_CODE", "INTELLI-VAR-24-10-29")
+    # The Ohme slot is in the 30p daytime window, but Intelligent Go bills the
+    # managed slot at the 8p off-peak rate.
+    rates = [_rate(0, 1, 0.08), _rate(12, 13, 0.30)]
+    assert octopus.cost_for_slots([_slot(12, 13, 10)], rates) == 0.8
+
+
 def test_cost_for_slots_returns_none_when_not_fully_covered():
     # Slot runs 0-2h but rates only cover 0-1h → can't price the tail.
     rates = [_rate(0, 1, 0.10)]
@@ -258,6 +273,61 @@ def test_price_energy_buckets_supports_negative_agile_rate():
     }]
     priced = octopus.price_energy_buckets({base.isoformat(): 1.0}, rates)
     assert priced.cost_minor == -5
+
+
+def test_intelligent_go_prices_measured_ohme_slot_at_cheaper_rate(monkeypatch):
+    monkeypatch.setattr(config, "OCTOPUS_PRODUCT_CODE", "INTELLI-VAR-24-10-29")
+    base = _dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc)
+    daytime = base + _dt.timedelta(hours=12)
+    rates = [
+        {
+            "from": base.isoformat(),
+            "to": (base + _dt.timedelta(minutes=30)).isoformat(),
+            "pricePerKwh": 0.08,
+        },
+        {
+            "from": daytime.isoformat(),
+            "to": (daytime + _dt.timedelta(minutes=30)).isoformat(),
+            "pricePerKwh": 0.30,
+        },
+    ]
+    slots = [{
+        "start": daytime.isoformat(),
+        "end": (daytime + _dt.timedelta(minutes=30)).isoformat(),
+    }]
+
+    priced = octopus.price_energy_buckets(
+        {daytime.isoformat(): 2.0}, rates, smart_slots=slots
+    )
+
+    assert priced.cost_minor == 16
+    assert priced.intervals[0]["rateMinorPerKwh"] == 8.0
+    assert priced.cost_method == "actual_intelligent_go"
+
+
+def test_intelligent_go_uses_peak_rate_outside_ohme_slot(monkeypatch):
+    monkeypatch.setattr(config, "OCTOPUS_PRODUCT_CODE", "INTELLI-VAR-24-10-29")
+    base = _dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc)
+    daytime = base + _dt.timedelta(hours=12)
+    rates = [
+        {
+            "from": base.isoformat(),
+            "to": (base + _dt.timedelta(minutes=30)).isoformat(),
+            "pricePerKwh": 0.08,
+        },
+        {
+            "from": daytime.isoformat(),
+            "to": (daytime + _dt.timedelta(minutes=30)).isoformat(),
+            "pricePerKwh": 0.30,
+        },
+    ]
+
+    priced = octopus.price_energy_buckets(
+        {daytime.isoformat(): 2.0}, rates, smart_slots=[]
+    )
+
+    assert priced.cost_minor == 60
+    assert priced.intervals[0]["rateMinorPerKwh"] == 30.0
 
 
 # --- household consumption --------------------------------------------------

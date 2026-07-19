@@ -1152,6 +1152,40 @@ async def test_reconcile_finished_session_prices_measured_energy():
     assert event.call_args.args[1] == "session_reconciled"
 
 
+async def test_reconcile_intelligent_go_uses_ohme_slots_and_surrounding_rates(monkeypatch):
+    monkeypatch.setattr(config, "OCTOPUS_PRODUCT_CODE", "INTELLI-VAR-24-10-29")
+    t0 = dt.datetime(2026, 6, 1, 12, tzinfo=dt.timezone.utc)
+    rows = [
+        (t0, 42, 0.0, 7400.0, "charging", True),
+        (t0 + dt.timedelta(minutes=5), 42, 1000.0, 7400.0, "finished", True),
+    ]
+    rates = [
+        {
+            "from": (t0 - dt.timedelta(hours=12)).isoformat(),
+            "to": (t0 - dt.timedelta(hours=11, minutes=30)).isoformat(),
+            "pricePerKwh": 0.08,
+        },
+        {
+            "from": t0.isoformat(),
+            "to": (t0 + dt.timedelta(minutes=30)).isoformat(),
+            "pricePerKwh": 0.30,
+        },
+    ]
+    slots = [{"start": t0.isoformat(), "end": (t0 + dt.timedelta(minutes=30)).isoformat()}]
+    with patch("db.get_session_attribution_rows", new=AsyncMock(return_value=rows)), \
+         patch("db.get_tariff_rates", new=AsyncMock(return_value=rates)) as get_rates, \
+         patch("db.get_session_schedule_slots", new=AsyncMock(return_value=slots)) as get_slots, \
+         patch("db.record_session_reconciliation", new=AsyncMock()) as record, \
+         patch("db.record_session_event", new=AsyncMock()):
+        await api._reconcile_session(42, 1000.0, trigger="finished")
+
+    assert get_rates.await_args.args == (t0 - dt.timedelta(days=1), t0 + dt.timedelta(minutes=35, days=1))
+    get_slots.assert_awaited_once_with(42)
+    priced = record.call_args.args[1]
+    assert priced.cost_minor == 8
+    assert priced.cost_method == "actual_intelligent_go"
+
+
 async def test_unplug_reconciliation_resolves_durable_session_after_restart():
     with patch(
         "db.get_session_id_by_key", new=AsyncMock(return_value=42)
@@ -2321,6 +2355,30 @@ def test_build_snapshot_prices_slots_against_agile_rates():
     assert snap.projected_cost == 3.0  # 10*0.05 + 10*0.25
     assert snap.projected_cost_method == "agile"
     assert snap.projected_cost_currency == "GBP"
+
+
+def test_build_snapshot_prices_intelligent_go_ohme_slots_at_cheaper_rate(monkeypatch):
+    monkeypatch.setattr(config, "OCTOPUS_PRODUCT_CODE", "INTELLI-VAR-24-10-29")
+    base = dt.datetime(2026, 6, 13, tzinfo=dt.timezone.utc)
+    client = _charging_client()
+    client.slots = [_slot(10.0, base.replace(hour=12))]
+    store.agile_rates = [
+        {
+            "from": base.isoformat(),
+            "to": (base + dt.timedelta(minutes=30)).isoformat(),
+            "pricePerKwh": 0.08,
+        },
+        {
+            "from": base.replace(hour=12).isoformat(),
+            "to": base.replace(hour=13).isoformat(),
+            "pricePerKwh": 0.30,
+        },
+    ]
+
+    snap = api.build_snapshot(client, connected=True)
+
+    assert snap.projected_cost == 0.8
+    assert snap.projected_cost_method == "intelligent_go"
 
 
 def test_build_snapshot_no_cost_without_price():

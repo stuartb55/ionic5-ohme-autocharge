@@ -828,6 +828,17 @@ async def test_get_session_attribution_rows_filters_by_session(fake_pool):
     assert conn.executed[0][1] == (42,)
 
 
+async def test_get_session_schedule_slots_flattens_and_deduplicates(fake_pool):
+    conn, cursor = fake_pool
+    first = {"start": "2026-06-01T00:00:00Z", "end": "2026-06-01T00:30:00Z"}
+    second = {"start": "2026-06-01T01:00:00Z", "end": "2026-06-01T01:30:00Z"}
+    cursor.rows = [([first],), ([first, second, "bad"],)]
+
+    assert await db.get_session_schedule_slots(42) == [first, second]
+    assert "FROM schedule_snapshots" in conn.executed[0][0]
+    assert conn.executed[0][1] == (42,)
+
+
 async def test_tariff_rate_round_trip_helpers(fake_pool, monkeypatch):
     import datetime as dt
     from decimal import Decimal
@@ -853,6 +864,22 @@ async def test_tariff_rate_round_trip_helpers(fake_pool, monkeypatch):
         "currency": "GBP", "source": "octopus_agile:AGILE-TEST:A",
     }]
     assert conn.executed[-1][1] == (t0, t1)
+
+
+async def test_intelligent_go_tariff_rates_have_distinct_source(fake_pool, monkeypatch):
+    _, cursor = fake_pool
+    monkeypatch.setattr(config, "OCTOPUS_PRODUCT_CODE", "INTELLI-VAR-24-10-29")
+    monkeypatch.setattr(config, "OCTOPUS_REGION", "A")
+
+    await db.upsert_tariff_rates([{
+        "from": "2026-06-01T00:00:00Z",
+        "to": "2026-06-01T00:30:00Z",
+        "pricePerKwh": 0.08,
+    }])
+
+    assert cursor.executemany_calls[0][1][0][4] == (
+        "octopus_intelligent_go:INTELLI-VAR-24-10-29:A"
+    )
 
 
 async def test_record_session_reconciliation_persists_intervals_and_total(fake_pool):

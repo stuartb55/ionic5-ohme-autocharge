@@ -108,14 +108,14 @@ DATABASE_RECONNECT_MAX = _int_setting(
     "DATABASE_RECONNECT_MAX", 300, minimum=DATABASE_RECONNECT_INITIAL, maximum=3600
 )
 
-# Optional Octopus Agile (dynamic tariff) awareness. Both must be set to enable;
-# blank disables the tariff card. PRODUCT_CODE is the Agile product (e.g.
-# "AGILE-24-10-01"); REGION is the single-letter DNO region (A–P). Used to build
-# the public unit-rate URL — no account/auth needed.
+# Optional Octopus tariff awareness for Agile or Intelligent Go. Both must be set
+# to enable; blank disables the tariff card. PRODUCT_CODE is the Octopus product
+# (e.g. "AGILE-24-10-01" or "INTELLI-VAR-24-10-29"); REGION is the single-letter
+# DNO region (A–P). Used to build the public unit-rate URL — no account/auth needed.
 OCTOPUS_PRODUCT_CODE = os.getenv("OCTOPUS_PRODUCT_CODE", "")
 OCTOPUS_REGION = os.getenv("OCTOPUS_REGION", "")
 
-# Optional Octopus household-consumption awareness (separate from the Agile rates
+# Optional Octopus household-consumption awareness (separate from the tariff rates
 # above — this needs an account). Both must be set to enable the energy-usage card
 # and its Postgres persistence. The API key is the account-level key from your
 # Octopus dashboard; the account number (e.g. "A-AAAA1111") lets the app discover

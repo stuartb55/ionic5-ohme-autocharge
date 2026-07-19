@@ -21,8 +21,8 @@ When the car is plugged in, the app reads the real battery state-of-charge from 
 - **Single-vehicle focus** — one clear vehicle dashboard, without fleet selection or duplicate per-vehicle settings.
 - **Vehicle health** — read-only 12V auxiliary battery level plus the car's own tyre-pressure, washer-fluid and key-fob-battery warnings and anything left open (door/bonnet/boot), shown on the dashboard with an optional ntfy when a warning first appears.
 - **Configurable notifications** — optional [ntfy](https://ntfy.sh) alerts with dashboard controls for plug-in, completion, problems/recovery, vehicle health and weekly summaries; tune failure, minimum-energy and optional 12V-battery thresholds.
-- **Octopus Agile** *(optional)* — upcoming half-hourly prices and the cheapest slots, plus an Agile-accurate session cost (each charge slot priced against the rate it falls in, not a flat average).
-- **Reconciled actual cost** *(Octopus Agile + Postgres)* — persists tariff windows in the background and prices measured session-energy intervals after charging finishes; incomplete tariff or telemetry coverage is reported instead of guessed.
+- **Octopus Agile / Intelligent Go** *(optional)* — upcoming prices and cheapest windows, plus tariff-accurate session costs. Agile uses each slot's clock-time price; Intelligent Go prices every Ohme smart-charge slot at the cheaper rate, including daytime slots.
+- **Reconciled actual cost** *(Octopus tariff + Postgres)* — persists tariff windows and Ohme schedules in the background, then prices measured session-energy intervals after charging finishes; incomplete tariff or telemetry coverage is reported instead of guessed.
 - **House vs car energy** *(optional, needs Postgres)* — splits Octopus import into car, household and explicitly unattributed energy; telemetry gaps and inconsistencies remain visible instead of being silently forced into a plausible split.
 - **History & Grafana** *(optional)* — per-session and telemetry data persisted to Postgres.
 - **Data-quality dashboard** *(needs Postgres)* — shows missing measured energy/cost, session-linkage problems, uncertain attribution, ingestion freshness and statistics-cache age, with a direct path to session records needing review.
@@ -116,7 +116,7 @@ All settings come from environment variables (or `.env`). Only the five credenti
 | `SETTINGS_PATH` | `/app/data/settings.json` | Where runtime settings (target, ready-by, per-day targets, selected vehicle) persist. A named volume is mounted here. |
 | `NTFY_TOPIC` / `NTFY_URL` / `NTFY_TOKEN` | *(off)* | [ntfy](https://ntfy.sh) notifications. Blank `NTFY_TOPIC` disables them. |
 | `WEEKLY_DIGEST_DAY` / `WEEKLY_DIGEST_HOUR` | `0` / `8` | Weekday (0=Mon … 6=Sun) and local hour for the weekly digest. Day outside 0–6 disables it. Needs ntfy. |
-| `OCTOPUS_PRODUCT_CODE` / `OCTOPUS_REGION` | *(off)* | Octopus Agile product code + single-letter DNO region (A–P) to enable the tariff card. |
+| `OCTOPUS_PRODUCT_CODE` / `OCTOPUS_REGION` | *(off)* | Octopus Agile or Intelligent Go import product code + single-letter DNO region (A–P) to enable tariff prices and charging-cost reconciliation. |
 | `OCTOPUS_API_KEY` / `OCTOPUS_ACCOUNT_NUMBER` | *(off)* | Octopus account API key + account number (e.g. `A-AAAA1111`) to enable the house-vs-car energy card. The import meter is auto-discovered. Needs `DATABASE_URL` too. |
 | `CONSUMPTION_BACKFILL_DAYS` | `90` | Initial Octopus consumption history to ingest. Later runs resume from a durable cursor with overlap for corrections. |
 | `DATABASE_URL` | *(off)* | Postgres connection string for charging history. Blank runs entirely in memory. The compose files default this to the bundled Postgres. |
@@ -164,7 +164,7 @@ A React + TypeScript single-page app (in `frontend/`) served by a hardened, non-
 3. **Costs & energy** — account-wide Ohme cost, savings, energy and average unit price for the last 7/30/90 **complete local calendar days**, plus vehicle-scoped home-energy efficiency and actual home running cost from complete charge-to-next-plug-in intervals. Missing upstream daily buckets stay missing rather than being displayed as zero usage. Daily charts include period-over-period deltas and CSV export; a month picker downloads auditable monthly JSON/CSV reports. DST days follow `TIMEZONE` rather than assuming every day is 24 hours.
 4. **Recent sessions** *(when Postgres is enabled)* — the last plug-ins with SOC, target, top-up and odometer, with a CSV/JSON export of the full history.
    Each row expands into a **session audit**: measured energy/cost and reconciliation, lifecycle events, schedule revisions, tariff-priced intervals, and the SOC/power charge curve. Missing evidence stays explicitly unavailable rather than being estimated.
-5. **Agile prices** *(when Octopus is configured)* — the current price and cheapest upcoming slots.
+5. **Octopus prices** *(when a tariff is configured)* — the current price and cheapest upcoming slots.
 6. **House vs car** *(when Octopus consumption + Postgres are configured)* — a stacked half-hourly chart of whole-house import split into car charging vs the rest of the household, with a day selector.
 
 The header has an explicit live/stale indicator, a full-dashboard **refresh**, a **theme** toggle, and the build version in the footer. Diagnostics and evidence remain available without competing with everyday metrics.
@@ -200,7 +200,7 @@ npm run build    # type-check + production build to dist/
 | `GET /api/sessions/{id}/telemetry` | Per-poll charge curve (SOC + power over time) for one session (404 when the id is unknown; `enabled: false` when persistence is off) |
 | `GET /api/sessions/{id}/audit` | Typed session provenance: identity record, lifecycle events, schedule revisions and priced charging intervals (404 when persistence is off or the id is unknown) |
 | `GET /api/soh-history?limit=N` | Battery state-of-health readings over time, one point per change (N = 1–365; `enabled: false` when persistence is off) |
-| `GET /api/tariff` | Upcoming Octopus Agile rates + cheapest slots (`enabled: false` when unconfigured) |
+| `GET /api/tariff` | Upcoming Octopus rates + cheapest slots (`enabled: false` when unconfigured) |
 | `GET /api/energy-usage?date=YYYY-MM-DD` | A day's half-hourly whole-house import split into car vs rest-of-house + totals (default yesterday; `enabled: false` when unconfigured) |
 | `GET /api/vehicles` | Vehicles on the Hyundai account, with the selected one flagged |
 | `POST /api/refresh` | Force a live re-read from Ohme (rate-limited) |
@@ -230,9 +230,9 @@ A typical message:
 
 **Weekly digest** — when ntfy is on, a once-a-week summary of the last 7 days (energy, cost, savings, CO₂) is sent on `WEEKLY_DIGEST_DAY` at `WEEKLY_DIGEST_HOUR` (default Monday 08:00).
 
-## Octopus Agile tariff (optional)
+## Octopus tariff (optional)
 
-Set both `OCTOPUS_PRODUCT_CODE` (e.g. `AGILE-24-10-01`) and `OCTOPUS_REGION` (your single-letter DNO region, A–P) to show an **Agile prices** card with the current price and cheapest upcoming half-hourly slots. It uses Octopus's public unit-rate API — no account or key needed. Leave either blank to hide the card.
+Set both `OCTOPUS_PRODUCT_CODE` (for example `AGILE-24-10-01` or your `INTELLI-…` Intelligent Go product) and `OCTOPUS_REGION` (your single-letter DNO region, A–P) to show an **Octopus prices** card with the current price and cheapest upcoming slots. It uses Octopus's public unit-rate API — no account or key needed. With Intelligent Go, every charge slot supplied by Ohme is costed at the cheaper rate even when it is scheduled outside the standard overnight window; charging outside an Ohme smart slot retains its clock-time rate. Leave either setting blank to hide the card.
 
 ## House vs car energy (optional)
 
@@ -293,7 +293,7 @@ docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compo
 ├── bluelink.py                    # Hyundai Bluelink wrapper (SOC, range, odometer, SoH, lock/location)
 ├── ohme_client.py                 # Ohme charger wrapper (ohme)
 ├── ntfy.py                        # Ntfy notification client + weekly digest
-├── octopus.py                     # Optional Octopus tariff (Agile) + household consumption client
+├── octopus.py                     # Optional Octopus tariff + household consumption client
 ├── energy.py                      # Pure helpers: per-half-hour car share + house-vs-car merge
 ├── db.py                          # Optional Postgres history (sessions, telemetry, daily stats, grid consumption)
 ├── config.py                      # Loads settings from .env

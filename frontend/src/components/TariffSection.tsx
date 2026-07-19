@@ -3,8 +3,8 @@ import { useNow } from '../hooks/useNow';
 import { formatFinishTime, formatPricePerKwh } from '../utils/format';
 
 /**
- * Octopus dynamic tariff prices: the current half-hourly rate plus the cheapest
- * upcoming slots, so you can see when to charge. Rendered only when on.
+ * Octopus tariff prices: the current rate plus the cheapest upcoming slots, so
+ * you can see when to charge. Rendered only when configured.
  */
 export function TariffSection({ data }: { data: TariffResponse }) {
   const currency = data.currency ?? 'GBP';

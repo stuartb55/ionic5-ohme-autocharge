@@ -206,7 +206,7 @@ class StatusChargerModel(ContractModel):
     plannedEnergyKwh: float
     projectedCost: Optional[float]
     projectedCostCurrency: Optional[str]
-    projectedCostMethod: Optional[Literal["agile", "average"]]
+    projectedCostMethod: Optional[Literal["agile", "intelligent_go", "average"]]
 
 
 class TripModeModel(ContractModel):

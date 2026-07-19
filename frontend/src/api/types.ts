@@ -54,8 +54,8 @@ export interface StatusResponse {
     projectedCost: number | null;
     /** Currency for projectedCost. */
     projectedCostCurrency: string | null;
-    /** How projectedCost was derived: 'agile' (per-slot Agile rates) or 'average'. */
-    projectedCostMethod: 'agile' | 'average' | null;
+    /** Tariff-specific slot pricing, or a flat recent average. */
+    projectedCostMethod: 'agile' | 'intelligent_go' | 'average' | null;
   };
   config: {
     chargeTarget: number;
@@ -315,7 +315,7 @@ export interface TariffRate {
 }
 
 export interface TariffResponse {
-  /** False when the Agile tariff feature is unconfigured — hide the card. */
+  /** False when the Octopus tariff feature is unconfigured — hide the card. */
   enabled: boolean;
   currency?: string | null;
   /** Upcoming half-hourly rates, oldest first. */

@@ -180,7 +180,11 @@ export function StatusSection({
         />
         <Metric
           icon="wallet"
-          label={charger.projectedCostMethod === 'agile' ? 'Estimated cost · Agile' : 'Estimated cost'}
+          label={charger.projectedCostMethod === 'agile'
+            ? 'Estimated cost · Agile'
+            : charger.projectedCostMethod === 'intelligent_go'
+              ? 'Estimated cost · Intelligent Go'
+              : 'Estimated cost'}
           value={charger.projectedCost != null
             ? formatMoney(charger.projectedCost, charger.projectedCostCurrency)
             : '—'}

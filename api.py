@@ -207,19 +207,21 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
     # slots is grid-side (watts × hours), so it already includes charging losses.
     planned_energy_raw = sum(s.energy for s in slots) if connected else 0.0
     planned_energy_kwh = round(planned_energy_raw, 2)
-    # Prefer an Agile-accurate cost: price each slot against the half-hourly rate
-    # it falls in (so an overnight charge through cheap slots isn't valued at a
-    # flat average). Falls back to the recent average £/kWh when Agile rates are
-    # unavailable or don't fully cover the schedule.
+    # Prefer tariff-accurate slot pricing. Agile uses each slot's clock-time rate;
+    # Intelligent Go uses its cheaper rate for every Ohme smart-charge slot,
+    # including extra daytime slots. Fall back to the recent average £/kWh when
+    # tariff rates are unavailable or don't fully cover the schedule.
     projected_cost = None
     projected_cost_method = None
     projected_cost_currency = None
     if connected and planned_energy_kwh > 0:
-        agile_cost = octopus.cost_for_slots(slots, store.agile_rates)
-        if agile_cost is not None:
-            projected_cost = agile_cost
-            projected_cost_method = "agile"
-            projected_cost_currency = "GBP"  # Octopus Agile is GBP-only
+        tariff_cost = octopus.cost_for_slots(slots, store.agile_rates)
+        if tariff_cost is not None:
+            projected_cost = tariff_cost
+            projected_cost_method = (
+                "intelligent_go" if octopus.is_intelligent_go() else "agile"
+            )
+            projected_cost_currency = "GBP"
         else:
             price = store.avg_price_per_kwh
             if price:
@@ -508,10 +510,19 @@ async def _reconcile_session(
     )
     start = rows[0][0]
     end = rows[-1][0] + datetime.timedelta(minutes=30)
-    rates = await db.get_tariff_rates(start, end)
+    # A daytime Intelligent Go slot still needs the tariff's overnight price as
+    # evidence, so include the surrounding day when loading persisted rates.
+    rate_start = start - datetime.timedelta(days=1) if octopus.is_intelligent_go() else start
+    rate_end = end + datetime.timedelta(days=1) if octopus.is_intelligent_go() else end
+    rates = await db.get_tariff_rates(rate_start, rate_end)
     if not rates:
         rates = store.agile_rates
-    priced = octopus.price_energy_buckets(attribution.car_by_slot, rates)
+    smart_slots = (
+        await db.get_session_schedule_slots(session_id) if octopus.is_intelligent_go() else None
+    )
+    priced = octopus.price_energy_buckets(
+        attribution.car_by_slot, rates, smart_slots=smart_slots
+    )
     await db.record_session_reconciliation(
         session_id, priced, counter_energy_wh=counter_energy_wh
     )
@@ -1567,7 +1578,7 @@ async def get_status() -> JSONResponse:
             "plannedEnergyKwh": store.status.planned_energy_kwh,
             "projectedCost": store.status.projected_cost,
             "projectedCostCurrency": store.status.projected_cost_currency,
-            # "agile" (per-slot Agile pricing) or "average" (flat recent £/kWh).
+            # "agile", "intelligent_go" (Ohme-slot off-peak pricing), or "average".
             "projectedCostMethod": store.status.projected_cost_method,
         },
         "config": {
@@ -1628,7 +1639,7 @@ async def get_schedule() -> JSONResponse:
     )
 
 
-_TARIFF_CACHE_TTL = 1800  # 30 min; Agile rates change at most once a day
+_TARIFF_CACHE_TTL = 1800  # 30 min; Octopus rates change at most once a day
 _tariff_cache: dict[str, Any] = {"value": None, "at": 0.0}
 
 
@@ -1652,7 +1663,7 @@ async def _refresh_tariff_rates() -> Optional[dict[str, Any]]:
 
 @app.get("/api/tariff")
 async def get_tariff() -> JSONResponse:
-    """Upcoming Octopus Agile half-hourly rates and the cheapest upcoming slots.
+    """Upcoming Octopus unit rates and the cheapest upcoming slots.
 
     ``enabled`` is false when the tariff feature is unconfigured — the dashboard
     hides the card. Cached for 30 min; a transient fetch failure serves the last

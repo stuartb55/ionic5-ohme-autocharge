@@ -1,10 +1,12 @@
-"""Optional Octopus Agile (dynamic tariff) awareness.
+"""Optional Octopus tariff awareness.
 
-Fetches upcoming half-hourly unit rates from Octopus Energy's public API (no
-account or auth needed). Enabled only when ``OCTOPUS_PRODUCT_CODE`` and
-``OCTOPUS_REGION`` are set; otherwise every call is a no-op, mirroring the
-graceful-degradation pattern used by ntfy/db. Failures return None and are
-swallowed so the tariff card simply hides.
+Fetches upcoming unit rates from Octopus Energy's public API (no account or auth
+needed). Agile rates are applied by time window. For Intelligent Octopus Go,
+Ohme smart-charge slots are billed at the tariff's cheaper rate even when Ohme
+schedules them outside the normal overnight window. Enabled only when
+``OCTOPUS_PRODUCT_CODE`` and ``OCTOPUS_REGION`` are set; otherwise every call is
+a no-op, mirroring the graceful-degradation pattern used by ntfy/db. Failures
+return None and are swallowed so the tariff card simply hides.
 """
 
 from __future__ import annotations
@@ -41,17 +43,23 @@ class PricedEnergy:
     cost_minor: Optional[int] = None
     coverage: float = 0.0
     energy_wh: int = 0
+    cost_method: str = "actual_agile"
 
 
 def is_enabled() -> bool:
-    """True when an Agile product code and region are configured."""
+    """True when an Octopus product code and region are configured."""
     return bool(config.OCTOPUS_PRODUCT_CODE and config.OCTOPUS_REGION)
+
+
+def is_intelligent_go() -> bool:
+    """True when the configured import product is Intelligent Octopus Go."""
+    return config.OCTOPUS_PRODUCT_CODE.strip().upper().startswith("INTELLI-")
 
 
 def consumption_is_enabled() -> bool:
     """True when an Octopus account (API key + number) is configured.
 
-    Separate from :func:`is_enabled`: the Agile rates use the public API, while
+    Separate from :func:`is_enabled`: tariff rates use the public API, while
     half-hourly household consumption needs an authenticated account call.
     """
     return bool(config.OCTOPUS_API_KEY and config.OCTOPUS_ACCOUNT_NUMBER)
@@ -111,7 +119,7 @@ async def fetch_rates() -> Optional[list[dict]]:
                     "pricePerKwh": round(float(price) / 100, 4),
                 }
     except Exception:
-        logger.warning("Failed to fetch Octopus Agile rates", exc_info=True)
+        logger.warning("Failed to fetch Octopus tariff rates", exc_info=True)
         return None
 
     # The API returns newest-first; present oldest-first (chronological).
@@ -128,17 +136,35 @@ def _parse(ts: str) -> Optional[datetime.datetime]:
 
 
 def cost_for_slots(slots: list, rates: Optional[list[dict]]) -> Optional[float]:
-    """Cost (£) of the allocated charge ``slots`` priced against half-hourly Agile
-    ``rates`` — far more accurate than a flat average when prices swing overnight.
+    """Cost (£) of the allocated Ohme charge ``slots`` against Octopus ``rates``.
 
-    Each slot's energy is assumed drawn at constant power across its span, so the
-    portion falling in a given rate window is ``energy × overlap / slot_duration``.
-    Returns None (so the caller falls back to the average-price estimate) when
-    rates are missing or don't fully cover every slot — e.g. a slot extends past
-    the last published Agile price.
+    Intelligent Go bills every Ohme smart-charge slot at the cheaper tariff rate,
+    including slots scheduled outside the normal overnight window. Other tariffs
+    (notably Agile) are priced by time window: energy is assumed drawn at constant
+    power across a slot, so the portion in a rate window is
+    ``energy × overlap / slot_duration``. Returns None when there is insufficient
+    rate evidence to price the complete plan.
     """
     if not slots or not rates:
         return None
+
+    if is_intelligent_go():
+        prices = [
+            Decimal(str(rate.get("pricePerKwh")))
+            for rate in rates
+            if isinstance(rate.get("pricePerKwh"), (int, float))
+        ]
+        if not prices:
+            return None
+        cheap_rate = min(prices)
+        total_energy = Decimal("0")
+        for slot in slots:
+            if (slot.end - slot.start).total_seconds() > 0:
+                total_energy += Decimal(str(slot.energy))
+        return float(
+            (total_energy * cheap_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        )
+
     windows = []
     for r in rates:
         start = _parse(r.get("from"))
@@ -173,8 +199,26 @@ def cost_for_slots(slots: list, rates: Optional[list[dict]]) -> Optional[float]:
     return float(total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
+def _slot_windows(slots: Optional[list]) -> list[tuple[datetime.datetime, datetime.datetime]]:
+    """Return valid aware start/end pairs from Ohme objects or persisted rows."""
+    windows = []
+    for slot in slots or []:
+        if isinstance(slot, dict):
+            start = _parse(slot.get("start"))
+            end = _parse(slot.get("end"))
+        else:
+            start = getattr(slot, "start", None)
+            end = getattr(slot, "end", None)
+        if isinstance(start, datetime.datetime) and isinstance(end, datetime.datetime) and end > start:
+            windows.append((start, end))
+    return windows
+
+
 def price_energy_buckets(
-    car_by_slot: dict[str, float], rates: Optional[list[dict]]
+    car_by_slot: dict[str, float],
+    rates: Optional[list[dict]],
+    *,
+    smart_slots: Optional[list] = None,
 ) -> PricedEnergy:
     """Price measured half-hour energy buckets against tariff windows.
 
@@ -182,7 +226,10 @@ def price_energy_buckets(
     units (pence for GBP) only at the persistence boundary. A session gets an
     actual total only when every delivered Wh is covered exactly once.
     """
-    result = PricedEnergy()
+    intelligent_go = is_intelligent_go()
+    result = PricedEnergy(
+        cost_method="actual_intelligent_go" if intelligent_go else "actual_agile"
+    )
     windows: list[tuple[datetime.datetime, datetime.datetime, Decimal]] = []
     for rate in rates or []:
         start = _parse(rate.get("from"))
@@ -191,6 +238,8 @@ def price_energy_buckets(
         if start and end and end > start and isinstance(price, (int, float)):
             windows.append((start, end, Decimal(str(price)) * Decimal(100)))
     windows.sort(key=lambda window: window[0])
+    cheap_rate = min((window[2] for window in windows), default=None)
+    intelligent_slots = _slot_windows(smart_slots) if intelligent_go else []
 
     covered_wh = 0
     exact_cost_minor = Decimal("0")
@@ -205,15 +254,26 @@ def price_energy_buckets(
         covered_seconds = Decimal("0")
         bucket_cost = Decimal("0")
         weighted_rate = Decimal("0")
-        for rate_start, rate_end, price_minor in windows:
-            overlap_seconds = (min(end, rate_end) - max(start, rate_start)).total_seconds()
-            if overlap_seconds <= 0:
-                continue
-            overlap = Decimal(str(overlap_seconds))
-            fraction = overlap / span
-            covered_seconds += overlap
-            bucket_cost += energy_kwh * fraction * price_minor
-            weighted_rate += price_minor * fraction
+        is_smart_charge = any(
+            min(end, slot_end) > max(start, slot_start)
+            for slot_start, slot_end in intelligent_slots
+        )
+        if is_smart_charge and cheap_rate is not None:
+            # Octopus bills an Ohme-managed Intelligent Go slot at the off-peak
+            # rate even when its clock time falls in a peak tariff window.
+            covered_seconds = span
+            bucket_cost = energy_kwh * cheap_rate
+            weighted_rate = cheap_rate
+        else:
+            for rate_start, rate_end, price_minor in windows:
+                overlap_seconds = (min(end, rate_end) - max(start, rate_start)).total_seconds()
+                if overlap_seconds <= 0:
+                    continue
+                overlap = Decimal(str(overlap_seconds))
+                fraction = overlap / span
+                covered_seconds += overlap
+                bucket_cost += energy_kwh * fraction * price_minor
+                weighted_rate += price_minor * fraction
         fully_covered = abs(covered_seconds - span) <= Decimal("1")
         cost_minor = (
             int(bucket_cost.quantize(Decimal("1"), rounding=ROUND_HALF_UP))

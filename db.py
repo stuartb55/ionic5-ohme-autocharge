@@ -1030,11 +1030,45 @@ async def get_session_attribution_rows(session_id: int) -> Optional[list[tuple]]
         return None
 
 
+async def get_session_schedule_slots(session_id: int) -> Optional[list[dict[str, Any]]]:
+    """All distinct Ohme slots recorded for a durable charging session."""
+    if _pool is None:
+        return None
+    try:
+        async with _pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT slots FROM schedule_snapshots WHERE session_id = %s "
+                "ORDER BY revision, recorded_at",
+                (session_id,),
+            )
+            rows = await cur.fetchall()
+        slots: list[dict[str, Any]] = []
+        seen: set[tuple[Any, Any]] = set()
+        for row in rows:
+            for slot in row[0] or []:
+                if not isinstance(slot, dict):
+                    continue
+                key = (slot.get("start"), slot.get("end"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                slots.append(slot)
+        return slots
+    except Exception:
+        logger.warning("Failed to read session schedule slots", exc_info=True)
+        return None
+
+
 async def upsert_tariff_rates(rates: list[dict[str, Any]]) -> None:
     """Persist normalized tariff windows so actual cost is dashboard-independent."""
     if _pool is None or not rates:
         return
-    source = f"octopus_agile:{config.OCTOPUS_PRODUCT_CODE}:{config.OCTOPUS_REGION}"
+    tariff = (
+        "intelligent_go"
+        if config.OCTOPUS_PRODUCT_CODE.strip().upper().startswith("INTELLI-")
+        else "agile"
+    )
+    source = f"octopus_{tariff}:{config.OCTOPUS_PRODUCT_CODE}:{config.OCTOPUS_REGION}"
     params = []
     for rate in rates:
         if not rate.get("from") or not rate.get("to"):
@@ -1142,7 +1176,7 @@ async def record_session_reconciliation(
                 (
                     stored_cost_minor,
                     "GBP" if stored_cost_minor is not None else None,
-                    "actual_agile" if stored_cost_minor is not None else None,
+                    priced.cost_method if stored_cost_minor is not None else None,
                     priced.coverage,
                     priced.energy_wh,
                     delta_wh,

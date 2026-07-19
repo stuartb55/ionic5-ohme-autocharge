@@ -97,6 +97,11 @@ describe('StatusSection projected cost', () => {
     expect(screen.getByText('Estimated cost · Agile')).toBeInTheDocument();
     expect(screen.queryByText('Estimated cost')).not.toBeInTheDocument();
   });
+
+  it('flags an Intelligent Go smart-slot cost', () => {
+    render(<StatusSection status={withCharger({ projectedCost: 0.80, projectedCostMethod: 'intelligent_go' })} />);
+    expect(screen.getByText('Estimated cost · Intelligent Go')).toBeInTheDocument();
+  });
 });
 
 describe('StatusSection driving range', () => {
