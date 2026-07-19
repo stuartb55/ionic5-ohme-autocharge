@@ -2361,7 +2361,12 @@ def test_build_snapshot_prices_intelligent_go_ohme_slots_at_cheaper_rate(monkeyp
     monkeypatch.setattr(config, "OCTOPUS_PRODUCT_CODE", "INTELLI-VAR-24-10-29")
     base = dt.datetime(2026, 6, 13, tzinfo=dt.timezone.utc)
     client = _charging_client()
-    client.slots = [_slot(10.0, base.replace(hour=12))]
+    slot = MagicMock()
+    slot.energy = 10.0
+    slot.start = base.replace(hour=12)
+    slot.end = base.replace(hour=13)
+    slot.to_dict.return_value = {"energy": 10.0}
+    client.slots = [slot]
     store.agile_rates = [
         {
             "from": base.isoformat(),
