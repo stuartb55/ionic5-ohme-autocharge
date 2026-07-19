@@ -6,13 +6,13 @@ import os
 from pathlib import Path
 import sys
 import uuid
-from types import SimpleNamespace
 
 # CI executes this file directly, so add the repository root just as pytest's
 # configured ``pythonpath = .`` does for the unit suite.
 sys.path.insert(0, str(Path(__file__).parents[2]))
 
 import db
+import octopus
 from state import StatusSnapshot
 
 
@@ -87,7 +87,7 @@ async def main() -> None:
     assert completed_id == session_id
     assert repeated_id is None
     interval_end = now + datetime.timedelta(minutes=30)
-    priced = SimpleNamespace(
+    priced = octopus.PricedEnergy(
         energy_wh=7000,
         cost_minor=70,
         coverage=1.0,
@@ -145,6 +145,7 @@ async def main() -> None:
     assert audit is not None
     assert audit["session"]["actualEnergyWh"] == 7000
     assert audit["session"]["actualCostMinor"] == 70
+    assert audit["session"]["costMethod"] == "actual_agile"
     assert audit["session"]["endSocPercent"] == 80
     assert audit["session"]["quality"] == "reconciled"
     assert audit["intervals"][0]["energyWh"] == 7000
