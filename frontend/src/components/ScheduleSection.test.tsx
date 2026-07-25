@@ -14,4 +14,14 @@ describe('ScheduleSection', () => {
     expect(within(summary).getByText('05:00')).toBeInTheDocument();
     expect(within(summary).getByText('22.2 kWh')).toBeInTheDocument();
   });
+
+  it('keeps every charging window visible without a disclosure interaction', () => {
+    const { container } = render(<ScheduleSection schedule={scheduleFixture} />);
+
+    const windows = screen.getByRole('region', { name: 'Charging windows' });
+    expect(within(windows).getByText('01:00 – 03:30')).toBeVisible();
+    expect(within(windows).getByText('04:30 – 05:00')).toBeVisible();
+    expect(within(windows).getByText('Next window')).toBeVisible();
+    expect(container.querySelector('details')).not.toBeInTheDocument();
+  });
 });
