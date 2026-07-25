@@ -31,7 +31,7 @@ export function ScheduleSection({ schedule }: { schedule: ScheduleResponse }) {
       <header>
         <div>
           <p className="eyebrow">Smart schedule</p>
-          <h2 id="schedule-heading">Tonight&apos;s plan</h2>
+          <h2 id="schedule-heading">Tonight&apos;s charging plan</h2>
         </div>
         {schedule.nextSlotStart && (
           <span className="badge plugged_in">
@@ -59,22 +59,31 @@ export function ScheduleSection({ schedule }: { schedule: ScheduleResponse }) {
               <strong>{formatKwh(totalEnergy)}</strong>
             </div>
           </div>
+          <section className="slot-plan" aria-labelledby="charging-windows-heading">
+            <header>
+              <h3 id="charging-windows-heading">Charging windows</h3>
+              <span>{slots.length} {slots.length === 1 ? 'window' : 'windows'}</span>
+            </header>
+            <ol className="slot-list">
+              {slots.map((slot) => {
+                const isNext = slot.start === schedule.nextSlotStart;
+                return (
+                  <li className={`slot-row${isNext ? ' next' : ''}`} key={slot.start}>
+                    <span className="time">
+                      <strong>
+                        {formatTime(slot.start, schedule.timezone)} – {formatTime(slot.end, schedule.timezone)}
+                      </strong>
+                      {isNext && <small>Next window</small>}
+                    </span>
+                    <span className="detail">
+                      {formatKwh(slot.energy)} · {formatPower(slot.power * 1000)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ol>
+          </section>
           <ScheduleTimeline slots={slots} now={new Date(now)} timeZone={schedule.timezone} />
-          <details className="slot-details">
-            <summary>{slots.length} charging {slots.length === 1 ? 'window' : 'windows'}</summary>
-            <div className="slot-list">
-              {slots.map((slot) => (
-                <div className="slot-row" key={slot.start}>
-                  <span className="time">
-                    {formatTime(slot.start, schedule.timezone)} – {formatTime(slot.end, schedule.timezone)}
-                  </span>
-                  <span className="detail">
-                    {formatKwh(slot.energy)} · {formatPower(slot.power * 1000)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </details>
         </>
       ) : (
         <p className="empty">

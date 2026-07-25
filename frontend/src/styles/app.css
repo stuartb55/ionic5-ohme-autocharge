@@ -1062,8 +1062,15 @@ body {
   background:
     linear-gradient(160deg, color-mix(in srgb, var(--brand-soft) 48%, transparent), transparent 45%),
     var(--surface);
+  border-color: color-mix(in srgb, var(--brand) 30%, var(--border));
+  border-radius: var(--radius-lg);
+  box-shadow: 0 1px 2px rgba(18, 32, 29, 0.04), 0 18px 44px rgba(15, 118, 110, 0.08);
 }
 .schedule-card > header { align-items: flex-start; }
+.schedule-card > header h2 {
+  font-size: 1.25rem;
+  letter-spacing: -0.025em;
+}
 .timeline {
   width: 100%;
 }
@@ -1112,19 +1119,38 @@ body {
 .schedule-summary span,
 .schedule-summary small { color: var(--text-muted); font-size: 0.67rem; }
 .schedule-summary strong { font-size: 1.03rem; font-variant-numeric: tabular-nums; }
-.slot-details { margin-top: var(--space-4); }
-.slot-details summary {
+.slot-plan {
+  background: color-mix(in srgb, var(--brand-soft) 36%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--brand) 22%, var(--border));
+  border-radius: var(--radius);
+  margin-bottom: var(--space-5);
+  padding: var(--space-4);
+}
+.slot-plan > header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.slot-plan h3 {
+  font-size: 0.95rem;
+  margin: 0;
+}
+.slot-plan > header > span {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
   color: var(--text-muted);
-  cursor: pointer;
-  font-size: 0.82rem;
-  font-weight: 600;
-  min-height: 44px;
-  padding: var(--space-3) 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 3px 9px;
 }
 .slot-list {
-  margin-top: var(--space-4);
   display: grid;
   gap: var(--space-2);
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
 }
 .slot-row {
   display: flex;
@@ -1136,7 +1162,25 @@ body {
   border-radius: var(--radius-sm);
   font-size: 0.9rem;
 }
-.slot-row .time { font-weight: 600; font-variant-numeric: tabular-nums; }
+.slot-row.next {
+  border-color: color-mix(in srgb, var(--brand) 42%, var(--border));
+  box-shadow: inset 3px 0 0 var(--brand);
+}
+.slot-row .time {
+  display: grid;
+  font-variant-numeric: tabular-nums;
+}
+.slot-row .time strong {
+  font-size: 1rem;
+  font-weight: 720;
+}
+.slot-row .time small {
+  color: var(--brand);
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
 .slot-row .detail { color: var(--text-muted); }
 
 /* --- recent sessions (Postgres history) --- */
