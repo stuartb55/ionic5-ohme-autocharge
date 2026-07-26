@@ -38,6 +38,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {
   server.resetHandlers();
   window.localStorage.clear();
+  window.history.replaceState(null, '', '/');
   delete document.documentElement.dataset.theme;
 });
 afterAll(() => server.close());

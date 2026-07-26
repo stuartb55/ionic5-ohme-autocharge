@@ -332,22 +332,60 @@ async def get_session_id_by_key(session_key: str | None) -> int | None:
         return None
 
 
-async def get_recent_sessions(limit: int) -> list[dict[str, Any]] | None:
+_SESSION_REVIEW_FILTERS = {
+    "missing_energy": (
+        "completed_at IS NOT NULL AND action = 'configured' "
+        "AND actual_energy_wh IS NULL"
+    ),
+    "missing_cost": (
+        "completed_at IS NOT NULL AND action = 'configured' "
+        "AND actual_energy_wh IS NOT NULL AND actual_cost_minor IS NULL"
+    ),
+    "any": (
+        "completed_at IS NOT NULL AND action = 'configured' AND ("
+        "actual_energy_wh IS NULL OR "
+        "(actual_energy_wh IS NOT NULL AND actual_cost_minor IS NULL))"
+    ),
+}
+
+
+def _session_review_issues(row: tuple[Any, ...]) -> list[str]:
+    """Return the concrete completeness gaps represented by a session row."""
+    if row[15] is None or row[6] != "configured":
+        return []
+    if row[9] is None:
+        return ["missing_energy"]
+    if row[10] is None:
+        return ["missing_cost"]
+    return []
+
+
+async def get_recent_sessions(
+    limit: int, review: str | None = None
+) -> list[dict[str, Any]] | None:
     """Return the most recent charge sessions, newest first.
 
     Returns None when persistence is disabled or the read fails, so the API
     can distinguish "history feature unavailable" from "no sessions yet".
+    ``review`` optionally restricts the result to the exact completeness gaps
+    counted by :func:`get_data_quality_summary`.
     """
     if _pool is None:
         return None
     try:
         async with _pool.connection() as conn:
+            review_clause = (
+                f"WHERE {_SESSION_REVIEW_FILTERS[review]} "
+                if review is not None
+                else ""
+            )
             cur = await conn.execute(
                 "SELECT id, plugged_in_at, vehicle_name, soc_percent, target_percent, "
                 "topup_percent, action, odometer_miles, soh_percent, actual_energy_wh, "
                 "actual_cost_minor, cost_currency, cost_method, tariff_coverage, "
                 "quality_status, completed_at FROM charge_sessions "
-                "ORDER BY plugged_in_at DESC LIMIT %s",
+                + review_clause
+                + "ORDER BY plugged_in_at DESC LIMIT %s",
                 (limit,),
             )
             rows = await cur.fetchall()
@@ -371,6 +409,7 @@ async def get_recent_sessions(limit: int) -> list[dict[str, Any]] | None:
                 "tariffCoverage": row[13],
                 "quality": row[14],
                 "completedAt": row[15].isoformat() if row[15] else None,
+                "reviewIssues": _session_review_issues(row),
             }
             for row in rows
         ]

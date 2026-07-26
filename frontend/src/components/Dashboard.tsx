@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { usePolling } from '../api/usePolling';
 import { useNow } from '../hooks/useNow';
@@ -15,7 +15,13 @@ import { StatisticsSection } from './StatisticsSection';
 import { StatusSection } from './StatusSection';
 import { TariffSection } from './TariffSection';
 import { ThemeToggle } from './ThemeToggle';
-import type { ApplyStatus, NotificationPreferences, PersistenceStatus } from '../api/types';
+import { dataQualityStatusLabel } from '../utils/dataQuality';
+import type {
+  ApplyStatus,
+  NotificationPreferences,
+  PersistenceStatus,
+  SessionReviewFilter,
+} from '../api/types';
 
 const STATUS_INTERVAL = 15_000;
 const SCHEDULE_INTERVAL = 30_000;
@@ -115,6 +121,10 @@ export function Dashboard() {
   const [days, setDays] = useState(7);
   const [mutationWarning, setMutationWarning] = useState<string | null>(null);
   const [version, setVersion] = useState<string | null>(null);
+  const [sessionReview, setSessionReview] = useState<SessionReviewFilter | null>(null);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const diagnosticsAutoOpened = useRef(false);
+  const historyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -131,8 +141,12 @@ export function Dashboard() {
   const schedule = usePolling(api.getSchedule, SCHEDULE_INTERVAL);
   const statsFetcher = useCallback((signal: AbortSignal) => api.getStatistics(days, signal), [days]);
   const stats = usePolling(statsFetcher, STATS_INTERVAL, [days]);
-  const sessionsFetcher = useCallback((signal: AbortSignal) => api.getSessions(8, signal), []);
-  const sessions = usePolling(sessionsFetcher, SESSIONS_INTERVAL);
+  const sessionsFetcher = useCallback(
+    (signal: AbortSignal) =>
+      api.getSessions(sessionReview ? 50 : 8, signal, sessionReview ?? undefined),
+    [sessionReview],
+  );
+  const sessions = usePolling(sessionsFetcher, SESSIONS_INTERVAL, [sessionReview]);
   const tariff = usePolling(api.getTariff, TARIFF_INTERVAL);
   const sohFetcher = useCallback((signal: AbortSignal) => api.getSohHistory(90, signal), []);
   const soh = usePolling(sohFetcher, SOH_INTERVAL);
@@ -143,6 +157,46 @@ export function Dashboard() {
   );
   const energy = usePolling(energyFetcher, ENERGY_INTERVAL, [energyDate]);
   const quality = usePolling(api.getDataQuality, QUALITY_INTERVAL);
+
+  useEffect(() => {
+    if (
+      quality.data?.persistenceAvailable
+      && quality.data.status === 'attention'
+      && !diagnosticsAutoOpened.current
+    ) {
+      diagnosticsAutoOpened.current = true;
+      setDiagnosticsOpen(true);
+    }
+  }, [quality.data?.persistenceAvailable, quality.data?.status]);
+
+  const scrollToHistory = useCallback((moveFocus: boolean) => {
+    const target = historyRef.current;
+    if (!target) return;
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    target.scrollIntoView?.({
+      behavior: reduceMotion ? 'auto' : 'smooth',
+      block: 'start',
+    });
+    if (moveFocus) target.focus({ preventScroll: true });
+  }, []);
+
+  const handleReviewSessions = useCallback(
+    (filter: SessionReviewFilter) => {
+      setSessionReview(filter);
+      window.history.replaceState(null, '', '#history');
+      window.requestAnimationFrame(() => scrollToHistory(true));
+    },
+    [scrollToHistory],
+  );
+
+  useEffect(() => {
+    if (
+      sessions.data?.enabled
+      && (window.location.hash === '#sessions-heading' || window.location.hash === '#history')
+    ) {
+      window.requestAnimationFrame(() => scrollToHistory(false));
+    }
+  }, [scrollToHistory, sessions.data?.enabled]);
 
   const { refetch: refetchStatus } = status;
   const { refetch: refetchSchedule } = schedule;
@@ -223,6 +277,13 @@ export function Dashboard() {
   const degraded = Boolean(status.error || status.data?.lastError);
   const lastPolled = status.data?.updatedAt ? new Date(status.data.updatedAt) : null;
   const pollMs = (status.data?.config.pollIntervalSeconds ?? 180) * 1_000;
+  const reviewTotal = sessionReview && quality.data?.sessions
+    ? sessionReview === 'missing_energy'
+      ? quality.data.sessions.missingActualEnergy
+      : sessionReview === 'missing_cost'
+        ? quality.data.sessions.missingActualCost
+        : quality.data.sessions.missingActualEnergy + quality.data.sessions.missingActualCost
+    : 0;
 
   return (
     <div className="app">
@@ -316,19 +377,36 @@ export function Dashboard() {
           <SectionSkeleton height={360} />
         )}
 
-        <div className="section-heading" id="history">
+        <div
+          className="section-heading history-heading"
+          id="history"
+          ref={historyRef}
+          tabIndex={-1}
+        >
           <div>
             <p className="eyebrow">History &amp; trends</p>
-            <h2>Recent charging activity</h2>
+            <h2 id="history-heading">
+              {sessionReview ? 'Charging sessions needing attention' : 'Recent charging activity'}
+            </h2>
           </div>
-          <p>Open a session when you need the underlying measurements.</p>
+          <p>
+            {sessionReview
+              ? 'Open a session to inspect the missing measurement and its audit trail.'
+              : 'Open a session when you need the underlying measurements.'}
+          </p>
         </div>
 
         <div className="dashboard-secondary">
           {sessions.data ? (
             <div className="data-block history-block">
               {sessions.error && <CachedNotice>History update failed — showing saved sessions.</CachedNotice>}
-              <SessionsSection data={sessions.data} />
+              <SessionsSection
+                key={sessionReview ?? 'recent'}
+                data={sessions.data}
+                reviewFilter={sessionReview}
+                reviewTotal={reviewTotal}
+                onClearReview={() => setSessionReview(null)}
+              />
             </div>
           ) : sessions.error ? (
             <SectionError message="Couldn’t load recent sessions." onRetry={refetchSessions} />
@@ -360,18 +438,28 @@ export function Dashboard() {
         </div>
 
         {quality.data?.persistenceAvailable && (
-          <details className="diagnostics" open={quality.data.status === 'attention' || undefined}>
+          <details
+            className="diagnostics"
+            open={diagnosticsOpen}
+            onToggle={(event) => setDiagnosticsOpen(event.currentTarget.open)}
+          >
             <summary>
               <span>
                 <strong>Diagnostics &amp; data checks</strong>
-                <small>Technical completeness and ingestion status</small>
+                <small>Checks behind session history, costs and energy reporting</small>
               </span>
-              <span className={`quality-summary ${quality.data.status}`}>
-                {quality.data.status === 'ok' ? 'All checks clear' : 'Review needed'}
+              <span className="diagnostics-summary-meta">
+                <span className={`quality-summary ${quality.data.status}`}>
+                  {dataQualityStatusLabel(quality.data)}
+                </span>
+                <span className="diagnostics-chevron" aria-hidden="true">⌄</span>
               </span>
             </summary>
             {quality.error && <CachedNotice>Diagnostics update failed — showing the previous checks.</CachedNotice>}
-            <DataQualitySection data={quality.data} />
+            <DataQualitySection
+              data={quality.data}
+              onReviewSessions={handleReviewSessions}
+            />
           </details>
         )}
       </main>

@@ -189,10 +189,12 @@ def test_data_quality_reports_unavailable_without_persistence(client):
     with (
         patch("db.get_data_quality_summary", new=AsyncMock(return_value=None)),
         patch("db.is_available", return_value=False),
+        patch("octopus.consumption_is_enabled", return_value=False),
     ):
         body = client.get("/api/data-quality").json()
     assert body["status"] == "unavailable"
     assert body["persistenceAvailable"] is False
+    assert body["consumptionConfigured"] is False
     assert body["sessions"] is None
 
 
@@ -344,12 +346,37 @@ def test_data_quality_flags_only_applicable_completeness_problems(client):
     with (
         patch("db.get_data_quality_summary", new=AsyncMock(return_value=summary)),
         patch("octopus.is_enabled", return_value=False),
+        patch("octopus.consumption_is_enabled", return_value=False),
     ):
         body = client.get("/api/data-quality").json()
     assert body["status"] == "attention"
     assert body["actualCostExpected"] is False
+    assert body["consumptionConfigured"] is False
     assert body["sessions"]["missingActualEnergy"] == 1
     assert body["consumption"]["uncertainLast30d"] == 3
+
+
+def test_data_quality_ignores_consumption_gaps_when_integration_is_disabled(client):
+    summary = {
+        "sessions": {
+            "total": 3,
+            "completed": 3,
+            "missingActualEnergy": 0,
+            "missingActualCost": 0,
+        },
+        "telemetry": {"unlinkedLast24h": 0},
+        "consumption": {"uncertainLast30d": 4, "ingestedThrough": None},
+        "daily": {"completeThrough": dt.date(2026, 7, 9)},
+    }
+    with (
+        patch("db.get_data_quality_summary", new=AsyncMock(return_value=summary)),
+        patch("octopus.is_enabled", return_value=False),
+        patch("octopus.consumption_is_enabled", return_value=False),
+    ):
+        body = client.get("/api/data-quality").json()
+
+    assert body["status"] == "ok"
+    assert body["consumptionConfigured"] is False
 
 
 def test_status_reflects_snapshot(client):
@@ -903,7 +930,7 @@ def test_refresh_502_on_upstream_error(client):
 def test_sessions_disabled_when_persistence_off(client):
     with patch("db.get_recent_sessions", new=AsyncMock(return_value=None)):
         body = client.get("/api/sessions").json()
-    assert body == {"enabled": False, "sessions": []}
+    assert body == {"enabled": False, "review": None, "sessions": []}
 
 
 def test_sessions_returns_rows_and_passes_limit(client):
@@ -914,13 +941,23 @@ def test_sessions_returns_rows_and_passes_limit(client):
         body = client.get("/api/sessions?limit=5").json()
 
     assert body["enabled"] is True
+    assert body["review"] is None
     assert body["sessions"] == rows
-    mock_get.assert_awaited_once_with(5)
+    mock_get.assert_awaited_once_with(5, None)
+
+
+def test_sessions_filters_records_needing_cost_review(client):
+    with patch("db.get_recent_sessions", new=AsyncMock(return_value=[])) as mock_get:
+        body = client.get("/api/sessions?limit=50&review=missing_cost").json()
+
+    assert body == {"enabled": True, "review": "missing_cost", "sessions": []}
+    mock_get.assert_awaited_once_with(50, "missing_cost")
 
 
 def test_sessions_validates_limit(client):
     assert client.get("/api/sessions?limit=0").status_code == 422
     assert client.get("/api/sessions?limit=100").status_code == 422
+    assert client.get("/api/sessions?review=unknown").status_code == 422
 
 
 def test_sessions_export_404_when_persistence_off(client):

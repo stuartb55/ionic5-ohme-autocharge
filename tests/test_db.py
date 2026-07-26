@@ -417,6 +417,7 @@ async def test_get_recent_sessions_maps_rows(fake_pool):
             "tariffCoverage": 1.0,
             "quality": "reconciled",
             "completedAt": completed.isoformat(),
+            "reviewIssues": [],
         },
         {
             "id": 2,
@@ -435,8 +436,30 @@ async def test_get_recent_sessions_maps_rows(fake_pool):
             "tariffCoverage": None,
             "quality": "validated",
             "completedAt": None,
+            "reviewIssues": [],
         },
     ]
+
+
+@pytest.mark.parametrize(
+    ("review", "clause"),
+    [
+        ("missing_energy", "actual_energy_wh IS NULL"),
+        ("missing_cost", "actual_cost_minor IS NULL"),
+        ("any", "actual_energy_wh IS NULL OR"),
+    ],
+)
+async def test_get_recent_sessions_filters_reviewable_rows(fake_pool, review, clause):
+    conn, cursor = fake_pool
+    cursor.rows = []
+
+    assert await db.get_recent_sessions(50, review) == []
+
+    sql, params = conn.executed[0]
+    assert "completed_at IS NOT NULL" in sql
+    assert "action = 'configured'" in sql
+    assert clause in sql
+    assert params == (50,)
 
 
 async def test_get_all_sessions_orders_chronologically_unbounded(fake_pool):

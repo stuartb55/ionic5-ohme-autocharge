@@ -1337,6 +1337,7 @@ async def get_data_quality() -> DataQualityResponseModel:
     """Read-only completeness counters for operations and alerting."""
     generated_at = datetime.datetime.now(datetime.timezone.utc)
     cache_available = _summary_cache["value"] is not None
+    consumption_configured = octopus.consumption_is_enabled()
     cache_age = (
         max(0, round(time.time() - _summary_cache["at"])) if cache_available else None
     )
@@ -1347,6 +1348,7 @@ async def get_data_quality() -> DataQualityResponseModel:
             generatedAt=generated_at,
             persistenceAvailable=db.is_available(),
             actualCostExpected=octopus.is_enabled(),
+            consumptionConfigured=consumption_configured,
             sessions=None,
             telemetry=None,
             consumption=None,
@@ -1357,13 +1359,14 @@ async def get_data_quality() -> DataQualityResponseModel:
         summary["sessions"]["missingActualEnergy"] > 0
         or (octopus.is_enabled() and summary["sessions"]["missingActualCost"] > 0)
         or summary["telemetry"]["unlinkedLast24h"] > 0
-        or summary["consumption"]["uncertainLast30d"] > 0
+        or (consumption_configured and summary["consumption"]["uncertainLast30d"] > 0)
     )
     return DataQualityResponseModel(
         status="attention" if needs_attention else "ok",
         generatedAt=generated_at,
         persistenceAvailable=True,
         actualCostExpected=octopus.is_enabled(),
+        consumptionConfigured=consumption_configured,
         sessions=summary["sessions"],
         telemetry=summary["telemetry"],
         consumption=summary["consumption"],
@@ -1873,16 +1876,23 @@ async def get_energy_usage(date: str | None = Query(default=None)) -> JSONRespon
 
 
 @app.get("/api/sessions", response_model=SessionsResponseModel)
-async def get_sessions(limit: int = Query(default=10, ge=1, le=50)) -> JSONResponse:
+async def get_sessions(
+    limit: int = Query(default=10, ge=1, le=50),
+    review: Literal["missing_energy", "missing_cost", "any"] | None = Query(
+        default=None
+    ),
+) -> JSONResponse:
     """Recent plug-in sessions from the Postgres history.
 
     ``enabled`` is false when persistence is off (or unreadable) — the
     dashboard hides the history card entirely rather than showing an empty one.
+    ``review`` narrows the rows to the completeness gaps surfaced by
+    ``/api/data-quality`` so its drill-down always lands on affected records.
     """
-    sessions = await db.get_recent_sessions(limit)
+    sessions = await db.get_recent_sessions(limit, review)
     if sessions is None:
-        return JSONResponse({"enabled": False, "sessions": []})
-    return JSONResponse({"enabled": True, "sessions": sessions})
+        return JSONResponse({"enabled": False, "review": review, "sessions": []})
+    return JSONResponse({"enabled": True, "review": review, "sessions": sessions})
 
 
 # Column order for the export — kept in one place so CSV header and JSON keys

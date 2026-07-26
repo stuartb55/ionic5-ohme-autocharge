@@ -8,6 +8,7 @@ import type {
   ReadyByUpdateResponse,
   RefreshResponse,
   ScheduleResponse,
+  SessionReviewFilter,
   SessionsResponse,
   SessionAuditResponse,
   SessionTelemetryResponse,
@@ -105,8 +106,15 @@ export const api = {
   getSchedule: (signal?: AbortSignal) => getJson<ScheduleResponse>('/api/schedule', signal),
   getStatistics: (days = 7, signal?: AbortSignal) =>
     getJson<StatisticsResponse>(`/api/statistics?days=${days}`, signal),
-  getSessions: (limit = 8, signal?: AbortSignal) =>
-    getJson<SessionsResponse>(`/api/sessions?limit=${limit}`, signal),
+  getSessions: (
+    limit = 8,
+    signal?: AbortSignal,
+    review?: SessionReviewFilter,
+  ) =>
+    getJson<SessionsResponse>(
+      `/api/sessions?limit=${limit}${review ? `&review=${review}` : ''}`,
+      signal,
+    ),
   getSohHistory: (limit = 90, signal?: AbortSignal) =>
     getJson<SohHistoryResponse>(`/api/soh-history?limit=${limit}`, signal),
   // Per-poll charge curve (SOC + power over time) for one session.
