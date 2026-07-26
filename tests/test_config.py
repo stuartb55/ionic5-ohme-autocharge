@@ -10,7 +10,13 @@ import sys
 
 import pytest
 
-REQUIRED = ["HYUNDAI_USERNAME", "HYUNDAI_PASSWORD", "HYUNDAI_PIN", "OHME_EMAIL", "OHME_PASSWORD"]
+REQUIRED = [
+    "HYUNDAI_USERNAME",
+    "HYUNDAI_PASSWORD",
+    "HYUNDAI_PIN",
+    "OHME_EMAIL",
+    "OHME_PASSWORD",
+]
 
 
 @pytest.fixture

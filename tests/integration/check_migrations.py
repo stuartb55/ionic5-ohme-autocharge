@@ -3,9 +3,10 @@
 import os
 from pathlib import Path
 
-from alembic import command
-from alembic.config import Config
 import psycopg
+from alembic.config import Config
+
+from alembic import command
 
 
 def migration_config(url: str) -> Config:
@@ -41,7 +42,9 @@ def main() -> None:
             "SELECT energy_wh, savings_minor, cost_minor FROM daily_stats "
             "WHERE stat_date = '2026-07-01'"
         ).fetchone()
-        cursor_table = conn.execute("SELECT to_regclass('public.ingestion_cursors')").fetchone()[0]
+        cursor_table = conn.execute(
+            "SELECT to_regclass('public.ingestion_cursors')"
+        ).fetchone()[0]
         nullable = conn.execute(
             "SELECT COUNT(*) FROM information_schema.columns "
             "WHERE table_name = 'daily_stats' "

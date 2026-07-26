@@ -11,8 +11,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-import db
 import config
+import db
 from state import StatusSnapshot
 
 
@@ -22,7 +22,9 @@ def test_run_migrations_uses_psycopg_driver(monkeypatch):
         db._run_migrations()
     cfg, revision = upgrade.call_args.args
     assert revision == "head"
-    assert cfg.get_main_option("sqlalchemy.url") == "postgresql+psycopg://user:p%25@db/app"
+    assert (
+        cfg.get_main_option("sqlalchemy.url") == "postgresql+psycopg://user:p%25@db/app"
+    )
     assert cfg.get_main_option("script_location").endswith("/alembic")
 
 
@@ -118,14 +120,24 @@ def fake_pool():
 
 async def test_writes_are_noops_when_disabled():
     db._pool = None
-    assert await db.record_session(
-        vehicle_name="EV", soc_percent=50, target_percent=80, topup_percent=30, action="configured"
-    ) is None
-    assert await db.close_session(
-        "session-1", actual_energy_wh=1000, end_soc_percent=80
-    ) is False
+    assert (
+        await db.record_session(
+            vehicle_name="EV",
+            soc_percent=50,
+            target_percent=80,
+            topup_percent=30,
+            action="configured",
+        )
+        is None
+    )
+    assert (
+        await db.close_session("session-1", actual_energy_wh=1000, end_soc_percent=80)
+        is False
+    )
     # None of these should raise.
-    await db.record_schedule(session_id=None, slots=[], next_slot_start=None, next_slot_end=None)
+    await db.record_schedule(
+        session_id=None, slots=[], next_slot_start=None, next_slot_end=None
+    )
     await db.record_telemetry(StatusSnapshot())
     await db.record_daily_stats([{"date": "2026-06-01", "energyKwh": 1}], "GBP")
 
@@ -168,7 +180,10 @@ async def test_init_closes_partially_opened_pool(monkeypatch):
     pool.open = AsyncMock(side_effect=RuntimeError("down"))
     pool.close = AsyncMock()
     db._pool = None
-    with patch("db._run_migrations"), patch("db.AsyncConnectionPool", return_value=pool):
+    with (
+        patch("db._run_migrations"),
+        patch("db.AsyncConnectionPool", return_value=pool),
+    ):
         await db.init()
     pool.close.assert_awaited_once()
     assert db.is_available() is False
@@ -180,16 +195,32 @@ async def test_init_closes_partially_opened_pool(monkeypatch):
 async def test_record_session_inserts_and_returns_id(fake_pool):
     conn, _ = fake_pool
     session_id = await db.record_session(
-        vehicle_name="IONIQ 5", soc_percent=62, target_percent=80, topup_percent=18,
-        action="configured", odometer_miles=12450, soh_percent=98,
+        vehicle_name="IONIQ 5",
+        soc_percent=62,
+        target_percent=80,
+        topup_percent=18,
+        action="configured",
+        odometer_miles=12450,
+        soh_percent=98,
     )
     assert session_id == 42
     sql, params = conn.executed[0]
     assert "INSERT INTO charge_sessions" in sql
     assert "RETURNING id" in sql
     assert params == (
-        "IONIQ 5", 62, 80, 18, "configured", 12450, 98,
-        None, None, None, None, None, None,
+        "IONIQ 5",
+        62,
+        80,
+        18,
+        "configured",
+        12450,
+        98,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
     )
 
 
@@ -198,24 +229,40 @@ async def test_record_session_uses_idempotency_key_and_identity(fake_pool):
 
     conn, _ = fake_pool
     observed = dt.datetime(2026, 6, 1, 20, 0, tzinfo=dt.timezone.utc)
-    assert await db.record_session(
-        vehicle_name="IONIQ 5", soc_percent=62, target_percent=80, topup_percent=18,
-        action="configured", session_key="session-1", vehicle_id="vehicle-1",
-        vin="VIN123", charger_id="charger-1", source_observed_at=observed,
-        plugged_in_at=observed,
-    ) == 42
+    assert (
+        await db.record_session(
+            vehicle_name="IONIQ 5",
+            soc_percent=62,
+            target_percent=80,
+            topup_percent=18,
+            action="configured",
+            session_key="session-1",
+            vehicle_id="vehicle-1",
+            vin="VIN123",
+            charger_id="charger-1",
+            source_observed_at=observed,
+            plugged_in_at=observed,
+        )
+        == 42
+    )
     sql, params = conn.executed[0]
     assert "ON CONFLICT (session_key)" in sql
     assert params[7:] == (
-        "session-1", "vehicle-1", "VIN123", "charger-1", observed, observed,
+        "session-1",
+        "vehicle-1",
+        "VIN123",
+        "charger-1",
+        observed,
+        observed,
     )
 
 
 async def test_close_session_is_idempotent_update(fake_pool):
     conn, _ = fake_pool
-    assert await db.close_session(
-        "session-1", actual_energy_wh=4321.4, end_soc_percent=80
-    ) is True
+    assert (
+        await db.close_session("session-1", actual_energy_wh=4321.4, end_soc_percent=80)
+        is True
+    )
     sql, params = conn.executed[0]
     assert "UPDATE charge_sessions" in sql
     assert "COALESCE(unplugged_at, now())" in sql
@@ -228,9 +275,12 @@ async def test_close_session_is_idempotent_update(fake_pool):
 
 async def test_complete_session_records_final_measurements(fake_pool):
     conn, _ = fake_pool
-    assert await db.complete_session(
-        "session-1", actual_energy_wh=4321.4, end_soc_percent=80
-    ) == 42
+    assert (
+        await db.complete_session(
+            "session-1", actual_energy_wh=4321.4, end_soc_percent=80
+        )
+        == 42
+    )
     sql, params = conn.executed[0]
     assert "completed_at = COALESCE(session.completed_at, now())" in sql
     assert "actual_energy_wh = GREATEST(session.actual_energy_wh, %s)" in sql
@@ -246,9 +296,12 @@ async def test_complete_session_repeat_has_no_single_shot_work(fake_pool):
     # PostgreSQL still applies the monotonic idempotent update, but returns null
     # once completed_at was already present.
     cursor._row = (None,)
-    assert await db.complete_session(
-        "session-1", actual_energy_wh=4321.4, end_soc_percent=80
-    ) is None
+    assert (
+        await db.complete_session(
+            "session-1", actual_energy_wh=4321.4, end_soc_percent=80
+        )
+        is None
+    )
 
 
 async def test_record_session_event_wraps_details_as_jsonb(fake_pool):
@@ -262,9 +315,10 @@ async def test_record_session_event_wraps_details_as_jsonb(fake_pool):
 
 async def test_initial_session_event_is_idempotent_and_acknowledged(fake_pool):
     conn, _ = fake_pool
-    assert await db.record_initial_session_event(
-        42, "target_configured", {"target": 80}
-    ) is True
+    assert (
+        await db.record_initial_session_event(42, "target_configured", {"target": 80})
+        is True
+    )
     sql, params = conn.executed[0]
     assert "WHERE NOT EXISTS" in sql
     assert params[:2] == (42, "target_configured")
@@ -282,7 +336,11 @@ async def test_record_session_swallows_errors():
     db._pool = _BoomPool()
     try:
         result = await db.record_session(
-            vehicle_name="EV", soc_percent=1, target_percent=2, topup_percent=1, action="configured"
+            vehicle_name="EV",
+            soc_percent=1,
+            target_percent=2,
+            topup_percent=1,
+            action="configured",
         )
     finally:
         db._pool = None
@@ -298,8 +356,42 @@ async def test_get_recent_sessions_maps_rows(fake_pool):
     conn, cursor = fake_pool
     completed = dt.datetime(2026, 6, 2, 1, 0, tzinfo=dt.timezone.utc)
     cursor.rows = [
-        (3, dt.datetime(2026, 6, 1, 21, 42, tzinfo=dt.timezone.utc), "IONIQ 5", 54, 80, 26, "configured", 12450, 98, 18500, 123, "GBP", "actual_agile", 1.0, "reconciled", completed),
-        (2, None, "IONIQ 5", 85, 80, 0, "skipped_at_target", None, None, None, None, None, None, None, "validated", None),
+        (
+            3,
+            dt.datetime(2026, 6, 1, 21, 42, tzinfo=dt.timezone.utc),
+            "IONIQ 5",
+            54,
+            80,
+            26,
+            "configured",
+            12450,
+            98,
+            18500,
+            123,
+            "GBP",
+            "actual_agile",
+            1.0,
+            "reconciled",
+            completed,
+        ),
+        (
+            2,
+            None,
+            "IONIQ 5",
+            85,
+            80,
+            0,
+            "skipped_at_target",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            "validated",
+            None,
+        ),
     ]
 
     sessions = await db.get_recent_sessions(10)
@@ -352,7 +444,24 @@ async def test_get_all_sessions_orders_chronologically_unbounded(fake_pool):
 
     conn, cursor = fake_pool
     cursor.rows = [
-        (1, dt.datetime(2026, 5, 1, 20, 0, tzinfo=dt.timezone.utc), "IONIQ 5", 40, 80, 40, "configured", 12000, 99, None, None, None, None, None, "validated", None),
+        (
+            1,
+            dt.datetime(2026, 5, 1, 20, 0, tzinfo=dt.timezone.utc),
+            "IONIQ 5",
+            40,
+            80,
+            40,
+            "configured",
+            12000,
+            99,
+            None,
+            None,
+            None,
+            None,
+            None,
+            "validated",
+            None,
+        ),
     ]
 
     sessions = await db.get_all_sessions()
@@ -374,19 +483,66 @@ async def test_get_session_audit_maps_all_provenance():
     observed = dt.datetime(2026, 6, 1, 20, 0, tzinfo=dt.timezone.utc)
     finished = observed + dt.timedelta(hours=3)
     session = (
-        7, "session-7", observed, finished, finished, "IONIQ 5", "car-1", "VIN1",
-        "charger-1", observed, 50, 80, 80, 30, "configured", 12000, 98, 18500,
-        123, "GBP", "actual_agile", 1.0, 18450, 50, "finished", "reconciled",
+        7,
+        "session-7",
+        observed,
+        finished,
+        finished,
+        "IONIQ 5",
+        "car-1",
+        "VIN1",
+        "charger-1",
+        observed,
+        50,
+        80,
+        80,
+        30,
+        "configured",
+        12000,
+        98,
+        18500,
+        123,
+        "GBP",
+        "actual_agile",
+        1.0,
+        18450,
+        50,
+        "finished",
+        "reconciled",
         finished,
     )
-    conn = _SequenceConn([
-        _FakeCursor(row=session),
-        _FakeCursor(rows=[(observed, "plugged_in", {"soc_percent": 50})]),
-        _FakeCursor(rows=[(observed, observed, observed + dt.timedelta(minutes=30),
-                           [{"energy": 3.7}], 1, "initial")]),
-        _FakeCursor(rows=[(observed, observed + dt.timedelta(minutes=30), 3700, 25,
-                           6.75, "GBP", "measured", "ohme_counter")]),
-    ])
+    conn = _SequenceConn(
+        [
+            _FakeCursor(row=session),
+            _FakeCursor(rows=[(observed, "plugged_in", {"soc_percent": 50})]),
+            _FakeCursor(
+                rows=[
+                    (
+                        observed,
+                        observed,
+                        observed + dt.timedelta(minutes=30),
+                        [{"energy": 3.7}],
+                        1,
+                        "initial",
+                    )
+                ]
+            ),
+            _FakeCursor(
+                rows=[
+                    (
+                        observed,
+                        observed + dt.timedelta(minutes=30),
+                        3700,
+                        25,
+                        6.75,
+                        "GBP",
+                        "measured",
+                        "ohme_counter",
+                    )
+                ]
+            ),
+        ]
+    )
     db._pool = _FakePool(conn)
     try:
         audit = await db.get_session_audit(7)
@@ -425,7 +581,9 @@ async def test_get_session_telemetry_maps_points(fake_pool):
     import datetime as dt
 
     conn, cursor = fake_pool
-    cursor._row = (dt.datetime(2026, 6, 1, 20, 0, tzinfo=dt.timezone.utc),)  # session start
+    cursor._row = (
+        dt.datetime(2026, 6, 1, 20, 0, tzinfo=dt.timezone.utc),
+    )  # session start
     cursor.rows = [
         (dt.datetime(2026, 6, 1, 20, 5, tzinfo=dt.timezone.utc), 62, 7400.0, 1500.0),
         (dt.datetime(2026, 6, 1, 20, 35, tzinfo=dt.timezone.utc), 70, 7300.0, 5200.0),
@@ -438,10 +596,18 @@ async def test_get_session_telemetry_maps_points(fake_pool):
     assert "FROM telemetry WHERE session_id = %s" in conn.executed[1][0]
     assert conn.executed[1][1] == (7,)
     assert points == [
-        {"at": "2026-06-01T20:05:00+00:00", "socPercent": 62,
-         "powerWatts": 7400.0, "sessionEnergyKwh": 1.5},
-        {"at": "2026-06-01T20:35:00+00:00", "socPercent": 70,
-         "powerWatts": 7300.0, "sessionEnergyKwh": 5.2},
+        {
+            "at": "2026-06-01T20:05:00+00:00",
+            "socPercent": 62,
+            "powerWatts": 7400.0,
+            "sessionEnergyKwh": 1.5,
+        },
+        {
+            "at": "2026-06-01T20:35:00+00:00",
+            "socPercent": 70,
+            "powerWatts": 7300.0,
+            "sessionEnergyKwh": 5.2,
+        },
     ]
 
 
@@ -512,7 +678,11 @@ async def test_get_recent_sessions_none_on_error():
 
 
 async def test_get_single_vehicle_id_requires_exactly_one_distinct_vehicle():
-    for row, expected in [(("car-1", 1), "car-1"), (("car-1", 2), None), ((None, 0), None)]:
+    for row, expected in [
+        (("car-1", 1), "car-1"),
+        (("car-1", 2), None),
+        ((None, 0), None),
+    ]:
         conn = _FakeConn(_FakeCursor(row=row))
         db._pool = _FakePool(conn)
         try:
@@ -540,7 +710,13 @@ async def test_ingestion_cursor_round_trip_helpers():
 
 async def test_data_quality_summary_maps_aggregate_counts():
     row = (
-        10, 8, 1, 2, 3, 4, dt.date(2026, 7, 8),
+        10,
+        8,
+        1,
+        2,
+        3,
+        4,
+        dt.date(2026, 7, 8),
         dt.datetime(2026, 7, 9, tzinfo=dt.timezone.utc),
     )
     conn = _FakeConn(_FakeCursor(row=row))
@@ -550,7 +726,10 @@ async def test_data_quality_summary_maps_aggregate_counts():
     finally:
         db._pool = None
     assert result["sessions"] == {
-        "total": 10, "completed": 8, "missingActualEnergy": 1, "missingActualCost": 2
+        "total": 10,
+        "completed": 8,
+        "missingActualEnergy": 1,
+        "missingActualCost": 2,
     }
     assert result["telemetry"]["unlinkedLast24h"] == 3
     assert result["consumption"]["uncertainLast30d"] == 4
@@ -565,7 +744,13 @@ async def test_vehicle_driving_metrics_pairs_only_valid_complete_intervals():
         (start, 1000, 10000, 250, "GBP"),  # +100 mi, valid energy + cost
         (start + dt.timedelta(days=2), 1100, 8000, None, None),  # regression: ignored
         (start + dt.timedelta(days=3), 1090, 9000, 300, "GBP"),
-        (start + dt.timedelta(days=5), 1190, None, 400, "GBP"),  # missing energy: ignored
+        (
+            start + dt.timedelta(days=5),
+            1190,
+            None,
+            400,
+            "GBP",
+        ),  # missing energy: ignored
         (end, 1290, 7000, 500, "GBP"),
     ]
     cursor = _FakeCursor(rows=rows)
@@ -598,11 +783,15 @@ async def test_vehicle_driving_metrics_returns_none_without_vehicle_or_intervals
     try:
         start = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
         assert (
-            await db.get_vehicle_driving_metrics(start, start + dt.timedelta(days=1), None)
+            await db.get_vehicle_driving_metrics(
+                start, start + dt.timedelta(days=1), None
+            )
             is None
         )
         assert (
-            await db.get_vehicle_driving_metrics(start, start + dt.timedelta(days=1), "car-1")
+            await db.get_vehicle_driving_metrics(
+                start, start + dt.timedelta(days=1), "car-1"
+            )
             is None
         )
     finally:
@@ -615,7 +804,9 @@ async def test_vehicle_driving_metrics_returns_none_without_vehicle_or_intervals
 async def test_record_schedule_wraps_slots_as_jsonb(fake_pool):
     conn, _ = fake_pool
     slots = [{"start": "01:00", "end": "03:30", "power": 7.4}]
-    await db.record_schedule(session_id=42, slots=slots, next_slot_start=None, next_slot_end=None)
+    await db.record_schedule(
+        session_id=42, slots=slots, next_slot_start=None, next_slot_end=None
+    )
     sql, params = conn.executed[0]
     assert "INSERT INTO schedule_snapshots" in sql
     assert params[0] == 42
@@ -628,12 +819,15 @@ async def test_record_schedule_wraps_slots_as_jsonb(fake_pool):
 async def test_initial_schedule_is_idempotent_and_acknowledged(fake_pool):
     conn, _ = fake_pool
     slots = [{"start": "01:00", "end": "03:30", "power": 7.4}]
-    assert await db.record_initial_schedule(
-        session_id=42,
-        slots=slots,
-        next_slot_start=None,
-        next_slot_end=None,
-    ) is True
+    assert (
+        await db.record_initial_schedule(
+            session_id=42,
+            slots=slots,
+            next_slot_start=None,
+            next_slot_end=None,
+        )
+        is True
+    )
     sql, params = conn.executed[0]
     assert "WHERE NOT EXISTS" in sql
     assert "reason = 'initial'" in sql
@@ -663,8 +857,18 @@ async def test_record_telemetry_maps_snapshot_fields(fake_pool):
     sql, params = conn.executed[0]
     assert "INSERT INTO telemetry" in sql
     assert params == (
-        "IONIQ 5", 62, "charging", True, True, 7400.0, 32.0, 230, 80, 4500.0,
-        42, "session_linked",
+        "IONIQ 5",
+        62,
+        "charging",
+        True,
+        True,
+        7400.0,
+        32.0,
+        230,
+        80,
+        4500.0,
+        42,
+        "session_linked",
     )
 
 
@@ -705,14 +909,23 @@ async def test_record_daily_stats_upserts_each_dated_row(fake_pool):
     _, cursor = fake_pool
     daily = [
         {
-            "date": "2026-06-01", "energyKwh": 18.5, "savings": 3.7,
-            "cost": 2.3, "energyWh": 18501, "savingsMinor": 371,
-            "costMinor": 231, "currency": "GBP", "isComplete": True,
+            "date": "2026-06-01",
+            "energyKwh": 18.5,
+            "savings": 3.7,
+            "cost": 2.3,
+            "energyWh": 18501,
+            "savingsMinor": 371,
+            "costMinor": 231,
+            "currency": "GBP",
+            "isComplete": True,
         },
         {"date": None, "energyKwh": 0, "savings": 0, "cost": 0},  # skipped (no date)
         {
-            "date": "2026-06-02", "energyKwh": 12.0, "savings": 2.1,
-            "cost": 1.4, "isComplete": True,
+            "date": "2026-06-02",
+            "energyKwh": 12.0,
+            "savings": 2.1,
+            "cost": 1.4,
+            "isComplete": True,
         },
     ]
     await db.record_daily_stats(daily, "GBP")
@@ -758,14 +971,39 @@ async def test_get_monthly_report_rows_maps_exact_units_and_sessions():
     start = dt.datetime(2026, 6, 1, tzinfo=dt.timezone.utc)
     end = dt.datetime(2026, 7, 1, tzinfo=dt.timezone.utc)
     updated = start + dt.timedelta(days=2)
-    conn = _SequenceConn([
-        _FakeCursor(rows=[
-            (dt.date(2026, 6, 1), 4200, 80, 50, "GBP", "ohme_summary", True, updated),
-        ]),
-        _FakeCursor(rows=[
-            (7, start, updated, 4100, 49, "GBP", "reconciled", "IONIQ 5", "configured"),
-        ]),
-    ])
+    conn = _SequenceConn(
+        [
+            _FakeCursor(
+                rows=[
+                    (
+                        dt.date(2026, 6, 1),
+                        4200,
+                        80,
+                        50,
+                        "GBP",
+                        "ohme_summary",
+                        True,
+                        updated,
+                    ),
+                ]
+            ),
+            _FakeCursor(
+                rows=[
+                    (
+                        7,
+                        start,
+                        updated,
+                        4100,
+                        49,
+                        "GBP",
+                        "reconciled",
+                        "IONIQ 5",
+                        "configured",
+                    ),
+                ]
+            ),
+        ]
+    )
     db._pool = _FakePool(conn)
     try:
         report = await db.get_monthly_report_rows(start, end)
@@ -796,7 +1034,9 @@ async def test_grid_consumption_helpers_are_noops_when_disabled():
     now = dt.datetime(2026, 6, 1, tzinfo=dt.timezone.utc)
     assert await db.get_telemetry_between(now, now) is None
     assert await db.get_grid_consumption(now, now) is None
-    await db.upsert_grid_consumption([{"start": now.isoformat(), "importKwh": 1}])  # no raise
+    await db.upsert_grid_consumption(
+        [{"start": now.isoformat(), "importKwh": 1}]
+    )  # no raise
 
 
 async def test_get_telemetry_between_maps_rows(fake_pool):
@@ -846,11 +1086,15 @@ async def test_tariff_rate_round_trip_helpers(fake_pool, monkeypatch):
     conn, cursor = fake_pool
     monkeypatch.setattr(config, "OCTOPUS_PRODUCT_CODE", "AGILE-TEST")
     monkeypatch.setattr(config, "OCTOPUS_REGION", "A")
-    await db.upsert_tariff_rates([{
-        "from": "2026-06-01T00:00:00Z",
-        "to": "2026-06-01T00:30:00Z",
-        "pricePerKwh": 0.1234,
-    }])
+    await db.upsert_tariff_rates(
+        [
+            {
+                "from": "2026-06-01T00:00:00Z",
+                "to": "2026-06-01T00:30:00Z",
+                "pricePerKwh": 0.1234,
+            }
+        ]
+    )
     _, params = cursor.executemany_calls[0]
     assert params[0][2] == Decimal("12.3400")
     assert params[0][4] == "octopus_agile:AGILE-TEST:A"
@@ -859,10 +1103,15 @@ async def test_tariff_rate_round_trip_helpers(fake_pool, monkeypatch):
     t1 = t0 + dt.timedelta(minutes=30)
     cursor.rows = [(t0, t1, Decimal("12.34"), "GBP", "octopus_agile:AGILE-TEST:A")]
     rates = await db.get_tariff_rates(t0, t1)
-    assert rates == [{
-        "from": t0.isoformat(), "to": t1.isoformat(), "pricePerKwh": 0.1234,
-        "currency": "GBP", "source": "octopus_agile:AGILE-TEST:A",
-    }]
+    assert rates == [
+        {
+            "from": t0.isoformat(),
+            "to": t1.isoformat(),
+            "pricePerKwh": 0.1234,
+            "currency": "GBP",
+            "source": "octopus_agile:AGILE-TEST:A",
+        }
+    ]
     assert conn.executed[-1][1] == (t0, t1)
 
 
@@ -871,11 +1120,15 @@ async def test_intelligent_go_tariff_rates_have_distinct_source(fake_pool, monke
     monkeypatch.setattr(config, "OCTOPUS_PRODUCT_CODE", "INTELLI-VAR-24-10-29")
     monkeypatch.setattr(config, "OCTOPUS_REGION", "A")
 
-    await db.upsert_tariff_rates([{
-        "from": "2026-06-01T00:00:00Z",
-        "to": "2026-06-01T00:30:00Z",
-        "pricePerKwh": 0.08,
-    }])
+    await db.upsert_tariff_rates(
+        [
+            {
+                "from": "2026-06-01T00:00:00Z",
+                "to": "2026-06-01T00:30:00Z",
+                "pricePerKwh": 0.08,
+            }
+        ]
+    )
 
     assert cursor.executemany_calls[0][1][0][4] == (
         "octopus_intelligent_go:INTELLI-VAR-24-10-29:A"
@@ -884,16 +1137,23 @@ async def test_intelligent_go_tariff_rates_have_distinct_source(fake_pool, monke
 
 async def test_record_session_reconciliation_persists_intervals_and_total(fake_pool):
     import datetime as dt
+
     import octopus
 
     conn, cursor = fake_pool
     t0 = dt.datetime(2026, 6, 1, tzinfo=dt.timezone.utc)
     priced = octopus.PricedEnergy(
-        intervals=[{
-            "start": t0, "end": t0 + dt.timedelta(minutes=30), "energyWh": 1000,
-            "costMinor": 10, "rateMinorPerKwh": 10.0, "currency": "GBP",
-            "quality": "priced",
-        }],
+        intervals=[
+            {
+                "start": t0,
+                "end": t0 + dt.timedelta(minutes=30),
+                "energyWh": 1000,
+                "costMinor": 10,
+                "rateMinorPerKwh": 10.0,
+                "currency": "GBP",
+                "quality": "priced",
+            }
+        ],
         cost_minor=10,
         coverage=1.0,
         energy_wh=1000,
@@ -919,8 +1179,13 @@ async def test_reconciliation_with_energy_mismatch_withholds_actual_cost(fake_po
 async def test_upsert_grid_consumption_inserts_dated_rows(fake_pool):
     _, cursor = fake_pool
     rows = [
-        {"start": "2026-06-01T00:00:00+00:00", "end": "2026-06-01T00:30:00+00:00",
-         "importKwh": 1.5, "carKwh": 1.0, "houseKwh": 0.5},
+        {
+            "start": "2026-06-01T00:00:00+00:00",
+            "end": "2026-06-01T00:30:00+00:00",
+            "importKwh": 1.5,
+            "carKwh": 1.0,
+            "houseKwh": 0.5,
+        },
         {"start": None, "importKwh": 9},  # skipped (no interval start)
     ]
     assert await db.upsert_grid_consumption(rows) is True
@@ -929,7 +1194,15 @@ async def test_upsert_grid_consumption_inserts_dated_rows(fake_pool):
     assert "INSERT INTO grid_consumption" in sql
     assert "ON CONFLICT (interval_start) DO UPDATE" in sql
     assert params == [
-        ("2026-06-01T00:00:00+00:00", "2026-06-01T00:30:00+00:00", 1.5, 1.0, 0.5, 0, "unknown")
+        (
+            "2026-06-01T00:00:00+00:00",
+            "2026-06-01T00:30:00+00:00",
+            1.5,
+            1.0,
+            0.5,
+            0,
+            "unknown",
+        )
     ]
 
 

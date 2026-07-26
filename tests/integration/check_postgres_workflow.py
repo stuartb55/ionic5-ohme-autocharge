@@ -3,9 +3,9 @@
 import asyncio
 import datetime
 import os
-from pathlib import Path
 import sys
 import uuid
+from pathlib import Path
 
 # CI executes this file directly, so add the repository root just as pytest's
 # configured ``pythonpath = .`` does for the unit suite.
@@ -82,8 +82,12 @@ async def main() -> None:
     telemetry = await db.get_session_telemetry(session_id)
     assert telemetry and telemetry[0]["socPercent"] == 50
 
-    completed_id = await db.complete_session(key, actual_energy_wh=7000, end_soc_percent=80)
-    repeated_id = await db.complete_session(key, actual_energy_wh=7000, end_soc_percent=80)
+    completed_id = await db.complete_session(
+        key, actual_energy_wh=7000, end_soc_percent=80
+    )
+    repeated_id = await db.complete_session(
+        key, actual_energy_wh=7000, end_soc_percent=80
+    )
     assert completed_id == session_id
     assert repeated_id is None
     interval_end = now + datetime.timedelta(minutes=30)
@@ -154,8 +158,10 @@ async def main() -> None:
 
     report = await db.get_monthly_report_rows(
         now.replace(day=1, hour=0, minute=0, second=0, microsecond=0),
-        (now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-         + datetime.timedelta(days=32)).replace(day=1),
+        (
+            now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            + datetime.timedelta(days=32)
+        ).replace(day=1),
     )
     assert report is not None
     assert any(row["id"] == session_id for row in report["sessions"])
@@ -175,8 +181,10 @@ async def main() -> None:
     )
     incomplete = await db.get_monthly_report_rows(
         now.replace(day=1, hour=0, minute=0, second=0, microsecond=0),
-        (now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-         + datetime.timedelta(days=32)).replace(day=1),
+        (
+            now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            + datetime.timedelta(days=32)
+        ).replace(day=1),
     )
     assert incomplete is not None
     daily_row = next(row for row in incomplete["daily"] if row["date"] == now.date())

@@ -3,7 +3,9 @@ import datetime
 import threading
 import time
 from unittest.mock import MagicMock, patch
+
 import pytest
+
 import bluelink
 import config
 
@@ -14,10 +16,23 @@ def _mock_manager(vehicles: dict):
     return vm
 
 
-def _mock_vehicle(soc, *, ev_range=None, ev_range_unit=None, odometer=None, odometer_unit=None,
-                  soh=None, is_locked=None, latitude=None, longitude=None,
-                  aux_battery=None, tyre_warn=None, washer_warn=None, key_warn=None,
-                  open_items=None):
+def _mock_vehicle(
+    soc,
+    *,
+    ev_range=None,
+    ev_range_unit=None,
+    odometer=None,
+    odometer_unit=None,
+    soh=None,
+    is_locked=None,
+    latitude=None,
+    longitude=None,
+    aux_battery=None,
+    tyre_warn=None,
+    washer_warn=None,
+    key_warn=None,
+    open_items=None,
+):
     v = MagicMock()
     v.last_updated_at = datetime.datetime.now(datetime.timezone.utc)
     v.ev_battery_percentage = soc
@@ -61,34 +76,44 @@ def test_calls_refresh_and_update_on_manager():
 
 def test_raises_runtime_error_when_no_vehicles():
     vm = _mock_manager({})
-    with patch("bluelink._get_manager", return_value=vm):
-        with pytest.raises(RuntimeError, match="No vehicles found"):
-            bluelink.get_battery_percentage()
+    with (
+        patch("bluelink._get_manager", return_value=vm),
+        pytest.raises(RuntimeError, match="No vehicles found"),
+    ):
+        bluelink.get_battery_percentage()
 
 
 def test_raises_runtime_error_when_soc_is_none():
     vm = _mock_manager({"vin1": _mock_vehicle(None)})
-    with patch("bluelink._get_manager", return_value=vm):
-        with pytest.raises(RuntimeError, match="battery percentage"):
-            bluelink.get_battery_percentage()
+    with (
+        patch("bluelink._get_manager", return_value=vm),
+        pytest.raises(RuntimeError, match="battery percentage"),
+    ):
+        bluelink.get_battery_percentage()
 
 
 @pytest.mark.parametrize("soc", [-1, 101, float("nan"), True, "62"])
 def test_rejects_invalid_soc(soc):
     vm = _mock_manager({"vin1": _mock_vehicle(soc)})
-    with patch("bluelink._get_manager", return_value=vm):
-        with pytest.raises(RuntimeError, match="battery percentage"):
-            bluelink.get_battery_percentage()
+    with (
+        patch("bluelink._get_manager", return_value=vm),
+        pytest.raises(RuntimeError, match="battery percentage"),
+    ):
+        bluelink.get_battery_percentage()
 
 
 def test_rejects_stale_vehicle_state(monkeypatch):
     monkeypatch.setattr(config, "MAX_SOC_AGE", 60)
     vehicle = _mock_vehicle(62)
-    vehicle.last_updated_at = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=5)
+    vehicle.last_updated_at = datetime.datetime.now(
+        datetime.timezone.utc
+    ) - datetime.timedelta(minutes=5)
     vm = _mock_manager({"vin1": vehicle})
-    with patch("bluelink._get_manager", return_value=vm):
-        with pytest.raises(RuntimeError, match="stale"):
-            bluelink.get_battery_percentage()
+    with (
+        patch("bluelink._get_manager", return_value=vm),
+        pytest.raises(RuntimeError, match="stale"),
+    ):
+        bluelink.get_battery_percentage()
 
 
 def test_rejects_missing_observation_time(monkeypatch):
@@ -96,14 +121,20 @@ def test_rejects_missing_observation_time(monkeypatch):
     vehicle = _mock_vehicle(62)
     vehicle.last_updated_at = None
     vm = _mock_manager({"vin1": vehicle})
-    with patch("bluelink._get_manager", return_value=vm):
-        with pytest.raises(RuntimeError, match="observation time"):
-            bluelink.get_battery_percentage()
+    with (
+        patch("bluelink._get_manager", return_value=vm),
+        pytest.raises(RuntimeError, match="observation time"),
+    ):
+        bluelink.get_battery_percentage()
 
 
 def test_vehicle_state_converts_km_to_miles():
     vm = _mock_manager(
-        {"vin1": _mock_vehicle(62, ev_range=300, ev_range_unit="km", odometer=20000, odometer_unit="km")}
+        {
+            "vin1": _mock_vehicle(
+                62, ev_range=300, ev_range_unit="km", odometer=20000, odometer_unit="km"
+            )
+        }
     )
     with patch("bluelink._get_manager", return_value=vm):
         state = bluelink.get_vehicle_state()
@@ -142,7 +173,9 @@ def test_vehicle_state_soh_none_when_zero_or_missing():
 
 
 def test_vehicle_state_reads_lock_and_location():
-    vm = _mock_manager({"v": _mock_vehicle(62, is_locked=True, latitude=51.5, longitude=-0.12)})
+    vm = _mock_manager(
+        {"v": _mock_vehicle(62, is_locked=True, latitude=51.5, longitude=-0.12)}
+    )
     with patch("bluelink._get_manager", return_value=vm):
         s = bluelink.get_vehicle_state()
     assert s.is_locked is True
@@ -159,10 +192,18 @@ def test_vehicle_state_lock_location_none_when_absent():
 
 
 def test_vehicle_state_reads_health():
-    vm = _mock_manager({"v": _mock_vehicle(
-        62, aux_battery=85, tyre_warn=True, washer_warn=False, key_warn=True,
-        open_items=["Boot", "Front-left door"],
-    )})
+    vm = _mock_manager(
+        {
+            "v": _mock_vehicle(
+                62,
+                aux_battery=85,
+                tyre_warn=True,
+                washer_warn=False,
+                key_warn=True,
+                open_items=["Boot", "Front-left door"],
+            )
+        }
+    )
     with patch("bluelink._get_manager", return_value=vm):
         s = bluelink.get_vehicle_state()
     assert s.aux_battery_percent == 85
@@ -183,7 +224,9 @@ def test_vehicle_state_health_none_when_absent():
 
 
 def test_vehicle_state_open_items_ordered_bonnet_first():
-    vm = _mock_manager({"v": _mock_vehicle(62, open_items=["Front-left door", "Bonnet"])})
+    vm = _mock_manager(
+        {"v": _mock_vehicle(62, open_items=["Front-left door", "Bonnet"])}
+    )
     with patch("bluelink._get_manager", return_value=vm):
         s = bluelink.get_vehicle_state()
     # Order follows _OPEN_ITEMS (bonnet, boot, doors…), not the input order.

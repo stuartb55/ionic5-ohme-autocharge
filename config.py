@@ -6,7 +6,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-def _int_setting(name: str, default: int, *, minimum: int, maximum: int | None = None) -> int:
+def _int_setting(
+    name: str, default: int, *, minimum: int, maximum: int | None = None
+) -> int:
     """Read a bounded integer setting or stop startup with a useful message."""
     raw = os.getenv(name, str(default))
     try:
@@ -18,11 +20,18 @@ def _int_setting(name: str, default: int, *, minimum: int, maximum: int | None =
         raise SystemExit(f"{name} must be {bounds} (got {value})")
     return value
 
+
 # Validate all required vars up front so a missing one produces a single clear
 # message naming everything that needs fixing, instead of a KeyError traceback
 # for whichever happened to be read first. Empty values count as missing — an
 # empty credential can never work.
-_REQUIRED = ("HYUNDAI_USERNAME", "HYUNDAI_PASSWORD", "HYUNDAI_PIN", "OHME_EMAIL", "OHME_PASSWORD")
+_REQUIRED = (
+    "HYUNDAI_USERNAME",
+    "HYUNDAI_PASSWORD",
+    "HYUNDAI_PIN",
+    "OHME_EMAIL",
+    "OHME_PASSWORD",
+)
 _missing = [name for name in _REQUIRED if not os.getenv(name)]
 if _missing:
     raise SystemExit(
@@ -147,4 +156,6 @@ TIMEZONE = os.getenv("TIMEZONE") or os.getenv("TZ") or "Europe/London"
 try:
     ZoneInfo(TIMEZONE)
 except (ZoneInfoNotFoundError, ValueError) as exc:
-    raise SystemExit(f"TIMEZONE/TZ must be a valid IANA timezone (got {TIMEZONE!r})") from exc
+    raise SystemExit(
+        f"TIMEZONE/TZ must be a valid IANA timezone (got {TIMEZONE!r})"
+    ) from exc

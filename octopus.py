@@ -16,8 +16,7 @@ import datetime
 import logging
 import time
 from dataclasses import dataclass, field
-from decimal import Decimal, ROUND_HALF_UP
-from typing import Optional
+from decimal import ROUND_HALF_UP, Decimal
 
 import aiohttp
 
@@ -40,7 +39,7 @@ class PricedEnergy:
     """Delivered energy priced in integer currency-minor units."""
 
     intervals: list[dict] = field(default_factory=list)
-    cost_minor: Optional[int] = None
+    cost_minor: int | None = None
     coverage: float = 0.0
     energy_wh: int = 0
     cost_method: str = "actual_agile"
@@ -79,7 +78,7 @@ def _auth_headers() -> dict[str, str]:
     return {"Authorization": f"Basic {token}"}
 
 
-async def fetch_rates() -> Optional[list[dict]]:
+async def fetch_rates() -> list[dict] | None:
     """Return upcoming half-hourly rates as ``[{from, to, pricePerKwh}]`` (£/kWh),
     sorted ascending by time. None when disabled or the fetch fails."""
     if not is_enabled():
@@ -95,12 +94,14 @@ async def fetch_rates() -> Optional[list[dict]]:
     params = {"period_from": period_from.isoformat()}
     timeout = aiohttp.ClientTimeout(total=10)
     try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url, params=params) as resp:
-                if resp.status != 200:
-                    logger.warning("Octopus API returned HTTP %s", resp.status)
-                    return None
-                data = await resp.json()
+        async with (
+            aiohttp.ClientSession(timeout=timeout) as session,
+            session.get(url, params=params) as resp,
+        ):
+            if resp.status != 200:
+                logger.warning("Octopus API returned HTTP %s", resp.status)
+                return None
+            data = await resp.json()
 
         # Octopus occasionally returns the same half-hour twice (e.g. a late
         # price correction). Keep one row per start time so a duplicated slot
@@ -127,7 +128,7 @@ async def fetch_rates() -> Optional[list[dict]]:
     return rates
 
 
-def _parse(ts: str) -> Optional[datetime.datetime]:
+def _parse(ts: str) -> datetime.datetime | None:
     """Parse an ISO timestamp (handling a trailing ``Z``) to an aware datetime."""
     try:
         return datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
@@ -135,7 +136,7 @@ def _parse(ts: str) -> Optional[datetime.datetime]:
         return None
 
 
-def cost_for_slots(slots: list, rates: Optional[list[dict]]) -> Optional[float]:
+def cost_for_slots(slots: list, rates: list[dict] | None) -> float | None:
     """Cost (£) of the allocated Ohme charge ``slots`` against Octopus ``rates``.
 
     Intelligent Go bills every Ohme smart-charge slot at the cheaper tariff rate,
@@ -157,12 +158,14 @@ def cost_for_slots(slots: list, rates: Optional[list[dict]]) -> Optional[float]:
         if not prices:
             return None
         cheap_rate = min(prices)
-        total_energy = Decimal("0")
+        total_energy = Decimal(0)
         for slot in slots:
             if (slot.end - slot.start).total_seconds() > 0:
                 total_energy += Decimal(str(slot.energy))
         return float(
-            (total_energy * cheap_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            (total_energy * cheap_rate).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
         )
 
     windows = []
@@ -175,13 +178,13 @@ def cost_for_slots(slots: list, rates: Optional[list[dict]]) -> Optional[float]:
     if not windows:
         return None
 
-    total = Decimal("0")
+    total = Decimal(0)
     for slot in slots:
         span = (slot.end - slot.start).total_seconds()
         if span <= 0:
             continue  # zero-length slot carries no time-priced energy
         covered = 0.0
-        slot_cost = Decimal("0")
+        slot_cost = Decimal(0)
         for w_start, w_end, price in windows:
             overlap = (min(slot.end, w_end) - max(slot.start, w_start)).total_seconds()
             if overlap > 0:
@@ -199,7 +202,9 @@ def cost_for_slots(slots: list, rates: Optional[list[dict]]) -> Optional[float]:
     return float(total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
-def _slot_windows(slots: Optional[list]) -> list[tuple[datetime.datetime, datetime.datetime]]:
+def _slot_windows(
+    slots: list | None,
+) -> list[tuple[datetime.datetime, datetime.datetime]]:
     """Return valid aware start/end pairs from Ohme objects or persisted rows."""
     windows = []
     for slot in slots or []:
@@ -209,16 +214,20 @@ def _slot_windows(slots: Optional[list]) -> list[tuple[datetime.datetime, dateti
         else:
             start = getattr(slot, "start", None)
             end = getattr(slot, "end", None)
-        if isinstance(start, datetime.datetime) and isinstance(end, datetime.datetime) and end > start:
+        if (
+            isinstance(start, datetime.datetime)
+            and isinstance(end, datetime.datetime)
+            and end > start
+        ):
             windows.append((start, end))
     return windows
 
 
 def price_energy_buckets(
     car_by_slot: dict[str, float],
-    rates: Optional[list[dict]],
+    rates: list[dict] | None,
     *,
-    smart_slots: Optional[list] = None,
+    smart_slots: list | None = None,
 ) -> PricedEnergy:
     """Price measured half-hour energy buckets against tariff windows.
 
@@ -242,18 +251,20 @@ def price_energy_buckets(
     intelligent_slots = _slot_windows(smart_slots) if intelligent_go else []
 
     covered_wh = 0
-    exact_cost_minor = Decimal("0")
+    exact_cost_minor = Decimal(0)
     for key, raw_kwh in sorted(car_by_slot.items()):
         start = _parse(key)
         energy_kwh = Decimal(str(max(0.0, raw_kwh)))
-        energy_wh = int((energy_kwh * 1000).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        energy_wh = int(
+            (energy_kwh * 1000).quantize(Decimal(1), rounding=ROUND_HALF_UP)
+        )
         if start is None or energy_wh <= 0:
             continue
         end = start + datetime.timedelta(minutes=30)
         span = Decimal(str((end - start).total_seconds()))
-        covered_seconds = Decimal("0")
-        bucket_cost = Decimal("0")
-        weighted_rate = Decimal("0")
+        covered_seconds = Decimal(0)
+        bucket_cost = Decimal(0)
+        weighted_rate = Decimal(0)
         is_smart_charge = any(
             min(end, slot_end) > max(start, slot_start)
             for slot_start, slot_end in intelligent_slots
@@ -266,7 +277,9 @@ def price_energy_buckets(
             weighted_rate = cheap_rate
         else:
             for rate_start, rate_end, price_minor in windows:
-                overlap_seconds = (min(end, rate_end) - max(start, rate_start)).total_seconds()
+                overlap_seconds = (
+                    min(end, rate_end) - max(start, rate_start)
+                ).total_seconds()
                 if overlap_seconds <= 0:
                     continue
                 overlap = Decimal(str(overlap_seconds))
@@ -274,9 +287,9 @@ def price_energy_buckets(
                 covered_seconds += overlap
                 bucket_cost += energy_kwh * fraction * price_minor
                 weighted_rate += price_minor * fraction
-        fully_covered = abs(covered_seconds - span) <= Decimal("1")
+        fully_covered = abs(covered_seconds - span) <= Decimal(1)
         cost_minor = (
-            int(bucket_cost.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+            int(bucket_cost.quantize(Decimal(1), rounding=ROUND_HALF_UP))
             if fully_covered
             else None
         )
@@ -299,7 +312,7 @@ def price_energy_buckets(
     result.coverage = covered_wh / result.energy_wh if result.energy_wh else 0.0
     if result.energy_wh and covered_wh == result.energy_wh:
         result.cost_minor = int(
-            exact_cost_minor.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            exact_cost_minor.quantize(Decimal(1), rounding=ROUND_HALF_UP)
         )
     return result
 
@@ -307,7 +320,7 @@ def price_energy_buckets(
 # --- household consumption (authenticated account API) -----------------------
 
 
-async def _discover_meters() -> Optional[list[tuple[str, str]]]:
+async def _discover_meters() -> list[tuple[str, str]] | None:
     """Return all current-property import meter identities, refreshed daily."""
     global _meters, _meters_discovered_at
     now = time.monotonic()
@@ -319,12 +332,14 @@ async def _discover_meters() -> Optional[list[tuple[str, str]]]:
     headers = _auth_headers()
     timeout = aiohttp.ClientTimeout(total=10)
     try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url, headers=headers) as resp:
-                if resp.status != 200:
-                    logger.warning("Octopus account API returned HTTP %s", resp.status)
-                    return None
-                data = await resp.json()
+        async with (
+            aiohttp.ClientSession(timeout=timeout) as session,
+            session.get(url, headers=headers) as resp,
+        ):
+            if resp.status != 200:
+                logger.warning("Octopus account API returned HTTP %s", resp.status)
+                return None
+            data = await resp.json()
         discovered: list[tuple[str, str]] = []
         for prop in data.get("properties") or []:
             if prop.get("moved_out_at"):
@@ -353,7 +368,7 @@ async def _discover_meters() -> Optional[list[tuple[str, str]]]:
 
 async def fetch_consumption(
     period_from: datetime.datetime, period_to: datetime.datetime
-) -> Optional[list[dict]]:
+) -> list[dict] | None:
     """Half-hourly household grid import between ``period_from`` and ``period_to``.
 
     Returns ``[{from, to, importKwh}]`` chronological, following Octopus's
@@ -372,10 +387,10 @@ async def fetch_consumption(
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             for mpan, serial in meters:
-                url: Optional[str] = (
+                url: str | None = (
                     f"{_BASE}/electricity-meter-points/{mpan}/meters/{serial}/consumption/"
                 )
-                params: Optional[dict] = {
+                params: dict | None = {
                     "period_from": period_from.isoformat(),
                     "period_to": period_to.isoformat(),
                     "order_by": "period",
@@ -387,10 +402,16 @@ async def fetch_consumption(
                             # Metadata can change between discovery and reading.
                             # Retry discovery next cycle but preserve other serials.
                             _meters_discovered_at = 0.0
-                            logger.warning("Octopus meter %s/%s is no longer readable", mpan, serial)
+                            logger.warning(
+                                "Octopus meter %s/%s is no longer readable",
+                                mpan,
+                                serial,
+                            )
                             break
                         if resp.status != 200:
-                            logger.warning("Octopus consumption API returned HTTP %s", resp.status)
+                            logger.warning(
+                                "Octopus consumption API returned HTTP %s", resp.status
+                            )
                             return None
                         data = await resp.json()
                     for row in data.get("results") or []:

@@ -92,7 +92,9 @@ def test_merge_usage_breaks_out_house_remainder():
 
 
 def test_merge_usage_surfaces_material_inconsistency():
-    imports = [{"from": _t(0, 0).isoformat(), "to": _t(0, 30).isoformat(), "importKwh": 0.9}]
+    imports = [
+        {"from": _t(0, 0).isoformat(), "to": _t(0, 30).isoformat(), "importKwh": 0.9}
+    ]
     car = {_t(0, 0).isoformat(): 1.2}
     out = energy.merge_usage(imports, car)
     assert out[0]["carKwh"] == 0.0
@@ -102,7 +104,9 @@ def test_merge_usage_surfaces_material_inconsistency():
 
 
 def test_merge_usage_keeps_small_timing_adjustment():
-    imports = [{"from": _t(0, 0).isoformat(), "to": _t(0, 30).isoformat(), "importKwh": 0.9}]
+    imports = [
+        {"from": _t(0, 0).isoformat(), "to": _t(0, 30).isoformat(), "importKwh": 0.9}
+    ]
     out = energy.merge_usage(imports, {_t(0, 0).isoformat(): 0.92})
     assert out[0]["carKwh"] == 0.9
     assert out[0]["houseKwh"] == 0.0
