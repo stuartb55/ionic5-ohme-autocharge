@@ -80,6 +80,7 @@ export const scheduleFixture: ScheduleResponse = {
 
 export const sessionsFixture: SessionsResponse = {
   enabled: true,
+  review: null,
   sessions: [
     {
       id: 3,
@@ -98,6 +99,7 @@ export const sessionsFixture: SessionsResponse = {
       tariffCoverage: 1,
       quality: 'reconciled',
       completedAt: '2026-06-02T01:00:00+01:00',
+      reviewIssues: [],
     },
     {
       id: 2,
@@ -116,6 +118,7 @@ export const sessionsFixture: SessionsResponse = {
       tariffCoverage: null,
       quality: 'validated',
       completedAt: null,
+      reviewIssues: [],
     },
   ],
 };

@@ -13,9 +13,44 @@ function demoApi(): Plugin {
     configureServer(server) {
       server.middlewares.use('/api', (request, response, next) => {
         if (process.env.VITE_DEMO_MODE !== '1') return next();
-        const path = request.url?.split('?')[0] ?? '';
+        const requestUrl = new URL(request.url ?? '/', 'http://demo.local');
+        const path = requestUrl.pathname;
+        const review = requestUrl.searchParams.get('review');
         const now = Date.now();
         const iso = (offsetMinutes: number) => new Date(now + offsetMinutes * 60_000).toISOString();
+        const missingCostSession = {
+          ...sessionsFixture.sessions[0],
+          id: 31,
+          actualCost: null,
+          costCurrency: null,
+          costMethod: null,
+          tariffCoverage: null,
+          quality: 'tariff_incomplete',
+          reviewIssues: ['missing_cost'],
+        };
+        const missingEnergySession = {
+          ...sessionsFixture.sessions[0],
+          id: 32,
+          actualEnergyKwh: null,
+          actualCost: null,
+          costCurrency: null,
+          costMethod: null,
+          tariffCoverage: null,
+          quality: 'missing_actual',
+          reviewIssues: ['missing_energy'],
+        };
+        const reviewedSessions = review
+          ? {
+              enabled: true,
+              review,
+              sessions:
+                review === 'missing_cost'
+                  ? [missingCostSession]
+                  : review === 'missing_energy'
+                    ? [missingEnergySession]
+                    : [missingCostSession, missingEnergySession],
+            }
+          : sessionsFixture;
         const payloads: Record<string, unknown> = {
           '/status': {
             ...statusFixture,
@@ -34,14 +69,20 @@ function demoApi(): Plugin {
             ],
           },
           '/statistics': statisticsFixture,
-          '/sessions': sessionsFixture,
+          '/sessions': reviewedSessions,
           '/soh-history': { enabled: false, history: [] },
           '/tariff': { enabled: false, rates: [], cheapest: [] },
           '/energy-usage': { enabled: false, date: null, slots: [], totals: null },
           '/data-quality': {
-            status: 'ok', generatedAt: iso(0), persistenceAvailable: false,
-            actualCostExpected: false, sessions: null, telemetry: null,
-            consumption: null, daily: null, statisticsCache: { available: true, ageSeconds: 30 },
+            status: 'attention', generatedAt: iso(0), persistenceAvailable: true,
+            actualCostExpected: true, consumptionConfigured: false,
+            sessions: {
+              total: 12, completed: 10, missingActualEnergy: 1, missingActualCost: 1,
+            },
+            telemetry: { unlinkedLast24h: 0 },
+            consumption: { uncertainLast30d: 0, ingestedThrough: null },
+            daily: { completeThrough: new Date(now - 86_400_000).toISOString().slice(0, 10) },
+            statisticsCache: { available: true, ageSeconds: 30 },
           },
           '/version': { version: 'demo' },
           '/vehicles': {

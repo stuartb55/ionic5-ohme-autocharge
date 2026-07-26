@@ -7,6 +7,86 @@ import { server } from '../mocks/server';
 import { scheduleFixture, sessionsFixture, statisticsFixture, statusFixture } from '../fixtures';
 
 describe('Dashboard integration', () => {
+  it('opens affected session records from diagnostics and moves focus to history', async () => {
+    let filteredRequests = 0;
+    const missingCost = {
+      ...sessionsFixture.sessions[0]!,
+      id: 21,
+      actualCost: null,
+      costCurrency: null,
+      costMethod: null,
+      tariffCoverage: null,
+      reviewIssues: ['missing_cost' as const],
+    };
+    const missingEnergy = {
+      ...sessionsFixture.sessions[0]!,
+      id: 22,
+      actualEnergyKwh: null,
+      actualCost: null,
+      costCurrency: null,
+      costMethod: null,
+      tariffCoverage: null,
+      reviewIssues: ['missing_energy' as const],
+    };
+
+    server.use(
+      http.get('*/api/data-quality', () =>
+        HttpResponse.json({
+          status: 'attention',
+          generatedAt: '2026-07-11T08:00:00Z',
+          persistenceAvailable: true,
+          actualCostExpected: true,
+          consumptionConfigured: true,
+          sessions: {
+            total: 12,
+            completed: 10,
+            missingActualEnergy: 1,
+            missingActualCost: 1,
+          },
+          telemetry: { unlinkedLast24h: 0 },
+          consumption: { uncertainLast30d: 0, ingestedThrough: '2026-07-10T23:30:00Z' },
+          daily: { completeThrough: '2026-07-10' },
+          statisticsCache: { available: true, ageSeconds: 45 },
+        }),
+      ),
+      http.get('*/api/sessions', ({ request }) => {
+        const review = new URL(request.url).searchParams.get('review');
+        if (review === 'any') {
+          filteredRequests += 1;
+          return HttpResponse.json({
+            enabled: true,
+            review: 'any',
+            sessions: [missingCost, missingEnergy],
+          });
+        }
+        return HttpResponse.json(sessionsFixture);
+      }),
+    );
+
+    render(<Dashboard />);
+    const reviewButton = await screen.findByRole('button', {
+      name: /review 2 affected sessions/i,
+    });
+
+    await userEvent.click(reviewButton);
+
+    await waitFor(() => expect(filteredRequests).toBeGreaterThan(0));
+    expect(
+      screen.getByRole('heading', {
+        name: 'Charging sessions needing attention',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', {
+        name: 'Sessions needing attention',
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Energy unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Cost unavailable')).toBeInTheDocument();
+    expect(window.location.hash).toBe('#history');
+    expect(document.activeElement).toBe(document.getElementById('history'));
+  });
+
   it('does not fetch fleet data for the single-vehicle dashboard', async () => {
     let vehicleListHits = 0;
     server.use(
@@ -160,7 +240,8 @@ describe('Dashboard integration', () => {
         hits.quality += 1;
         return HttpResponse.json({
           status: 'ok', generatedAt: statusFixture.updatedAt, persistenceAvailable: false,
-          actualCostExpected: false, sessions: null, telemetry: null, consumption: null, daily: null,
+          actualCostExpected: false, consumptionConfigured: false,
+          sessions: null, telemetry: null, consumption: null, daily: null,
           statisticsCache: { available: true, ageSeconds: 30 },
         });
       }),

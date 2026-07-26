@@ -11,6 +11,7 @@ export const handlers = [
       generatedAt: '2026-06-03T08:00:00Z',
       persistenceAvailable: false,
       actualCostExpected: false,
+      consumptionConfigured: false,
       sessions: null,
       telemetry: null,
       consumption: null,

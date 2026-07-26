@@ -220,11 +220,18 @@ export interface ChargeSessionEntry {
   tariffCoverage: number | null;
   quality: string | null;
   completedAt: string | null;
+  /** Concrete completeness gaps that make this session appear in diagnostics. */
+  reviewIssues: SessionReviewIssue[];
 }
+
+export type SessionReviewIssue = 'missing_energy' | 'missing_cost';
+export type SessionReviewFilter = SessionReviewIssue | 'any';
 
 export interface SessionsResponse {
   /** False when Postgres history persistence is disabled — hide the card. */
   enabled: boolean;
+  /** Server-applied diagnostics filter; null means ordinary recent history. */
+  review: SessionReviewFilter | null;
   sessions: ChargeSessionEntry[];
 }
 
@@ -451,6 +458,7 @@ export interface DataQualityResponse {
   generatedAt: string;
   persistenceAvailable: boolean;
   actualCostExpected: boolean;
+  consumptionConfigured: boolean;
   sessions: {
     total: number;
     completed: number;

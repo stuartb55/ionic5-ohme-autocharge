@@ -283,10 +283,12 @@ class ChargeSessionEntryModel(ContractModel):
     tariffCoverage: float | None
     quality: str | None
     completedAt: str | None
+    reviewIssues: list[Literal["missing_energy", "missing_cost"]]
 
 
 class SessionsResponseModel(ContractModel):
     enabled: bool
+    review: Literal["missing_energy", "missing_cost", "any"] | None
     sessions: list[ChargeSessionEntryModel]
 
 
@@ -426,6 +428,7 @@ class DataQualityResponseModel(BaseModel):
     generatedAt: datetime.datetime
     persistenceAvailable: bool
     actualCostExpected: bool
+    consumptionConfigured: bool
     sessions: SessionQualityModel | None
     telemetry: TelemetryQualityModel | None
     consumption: ConsumptionQualityModel | None

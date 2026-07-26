@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { sessionsFixture } from '../test/fixtures';
 import { server } from '../test/mocks/server';
 import { SessionsSection } from './SessionsSection';
@@ -9,13 +9,13 @@ import { SessionsSection } from './SessionsSection';
 describe('SessionsSection', () => {
   it('renders nothing when history persistence is disabled', () => {
     const { container } = render(
-      <SessionsSection data={{ enabled: false, sessions: [] }} />,
+      <SessionsSection data={{ enabled: false, review: null, sessions: [] }} />,
     );
     expect(container).toBeEmptyDOMElement();
   });
 
   it('shows an empty state when enabled but no sessions yet', () => {
-    render(<SessionsSection data={{ enabled: true, sessions: [] }} />);
+    render(<SessionsSection data={{ enabled: true, review: null, sessions: [] }} />);
     expect(screen.getByText(/no plug-in sessions recorded yet/i)).toBeInTheDocument();
   });
 
@@ -46,8 +46,50 @@ describe('SessionsSection', () => {
   });
 
   it('hides the export links when there are no sessions to export', () => {
-    render(<SessionsSection data={{ enabled: true, sessions: [] }} />);
+    render(<SessionsSection data={{ enabled: true, review: null, sessions: [] }} />);
     expect(screen.queryByRole('link', { name: /export/i })).not.toBeInTheDocument();
+  });
+
+  it('shows only server-filtered affected sessions with concrete issue labels', async () => {
+    const onClearReview = vi.fn();
+    const affected = {
+      ...sessionsFixture.sessions[0]!,
+      id: 8,
+      actualCost: null,
+      costCurrency: null,
+      costMethod: null,
+      tariffCoverage: null,
+      quality: 'tariff_incomplete',
+      reviewIssues: ['missing_cost' as const],
+    };
+
+    render(
+      <SessionsSection
+        data={{ enabled: true, review: 'missing_cost', sessions: [affected] }}
+        reviewFilter="missing_cost"
+        reviewTotal={1}
+        onClearReview={onClearReview}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: /sessions needing attention/i })).toBeInTheDocument();
+    expect(screen.getByText('Cost unavailable')).toBeInTheDocument();
+    expect(screen.getByText(/1 session needs attention/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /show recent/i }));
+    expect(onClearReview).toHaveBeenCalledOnce();
+  });
+
+  it('does not show stale unfiltered rows while an affected-session request loads', () => {
+    render(
+      <SessionsSection
+        data={sessionsFixture}
+        reviewFilter="missing_energy"
+        reviewTotal={2}
+      />,
+    );
+
+    expect(screen.getByText('Loading affected sessions…')).toBeInTheDocument();
+    expect(screen.queryByText(/54%\s*→\s*80%/)).not.toBeInTheDocument();
   });
 
   it('expands a row to show its audit and charge curve on click', async () => {

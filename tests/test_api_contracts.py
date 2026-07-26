@@ -59,6 +59,7 @@ def test_frontend_top_level_contracts_match_openapi():
         "StatusResponseModel": "StatusResponse",
         "ScheduleResponseModel": "ScheduleResponse",
         "SessionsResponseModel": "SessionsResponse",
+        "DataQualityResponseModel": "DataQualityResponse",
         "VehiclesResponseModel": "VehiclesResponse",
         "TargetUpdateResponseModel": "TargetUpdateResponse",
         "ReadyByUpdateResponseModel": "ReadyByUpdateResponse",
@@ -85,6 +86,7 @@ def test_core_routes_publish_typed_openapi_responses():
         "/api/status": "StatusResponseModel",
         "/api/schedule": "ScheduleResponseModel",
         "/api/sessions": "SessionsResponseModel",
+        "/api/data-quality": "DataQualityResponseModel",
         "/api/vehicles": "VehiclesResponseModel",
         "/api/settings/target": "TargetUpdateResponseModel",
     }
@@ -96,6 +98,7 @@ def test_core_routes_publish_typed_openapi_responses():
                 "/api/status",
                 "/api/schedule",
                 "/api/sessions",
+                "/api/data-quality",
                 "/api/vehicles",
             }
             else "put"
