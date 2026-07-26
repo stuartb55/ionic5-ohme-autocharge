@@ -1,7 +1,8 @@
 """Alembic environment configured programmatically by :mod:`db`."""
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
+
+from alembic import context
 
 
 def run_migrations_offline() -> None:

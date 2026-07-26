@@ -4,7 +4,6 @@ import logging
 import math
 import threading
 from dataclasses import dataclass, field
-from typing import Optional
 
 from hyundai_kia_connect_api import VehicleManager
 
@@ -30,25 +29,25 @@ class VehicleState:
     """
 
     soc: int
-    vehicle_id: Optional[str] = None
-    vin: Optional[str] = None
-    observed_at: Optional[datetime.datetime] = None
-    range_miles: Optional[int] = None
-    odometer_miles: Optional[int] = None
+    vehicle_id: str | None = None
+    vin: str | None = None
+    observed_at: datetime.datetime | None = None
+    range_miles: int | None = None
+    odometer_miles: int | None = None
     # Battery state of health (%). None when the vehicle doesn't report it.
-    soh_percent: Optional[int] = None
+    soh_percent: int | None = None
     # Read-only lock status and last-known GPS location. None when not reported.
-    is_locked: Optional[bool] = None
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
+    is_locked: bool | None = None
+    latitude: float | None = None
+    longitude: float | None = None
     # Read-only vehicle health (all best-effort). aux_battery_percent is the 12V
     # auxiliary battery %; the *_warning flags mirror the SDK's own warnings
     # (None when the car doesn't report them); open_items lists any door/bonnet/
     # boot the car reports as open (empty when all closed or not reported).
-    aux_battery_percent: Optional[int] = None
-    tyre_pressure_warning: Optional[bool] = None
-    washer_fluid_warning: Optional[bool] = None
-    key_battery_warning: Optional[bool] = None
+    aux_battery_percent: int | None = None
+    tyre_pressure_warning: bool | None = None
+    washer_fluid_warning: bool | None = None
+    key_battery_warning: bool | None = None
     open_items: list[str] = field(default_factory=list)
 
 
@@ -64,7 +63,7 @@ _OPEN_ITEMS = (
 )
 
 
-def _as_bool(value) -> Optional[bool]:
+def _as_bool(value) -> bool | None:
     """Coerce an SDK warning flag to a real bool, else None.
 
     The flags are bools when reported, but can be absent or a non-bool (and are
@@ -76,10 +75,12 @@ def _as_bool(value) -> Optional[bool]:
 
 def _open_items(vehicle) -> list[str]:
     """Labels for any door/bonnet/boot the car reports as open (strictly True)."""
-    return [label for attr, label in _OPEN_ITEMS if getattr(vehicle, attr, None) is True]
+    return [
+        label for attr, label in _OPEN_ITEMS if getattr(vehicle, attr, None) is True
+    ]
 
 
-def _to_miles(value, unit) -> Optional[int]:
+def _to_miles(value, unit) -> int | None:
     """Convert an SDK distance (value + unit string) to whole miles, or None.
 
     Defensive: the SDK fields can be absent or non-numeric (and in tests are
@@ -97,6 +98,7 @@ def _to_miles(value, unit) -> Optional[int]:
         return None
     return round(miles)
 
+
 # The VehicleManager is a shared, mutable singleton and the SDK is not
 # thread-safe. get_battery_percentage runs via asyncio.to_thread and has two
 # concurrent callers — the poll loop's plug-in handler and the dashboard's
@@ -109,7 +111,7 @@ _lock = threading.Lock()
 # the same operation (or reject an incompatible one) rather than accumulating
 # more blocked threads behind ``_lock``.
 _inflight_task: asyncio.Task | None = None
-_inflight_key: tuple[str, Optional[str]] | None = None
+_inflight_key: tuple[str, str | None] | None = None
 
 
 class BluelinkBusyError(RuntimeError):
@@ -121,11 +123,11 @@ def _consume_inflight_result(task: asyncio.Task) -> None:
     if not task.cancelled():
         try:
             task.exception()
-        except Exception:  # pragma: no cover - retrieving cannot affect callers
+        except Exception:  # noqa: BLE001, S110  # pragma: no cover - retrieval only
             pass
 
 
-async def _single_flight(name: str, argument: Optional[str], func, *args):
+async def _single_flight(name: str, argument: str | None, func, *args):
     global _inflight_task, _inflight_key
 
     key = (name, argument)
@@ -164,7 +166,7 @@ def _get_manager() -> VehicleManager:
     return _manager
 
 
-def _select_vehicle(vm: VehicleManager, vehicle_id: Optional[str]):
+def _select_vehicle(vm: VehicleManager, vehicle_id: str | None):
     """Pick the configured vehicle, failing closed when an explicit id is invalid."""
     if vehicle_id:
         if vehicle_id not in vm.vehicles:
@@ -179,23 +181,31 @@ def _select_vehicle(vm: VehicleManager, vehicle_id: Optional[str]):
 def _validated_soc(value) -> int:
     """Return a trustworthy whole-percent SOC, rejecting malformed SDK values."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise RuntimeError("Vehicle reported an invalid battery percentage")
+        raise RuntimeError(  # noqa: TRY004 - preserve the public wrapper contract
+            "Vehicle reported an invalid battery percentage"
+        )
     numeric = float(value)
     if not math.isfinite(numeric) or not 0 <= numeric <= 100:
-        raise RuntimeError(f"Vehicle reported an out-of-range battery percentage: {value!r}")
+        raise RuntimeError(
+            f"Vehicle reported an out-of-range battery percentage: {value!r}"
+        )
     return round(numeric)
 
 
-def _validated_observed_at(value) -> Optional[datetime.datetime]:
+def _validated_observed_at(value) -> datetime.datetime | None:
     """Normalise and freshness-check the vehicle snapshot timestamp."""
     if config.MAX_SOC_AGE == 0:
         return value if isinstance(value, datetime.datetime) else None
     if not isinstance(value, datetime.datetime) or value.tzinfo is None:
-        raise RuntimeError("Vehicle state did not include a trustworthy observation time")
+        raise RuntimeError(
+            "Vehicle state did not include a trustworthy observation time"
+        )
     observed = value.astimezone(datetime.timezone.utc)
     age = (datetime.datetime.now(datetime.timezone.utc) - observed).total_seconds()
     if age < -300:
-        raise RuntimeError("Vehicle state observation time is unexpectedly in the future")
+        raise RuntimeError(
+            "Vehicle state observation time is unexpectedly in the future"
+        )
     if age > config.MAX_SOC_AGE:
         raise RuntimeError(
             f"Vehicle state is stale ({age / 60:.0f} minutes old; "
@@ -211,12 +221,11 @@ def list_vehicles() -> list[dict]:
         vm.check_and_refresh_token()
         vm.update_all_vehicles_with_cached_state()
         return [
-            {"id": v.id, "name": v.name, "model": v.model}
-            for v in vm.vehicles.values()
+            {"id": v.id, "name": v.name, "model": v.model} for v in vm.vehicles.values()
         ]
 
 
-def get_vehicle_state(vehicle_id: Optional[str] = None) -> VehicleState:
+def get_vehicle_state(vehicle_id: str | None = None) -> VehicleState:
     """Return SOC (plus driving range and odometer) for the selected vehicle.
 
     ``vehicle_id`` picks a specific vehicle when the account has more than one;
@@ -234,7 +243,8 @@ def get_vehicle_state(vehicle_id: Optional[str] = None) -> VehicleState:
 
         vehicle = _select_vehicle(vm, vehicle_id)
         selected_vehicle_id = next(
-            (key for key, candidate in vm.vehicles.items() if candidate is vehicle), None
+            (key for key, candidate in vm.vehicles.items() if candidate is vehicle),
+            None,
         )
         soc = _validated_soc(vehicle.ev_battery_percentage)
         observed_at = _validated_observed_at(getattr(vehicle, "last_updated_at", None))
@@ -242,7 +252,9 @@ def get_vehicle_state(vehicle_id: Optional[str] = None) -> VehicleState:
         odometer_miles = _to_miles(vehicle.odometer, vehicle.odometer_unit)
         raw_soh = vehicle.ev_battery_soh_percentage
         # SoH is a percentage; 0/None/non-numeric means "not reported".
-        soh_percent = int(raw_soh) if isinstance(raw_soh, (int, float)) and raw_soh > 0 else None
+        soh_percent = (
+            int(raw_soh) if isinstance(raw_soh, (int, float)) and raw_soh > 0 else None
+        )
         is_locked = vehicle.is_locked if isinstance(vehicle.is_locked, bool) else None
         lat, lon = vehicle.location_latitude, vehicle.location_longitude
         latitude = float(lat) if isinstance(lat, (int, float)) else None
@@ -253,36 +265,56 @@ def get_vehicle_state(vehicle_id: Optional[str] = None) -> VehicleState:
         aux_battery_percent = (
             int(raw_aux) if isinstance(raw_aux, (int, float)) and raw_aux > 0 else None
         )
-        tyre_pressure_warning = _as_bool(getattr(vehicle, "tire_pressure_all_warning_is_on", None))
-        washer_fluid_warning = _as_bool(getattr(vehicle, "washer_fluid_warning_is_on", None))
-        key_battery_warning = _as_bool(getattr(vehicle, "smart_key_battery_warning_is_on", None))
+        tyre_pressure_warning = _as_bool(
+            getattr(vehicle, "tire_pressure_all_warning_is_on", None)
+        )
+        washer_fluid_warning = _as_bool(
+            getattr(vehicle, "washer_fluid_warning_is_on", None)
+        )
+        key_battery_warning = _as_bool(
+            getattr(vehicle, "smart_key_battery_warning_is_on", None)
+        )
         open_items = _open_items(vehicle)
 
     logger.info(
         "Hyundai vehicle=%s SOC=%s%% observed_at=%s, range=%s mi, odometer=%s mi, "
         "SoH=%s%%, locked=%s, 12V=%s%%",
-        selected_vehicle_id, soc, observed_at, range_miles, odometer_miles,
-        soh_percent, is_locked, aux_battery_percent,
+        selected_vehicle_id,
+        soc,
+        observed_at,
+        range_miles,
+        odometer_miles,
+        soh_percent,
+        is_locked,
+        aux_battery_percent,
     )
     return VehicleState(
         soc=soc,
-        vehicle_id=str(selected_vehicle_id) if selected_vehicle_id is not None else None,
+        vehicle_id=str(selected_vehicle_id)
+        if selected_vehicle_id is not None
+        else None,
         vin=vehicle.VIN if isinstance(getattr(vehicle, "VIN", None), str) else None,
         observed_at=observed_at,
-        range_miles=range_miles, odometer_miles=odometer_miles, soh_percent=soh_percent,
-        is_locked=is_locked, latitude=latitude, longitude=longitude,
-        aux_battery_percent=aux_battery_percent, tyre_pressure_warning=tyre_pressure_warning,
-        washer_fluid_warning=washer_fluid_warning, key_battery_warning=key_battery_warning,
+        range_miles=range_miles,
+        odometer_miles=odometer_miles,
+        soh_percent=soh_percent,
+        is_locked=is_locked,
+        latitude=latitude,
+        longitude=longitude,
+        aux_battery_percent=aux_battery_percent,
+        tyre_pressure_warning=tyre_pressure_warning,
+        washer_fluid_warning=washer_fluid_warning,
+        key_battery_warning=key_battery_warning,
         open_items=open_items,
     )
 
 
-def get_battery_percentage(vehicle_id: Optional[str] = None) -> int:
+def get_battery_percentage(vehicle_id: str | None = None) -> int:
     """Return just the current battery SOC % for the selected vehicle."""
     return get_vehicle_state(vehicle_id).soc
 
 
-async def get_vehicle_state_async(vehicle_id: Optional[str] = None) -> VehicleState:
+async def get_vehicle_state_async(vehicle_id: str | None = None) -> VehicleState:
     """Run the blocking :func:`get_vehicle_state` in a worker thread, bounded by
     ``config.UPSTREAM_TIMEOUT``.
 
@@ -293,7 +325,9 @@ async def get_vehicle_state_async(vehicle_id: Optional[str] = None) -> VehicleSt
     is acceptable: the module lock is released when that thread finishes and the
     next read re-acquires it.
     """
-    return await _single_flight("vehicle state", vehicle_id, get_vehicle_state, vehicle_id)
+    return await _single_flight(
+        "vehicle state", vehicle_id, get_vehicle_state, vehicle_id
+    )
 
 
 async def list_vehicles_async() -> list[dict]:

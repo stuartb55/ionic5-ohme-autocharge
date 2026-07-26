@@ -18,8 +18,8 @@ import config
 import settings
 from state import AppState, StatusSnapshot
 
-
 # --- charge target / effective target --------------------------------------
+
 
 def test_charge_target_uses_env_default_when_no_override(monkeypatch):
     monkeypatch.setattr(config, "CHARGE_TARGET", 80)
@@ -107,10 +107,11 @@ def test_last_observed_vehicle_selects_effective_profile(monkeypatch):
 
 # --- vehicle selection precedence ------------------------------------------
 
+
 def test_selected_vehicle_id_precedence(monkeypatch):
     monkeypatch.setattr(config, "HYUNDAI_VEHICLE_ID", "env-vin")
     s = AppState()
-    assert s.selected_vehicle_id == "env-vin"   # env default
+    assert s.selected_vehicle_id == "env-vin"  # env default
     s.set_vehicle_id("runtime-vin")
     assert s.selected_vehicle_id == "runtime-vin"  # runtime override wins
 
@@ -121,6 +122,7 @@ def test_selected_vehicle_id_none_when_unset(monkeypatch):
 
 
 # --- ready-by parsing ------------------------------------------------------
+
 
 def test_ready_by_tuple_parses_valid():
     s = AppState()
@@ -136,6 +138,7 @@ def test_ready_by_tuple_none_when_unset_or_invalid():
 
 
 # --- poll failure tracking & snapshot update -------------------------------
+
 
 def test_record_poll_failure_increments_and_keeps_last_good_snapshot():
     s = AppState()
@@ -169,6 +172,7 @@ def test_update_with_error_snapshot_does_not_reset_failures():
 
 # --- cached vehicle readings -----------------------------------------------
 
+
 def test_record_soc_sets_value_and_timestamp():
     s = AppState()
     s.record_soc(55)
@@ -195,10 +199,18 @@ def test_session_energy_is_monotonic_and_cleared_with_session_state():
 def test_record_and_clear_vehicle_state():
     s = AppState()
     vstate = SimpleNamespace(
-        soc=62, range_miles=180, odometer_miles=12000, soh_percent=98,
-        is_locked=True, latitude=51.5, longitude=-0.1,
-        aux_battery_percent=85, tyre_pressure_warning=True,
-        washer_fluid_warning=False, key_battery_warning=None, open_items=["Boot"],
+        soc=62,
+        range_miles=180,
+        odometer_miles=12000,
+        soh_percent=98,
+        is_locked=True,
+        latitude=51.5,
+        longitude=-0.1,
+        aux_battery_percent=85,
+        tyre_pressure_warning=True,
+        washer_fluid_warning=False,
+        key_battery_warning=None,
+        open_items=["Boot"],
     )
     s.record_vehicle_state(vstate)
     assert s.last_soc == 62
@@ -224,6 +236,7 @@ def test_record_and_clear_vehicle_state():
 
 
 # --- snapshot serialisation ------------------------------------------------
+
 
 def test_status_snapshot_to_dict_is_json_serialisable():
     snap = StatusSnapshot(battery_percent=62, slots=[{"start": "00:00"}])

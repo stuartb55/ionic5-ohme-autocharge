@@ -100,13 +100,22 @@ def test_is_charging_only_true_when_charging():
 async def test_set_target_calls_methods_in_correct_order():
     client = _mock_client()
     call_order = []
-    client.async_update_device_info.side_effect = lambda: call_order.append("update_device_info")
-    client.async_get_charge_session.side_effect = lambda: call_order.append("get_charge_session")
+    client.async_update_device_info.side_effect = lambda: call_order.append(
+        "update_device_info"
+    )
+    client.async_get_charge_session.side_effect = lambda: call_order.append(
+        "get_charge_session"
+    )
     client.async_set_target.side_effect = lambda **_: call_order.append("set_target")
 
     await ohme_client.set_target(client, current_soc=62, target_percent=80)
 
-    assert call_order == ["update_device_info", "get_charge_session", "set_target", "get_charge_session"]
+    assert call_order == [
+        "update_device_info",
+        "get_charge_session",
+        "set_target",
+        "get_charge_session",
+    ]
 
 
 async def test_set_target_passes_correct_values():
@@ -119,8 +128,12 @@ async def test_set_target_passes_correct_values():
 
 async def test_set_target_passes_ready_by_time():
     client = _mock_client()
-    await ohme_client.set_target(client, current_soc=55, target_percent=80, target_time=(7, 30))
-    client.async_set_target.assert_called_once_with(target_percent=25, target_time=(7, 30))
+    await ohme_client.set_target(
+        client, current_soc=55, target_percent=80, target_time=(7, 30)
+    )
+    client.async_set_target.assert_called_once_with(
+        target_percent=25, target_time=(7, 30)
+    )
 
 
 async def test_set_target_clamps_a_lower_restored_target_to_zero_topup():

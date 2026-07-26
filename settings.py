@@ -88,7 +88,9 @@ def _load() -> dict:
     except FileNotFoundError:
         return {}
     except (OSError, ValueError, json.JSONDecodeError):
-        logger.warning("Ignoring unreadable settings file at %s", SETTINGS_PATH, exc_info=True)
+        logger.warning(
+            "Ignoring unreadable settings file at %s", SETTINGS_PATH, exc_info=True
+        )
         return {}
 
 
@@ -108,7 +110,11 @@ def _save(data: dict) -> bool:
                 os.unlink(tmp)
         return True
     except OSError:
-        logger.warning("Could not persist settings to %s — keeping in memory only", SETTINGS_PATH, exc_info=True)
+        logger.warning(
+            "Could not persist settings to %s — keeping in memory only",
+            SETTINGS_PATH,
+            exc_info=True,
+        )
         return False
 
 
@@ -230,15 +236,23 @@ def load_notification_preferences() -> NotificationPreferences:
         value = raw.get(key)
         return (
             value
-            if isinstance(value, int) and not isinstance(value, bool) and low <= value <= high
+            if isinstance(value, int)
+            and not isinstance(value, bool)
+            and low <= value <= high
             else default
         )
 
     minimum = raw.get("minimumChargeKwh")
-    if not isinstance(minimum, (int, float)) or isinstance(minimum, bool) or not 0 <= minimum <= 100:
+    if (
+        not isinstance(minimum, (int, float))
+        or isinstance(minimum, bool)
+        or not 0 <= minimum <= 100
+    ):
         minimum = defaults.minimum_charge_kwh
     aux = raw.get("auxBatteryBelowPercent")
-    if aux is not None and (not isinstance(aux, int) or isinstance(aux, bool) or not 1 <= aux <= 100):
+    if aux is not None and (
+        not isinstance(aux, int) or isinstance(aux, bool) or not 1 <= aux <= 100
+    ):
         aux = None
     return NotificationPreferences(
         plug_in=boolean("plugIn", defaults.plug_in),
@@ -282,7 +296,11 @@ def load_vehicle_profiles() -> dict[str, VehicleProfile]:
         return {}
     profiles: dict[str, VehicleProfile] = {}
     for vehicle_id, value in raw.items():
-        if not isinstance(vehicle_id, str) or not vehicle_id or not isinstance(value, dict):
+        if (
+            not isinstance(vehicle_id, str)
+            or not vehicle_id
+            or not isinstance(value, dict)
+        ):
             continue
         try:
             target = int(value["targetPercent"])

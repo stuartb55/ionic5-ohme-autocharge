@@ -1,11 +1,13 @@
 import asyncio
 import datetime as dt
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
+
 import bluelink
 import config
-import settings
 import main
+import settings
 from main import (
     PlugInDetector,
     ensure_pending_sessions,
@@ -22,8 +24,11 @@ def _vstate(
 ):
     """Build a Bluelink VehicleState for patching bluelink.get_vehicle_state."""
     return bluelink.VehicleState(
-        soc=soc, range_miles=range_miles, odometer_miles=odometer_miles,
-        soh_percent=soh_percent, vehicle_id=vehicle_id,
+        soc=soc,
+        range_miles=range_miles,
+        odometer_miles=odometer_miles,
+        soh_percent=soh_percent,
+        vehicle_id=vehicle_id,
     )
 
 
@@ -59,7 +64,9 @@ def _reset_session_state():
 
 
 async def test_returns_false_when_bluelink_fails():
-    with patch("bluelink.get_vehicle_state", side_effect=RuntimeError("No vehicles found")):
+    with patch(
+        "bluelink.get_vehicle_state", side_effect=RuntimeError("No vehicles found")
+    ):
         result = await handle_plugin_event(_mock_ohme_client())
     assert result is False
     assert store.automation_state == "error"
@@ -72,6 +79,7 @@ async def test_returns_false_when_bluelink_times_out(monkeypatch):
 
     def slow(_vehicle_id):
         import time
+
         time.sleep(0.3)
         return _vstate(50)
 
@@ -100,9 +108,11 @@ async def test_sets_ohme_target_and_sends_notification_when_below_target(monkeyp
     monkeypatch.setattr(config, "CHARGE_TARGET", 80)
     client = _mock_ohme_client()
 
-    with patch("bluelink.get_vehicle_state", return_value=_vstate(62)), \
-         patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target, \
-         patch("ntfy.send", new=AsyncMock()) as mock_notify:
+    with (
+        patch("bluelink.get_vehicle_state", return_value=_vstate(62)),
+        patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target,
+        patch("ntfy.send", new=AsyncMock()) as mock_notify,
+    ):
         result = await handle_plugin_event(client)
 
     assert result is True
@@ -120,9 +130,11 @@ async def test_sets_ohme_target_and_sends_notification_when_below_target(monkeyp
 async def test_plug_in_notification_can_be_disabled(monkeypatch):
     monkeypatch.setattr(config, "CHARGE_TARGET", 80)
     store.notification_preferences = settings.NotificationPreferences(plug_in=False)
-    with patch("bluelink.get_vehicle_state", return_value=_vstate(62)), \
-         patch("ohme_client.set_target", new=AsyncMock()), \
-         patch("ntfy.send", new=AsyncMock()) as notify:
+    with (
+        patch("bluelink.get_vehicle_state", return_value=_vstate(62)),
+        patch("ohme_client.set_target", new=AsyncMock()),
+        patch("ntfy.send", new=AsyncMock()) as notify,
+    ):
         assert await handle_plugin_event(_mock_ohme_client()) is True
     notify.assert_not_called()
 
@@ -131,10 +143,12 @@ async def test_plug_in_uses_profile_for_vehicle_returned_by_bluelink(monkeypatch
     monkeypatch.setattr(config, "CHARGE_TARGET", 80)
     store.set_vehicle_profiles({"car-2": settings.VehicleProfile(95, "05:45")})
     client = _mock_ohme_client()
-    with patch(
-        "bluelink.get_vehicle_state", return_value=_vstate(60, vehicle_id="car-2")
-    ), patch("ohme_client.set_target", new=AsyncMock()) as set_target, patch(
-        "ntfy.send", new=AsyncMock()
+    with (
+        patch(
+            "bluelink.get_vehicle_state", return_value=_vstate(60, vehicle_id="car-2")
+        ),
+        patch("ohme_client.set_target", new=AsyncMock()) as set_target,
+        patch("ntfy.send", new=AsyncMock()),
     ):
         assert await handle_plugin_event(client) is True
     set_target.assert_awaited_once_with(
@@ -151,14 +165,17 @@ async def test_problem_notification_can_be_disabled():
 
 async def test_notification_includes_charge_schedule_when_slots_available(monkeypatch):
     from unittest.mock import MagicMock as MM
+
     monkeypatch.setattr(config, "CHARGE_TARGET", 80)
     slot = MM()
     slot.__str__ = lambda self: "01:00-03:30"
     client = _mock_ohme_client(slots=[slot])
 
-    with patch("bluelink.get_vehicle_state", return_value=_vstate(62)), \
-         patch("ohme_client.set_target", new=AsyncMock()), \
-         patch("ntfy.send", new=AsyncMock()) as mock_notify:
+    with (
+        patch("bluelink.get_vehicle_state", return_value=_vstate(62)),
+        patch("ohme_client.set_target", new=AsyncMock()),
+        patch("ntfy.send", new=AsyncMock()) as mock_notify,
+    ):
         await handle_plugin_event(client)
 
     msg = mock_notify.call_args[0][0]
@@ -174,14 +191,18 @@ async def test_records_session_and_schedule_when_db_enabled(monkeypatch):
     client.next_slot_start = None
     client.next_slot_end = None
 
-    with patch("bluelink.get_vehicle_state", return_value=_vstate(62, soh_percent=98)), \
-         patch("ohme_client.set_target", new=AsyncMock()), \
-         patch("ntfy.send", new=AsyncMock()), \
-         patch("db.is_enabled", return_value=True), \
-         patch("db.is_available", return_value=True), \
-         patch("db.record_session", new=AsyncMock(return_value=7)) as mock_session, \
-         patch("db.record_initial_session_event", new=AsyncMock(return_value=True)), \
-         patch("db.record_initial_schedule", new=AsyncMock(return_value=True)) as mock_schedule:
+    with (
+        patch("bluelink.get_vehicle_state", return_value=_vstate(62, soh_percent=98)),
+        patch("ohme_client.set_target", new=AsyncMock()),
+        patch("ntfy.send", new=AsyncMock()),
+        patch("db.is_enabled", return_value=True),
+        patch("db.is_available", return_value=True),
+        patch("db.record_session", new=AsyncMock(return_value=7)) as mock_session,
+        patch("db.record_initial_session_event", new=AsyncMock(return_value=True)),
+        patch(
+            "db.record_initial_schedule", new=AsyncMock(return_value=True)
+        ) as mock_schedule,
+    ):
         plugged_at = dt.datetime(2026, 6, 1, 20, 0, tzinfo=dt.timezone.utc)
         result = await handle_plugin_event(
             client, session_key="session-1", plugged_in_at=plugged_at
@@ -189,10 +210,19 @@ async def test_records_session_and_schedule_when_db_enabled(monkeypatch):
 
     assert result is True
     mock_session.assert_awaited_once_with(
-        vehicle_name="IONIQ 5", soc_percent=62, target_percent=80, topup_percent=18,
-        action="configured", odometer_miles=10000, soh_percent=98,
-        session_key="session-1", vehicle_id=None, vin=None, charger_id=None,
-        source_observed_at=None, plugged_in_at=plugged_at,
+        vehicle_name="IONIQ 5",
+        soc_percent=62,
+        target_percent=80,
+        topup_percent=18,
+        action="configured",
+        odometer_miles=10000,
+        soh_percent=98,
+        session_key="session-1",
+        vehicle_id=None,
+        vin=None,
+        charger_id=None,
+        source_observed_at=None,
+        plugged_in_at=plugged_at,
     )
     mock_schedule.assert_awaited_once()
     assert mock_schedule.call_args.kwargs["session_id"] == 7
@@ -203,10 +233,15 @@ async def test_records_skipped_session_when_already_at_target(monkeypatch):
     client = _mock_ohme_client()
     client.current_vehicle = "IONIQ 5"
 
-    with patch("bluelink.get_vehicle_state", return_value=_vstate(90, odometer_miles=12000, soh_percent=97)), \
-         patch("db.is_enabled", return_value=True), \
-         patch("db.is_available", return_value=True), \
-         patch("db.record_session", new=AsyncMock(return_value=1)) as mock_session:
+    with (
+        patch(
+            "bluelink.get_vehicle_state",
+            return_value=_vstate(90, odometer_miles=12000, soh_percent=97),
+        ),
+        patch("db.is_enabled", return_value=True),
+        patch("db.is_available", return_value=True),
+        patch("db.record_session", new=AsyncMock(return_value=1)) as mock_session,
+    ):
         plugged_at = dt.datetime(2026, 6, 1, 20, 0, tzinfo=dt.timezone.utc)
         result = await handle_plugin_event(
             client, session_key="session-2", plugged_in_at=plugged_at
@@ -214,10 +249,19 @@ async def test_records_skipped_session_when_already_at_target(monkeypatch):
 
     assert result is True
     mock_session.assert_awaited_once_with(
-        vehicle_name="IONIQ 5", soc_percent=90, target_percent=80, topup_percent=0,
-        action="skipped_at_target", odometer_miles=12000, soh_percent=97,
-        session_key="session-2", vehicle_id=None, vin=None, charger_id=None,
-        source_observed_at=None, plugged_in_at=plugged_at,
+        vehicle_name="IONIQ 5",
+        soc_percent=90,
+        target_percent=80,
+        topup_percent=0,
+        action="skipped_at_target",
+        odometer_miles=12000,
+        soh_percent=97,
+        session_key="session-2",
+        vehicle_id=None,
+        vin=None,
+        charger_id=None,
+        source_observed_at=None,
+        plugged_in_at=plugged_at,
     )
 
 
@@ -228,9 +272,12 @@ async def test_disabled_persistence_does_not_create_session_outbox(monkeypatch):
         patch("db.is_enabled", return_value=False),
         patch("db.record_session", new=AsyncMock()) as record,
     ):
-        assert await handle_plugin_event(
-            _mock_ohme_client(), session_key="memory-only-session"
-        ) is True
+        assert (
+            await handle_plugin_event(
+                _mock_ohme_client(), session_key="memory-only-session"
+            )
+            is True
+        )
 
     record.assert_not_awaited()
     assert store.pending_sessions == {}
@@ -258,11 +305,16 @@ async def test_session_row_recovers_after_database_outage(monkeypatch):
         patch(
             "db.record_initial_session_event", new=AsyncMock(return_value=True)
         ) as event,
-        patch("db.record_initial_schedule", new=AsyncMock(return_value=True)) as schedule,
+        patch(
+            "db.record_initial_schedule", new=AsyncMock(return_value=True)
+        ) as schedule,
     ):
-        assert await handle_plugin_event(
-            client, session_key="outage-session", plugged_in_at=plugged_at
-        ) is True
+        assert (
+            await handle_plugin_event(
+                client, session_key="outage-session", plugged_in_at=plugged_at
+            )
+            is True
+        )
 
         # Target configuration succeeds independently. Its history row remains
         # durably queued, and no audit write is attempted against a missing id.
@@ -272,9 +324,7 @@ async def test_session_row_recovers_after_database_outage(monkeypatch):
         event.assert_not_awaited()
         schedule.assert_not_awaited()
 
-        assert await ensure_pending_sessions(
-            active_session_key="outage-session"
-        ) == 7
+        assert await ensure_pending_sessions(active_session_key="outage-session") == 7
 
     assert record.await_count == 2
     assert store.active_session_id == 7
@@ -301,9 +351,7 @@ async def test_session_outbox_recovers_after_process_state_is_lost(monkeypatch):
         store.pending_sessions = {}
         store.active_session_id = None
         store.active_session_key = "restart-session"
-        assert await ensure_pending_sessions(
-            active_session_key="restart-session"
-        ) == 11
+        assert await ensure_pending_sessions(active_session_key="restart-session") == 11
 
     assert record.await_count == 2
     assert store.active_session_id == 11
@@ -330,9 +378,10 @@ async def test_connected_poll_automatically_drains_session_outbox():
     client = _mock_ohme_client()
     client.energy = 1_500
 
-    with patch("db.is_enabled", return_value=True), patch(
-        "db.record_session", new=AsyncMock(return_value=23)
-    ) as record:
+    with (
+        patch("db.is_enabled", return_value=True),
+        patch("db.record_session", new=AsyncMock(return_value=23)) as record,
+    ):
         assert await detector.update(client, ChargerStatus.CHARGING) is True
 
     record.assert_awaited_once()
@@ -359,9 +408,10 @@ async def test_full_acknowledged_payload_recreates_missing_database_row():
         patch("db.get_session_id_by_key", new=AsyncMock(return_value=None)) as lookup,
         patch("db.record_session", new=AsyncMock(return_value=29)) as record,
     ):
-        assert await ensure_pending_sessions(
-            active_session_key="restored-db-session"
-        ) == 29
+        assert (
+            await ensure_pending_sessions(active_session_key="restored-db-session")
+            == 29
+        )
 
     lookup.assert_awaited_once_with("restored-db-session")
     record.assert_awaited_once()
@@ -425,9 +475,14 @@ async def test_database_outage_through_unplug_replays_final_close(monkeypatch):
 async def test_returns_false_when_ohme_fails_and_sends_only_failure_alert(monkeypatch):
     monkeypatch.setattr(config, "CHARGE_TARGET", 80)
 
-    with patch("bluelink.get_vehicle_state", return_value=_vstate(62)), \
-         patch("ohme_client.set_target", new=AsyncMock(side_effect=Exception("Ohme API error"))), \
-         patch("ntfy.send", new=AsyncMock()) as mock_notify:
+    with (
+        patch("bluelink.get_vehicle_state", return_value=_vstate(62)),
+        patch(
+            "ohme_client.set_target",
+            new=AsyncMock(side_effect=Exception("Ohme API error")),
+        ),
+        patch("ntfy.send", new=AsyncMock()) as mock_notify,
+    ):
         result = await handle_plugin_event(_mock_ohme_client())
 
     assert result is False
@@ -443,8 +498,10 @@ async def test_returns_false_when_ohme_fails_and_sends_only_failure_alert(monkey
 async def test_no_ohme_call_when_soc_at_or_above_target(monkeypatch):
     monkeypatch.setattr(config, "CHARGE_TARGET", 80)
 
-    with patch("bluelink.get_vehicle_state", return_value=_vstate(80)), \
-         patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
+    with (
+        patch("bluelink.get_vehicle_state", return_value=_vstate(80)),
+        patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target,
+    ):
         await handle_plugin_event(_mock_ohme_client())
 
     mock_set_target.assert_not_called()
@@ -454,8 +511,10 @@ async def test_no_ohme_call_when_soc_at_or_above_target(monkeypatch):
 
 
 async def test_bluelink_failure_notifies_once_per_session():
-    with patch("bluelink.get_vehicle_state", side_effect=RuntimeError("down")), \
-         patch("ntfy.send", new=AsyncMock()) as mock_notify:
+    with (
+        patch("bluelink.get_vehicle_state", side_effect=RuntimeError("down")),
+        patch("ntfy.send", new=AsyncMock()) as mock_notify,
+    ):
         # The poll loop retries every interval; only the first failure alerts.
         await handle_plugin_event(_mock_ohme_client())
         await handle_plugin_event(_mock_ohme_client())
@@ -466,9 +525,11 @@ async def test_bluelink_failure_notifies_once_per_session():
 
 async def test_ohme_failure_notifies_once_per_session(monkeypatch):
     monkeypatch.setattr(config, "CHARGE_TARGET", 80)
-    with patch("bluelink.get_vehicle_state", return_value=_vstate(62)), \
-         patch("ohme_client.set_target", new=AsyncMock(side_effect=Exception("boom"))), \
-         patch("ntfy.send", new=AsyncMock()) as mock_notify:
+    with (
+        patch("bluelink.get_vehicle_state", return_value=_vstate(62)),
+        patch("ohme_client.set_target", new=AsyncMock(side_effect=Exception("boom"))),
+        patch("ntfy.send", new=AsyncMock()) as mock_notify,
+    ):
         await handle_plugin_event(_mock_ohme_client())
         await handle_plugin_event(_mock_ohme_client())
 
@@ -479,9 +540,11 @@ async def test_successful_handling_resets_failure_notice(monkeypatch):
     monkeypatch.setattr(config, "CHARGE_TARGET", 80)
     store.plugin_failure_notified = True  # a previous attempt alerted
 
-    with patch("bluelink.get_vehicle_state", return_value=_vstate(62)), \
-         patch("ohme_client.set_target", new=AsyncMock()), \
-         patch("ntfy.send", new=AsyncMock()):
+    with (
+        patch("bluelink.get_vehicle_state", return_value=_vstate(62)),
+        patch("ohme_client.set_target", new=AsyncMock()),
+        patch("ntfy.send", new=AsyncMock()),
+    ):
         result = await handle_plugin_event(_mock_ohme_client())
 
     assert result is True
@@ -489,6 +552,7 @@ async def test_successful_handling_resets_failure_notice(monkeypatch):
 
 
 # --- run_loop startup behaviour ---
+
 
 def _make_loop_client():
     """Return a mock Ohme client for run_loop tests."""
@@ -508,10 +572,17 @@ async def test_restart_mid_handled_session_does_not_re_handle(monkeypatch):
 
     from ohme import ChargerStatus
 
-    with patch("ohme_client.make_client", new=AsyncMock(return_value=client)), \
-         patch("ohme_client.get_charger_status", new=AsyncMock(return_value=ChargerStatus.CHARGING)), \
-         patch("main.handle_plugin_event", new=AsyncMock(return_value=True)) as mock_handle, \
-         patch("asyncio.sleep", side_effect=asyncio.CancelledError()):
+    with (
+        patch("ohme_client.make_client", new=AsyncMock(return_value=client)),
+        patch(
+            "ohme_client.get_charger_status",
+            new=AsyncMock(return_value=ChargerStatus.CHARGING),
+        ),
+        patch(
+            "main.handle_plugin_event", new=AsyncMock(return_value=True)
+        ) as mock_handle,
+        patch("asyncio.sleep", side_effect=asyncio.CancelledError()),
+    ):
         try:
             await run_loop()
         except asyncio.CancelledError:
@@ -531,10 +602,17 @@ async def test_connected_on_startup_without_prior_session_is_handled(monkeypatch
 
     from ohme import ChargerStatus
 
-    with patch("ohme_client.make_client", new=AsyncMock(return_value=client)), \
-         patch("ohme_client.get_charger_status", new=AsyncMock(return_value=ChargerStatus.CHARGING)), \
-         patch("main.handle_plugin_event", new=AsyncMock(return_value=True)) as mock_handle, \
-         patch("asyncio.sleep", side_effect=asyncio.CancelledError()):
+    with (
+        patch("ohme_client.make_client", new=AsyncMock(return_value=client)),
+        patch(
+            "ohme_client.get_charger_status",
+            new=AsyncMock(return_value=ChargerStatus.CHARGING),
+        ),
+        patch(
+            "main.handle_plugin_event", new=AsyncMock(return_value=True)
+        ) as mock_handle,
+        patch("asyncio.sleep", side_effect=asyncio.CancelledError()),
+    ):
         try:
             await run_loop()
         except asyncio.CancelledError:
@@ -555,8 +633,10 @@ async def test_run_once_exit_code_reflects_outcome(handled, expected_code):
     """CI/smoke callers rely on the exit code, so a failed one-shot must be non-zero."""
     client = _make_loop_client()
 
-    with patch("ohme_client.make_client", new=AsyncMock(return_value=client)), \
-         patch("main.handle_plugin_event", new=AsyncMock(return_value=handled)):
+    with (
+        patch("ohme_client.make_client", new=AsyncMock(return_value=client)),
+        patch("main.handle_plugin_event", new=AsyncMock(return_value=handled)),
+    ):
         assert await run_once() == expected_code
 
     client.close.assert_awaited()
@@ -572,14 +652,20 @@ async def test_unplug_clears_recorded_soc(monkeypatch):
 
     # Startup + poll 1: connected (plug-in handled); poll 2: unplugged.
     statuses = AsyncMock(
-        side_effect=[ChargerStatus.CHARGING, ChargerStatus.CHARGING, ChargerStatus.UNPLUGGED]
+        side_effect=[
+            ChargerStatus.CHARGING,
+            ChargerStatus.CHARGING,
+            ChargerStatus.UNPLUGGED,
+        ]
     )
     sleeps = AsyncMock(side_effect=[None, asyncio.CancelledError()])
 
-    with patch("ohme_client.make_client", new=AsyncMock(return_value=client)), \
-         patch("ohme_client.get_charger_status", new=statuses), \
-         patch("main.handle_plugin_event", new=AsyncMock(return_value=True)), \
-         patch("asyncio.sleep", new=sleeps):
+    with (
+        patch("ohme_client.make_client", new=AsyncMock(return_value=client)),
+        patch("ohme_client.get_charger_status", new=statuses),
+        patch("main.handle_plugin_event", new=AsyncMock(return_value=True)),
+        patch("asyncio.sleep", new=sleeps),
+    ):
         try:
             await run_loop()
         except asyncio.CancelledError:
@@ -606,9 +692,10 @@ async def test_unplug_uses_last_session_energy_after_ohme_counter_resets():
     client = _mock_ohme_client()
     client.energy = 0
 
-    with patch("db.is_enabled", return_value=True), patch(
-        "db.close_session", new=AsyncMock(return_value=True)
-    ) as close:
+    with (
+        patch("db.is_enabled", return_value=True),
+        patch("db.close_session", new=AsyncMock(return_value=True)) as close,
+    ):
         await detector.update(client, ChargerStatus.UNPLUGGED)
 
     close.assert_awaited_once_with(
@@ -634,9 +721,11 @@ async def test_unplug_consumes_trip_mode():
     client = _mock_ohme_client()
     client.energy = 1200
 
-    with patch("db.is_enabled", return_value=True), \
-         patch("db.close_session", new=AsyncMock(return_value=True)) as close, \
-         patch("db.record_session_event", new=AsyncMock()) as event:
+    with (
+        patch("db.is_enabled", return_value=True),
+        patch("db.close_session", new=AsyncMock(return_value=True)) as close,
+        patch("db.record_session_event", new=AsyncMock()) as event,
+    ):
         connected = await detector.update(client, ChargerStatus.UNPLUGGED)
 
     assert connected is False

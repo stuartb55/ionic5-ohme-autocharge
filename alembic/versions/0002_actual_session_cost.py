@@ -60,7 +60,11 @@ def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS charging_intervals")
     op.execute("DROP TABLE IF EXISTS tariff_rates")
     for column in (
-        "reconciliation_delta_wh", "reconstructed_energy_wh", "tariff_coverage",
-        "cost_method", "cost_currency", "actual_cost_minor",
+        "reconciliation_delta_wh",
+        "reconstructed_energy_wh",
+        "tariff_coverage",
+        "cost_method",
+        "cost_currency",
+        "actual_cost_minor",
     ):
         op.execute(f"ALTER TABLE charge_sessions DROP COLUMN IF EXISTS {column}")

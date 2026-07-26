@@ -18,26 +18,27 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
+from itertools import pairwise
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from alembic import command
 from alembic.config import Config
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 import config
+from alembic import command
 
 logger = logging.getLogger(__name__)
 
 # Created in init() when DATABASE_URL is set and reachable; stays None otherwise,
 # which is the signal every write helper checks to decide whether it is a no-op.
-_pool: Optional[AsyncConnectionPool] = None
+_pool: AsyncConnectionPool | None = None
 _init_lock = asyncio.Lock()
 
 
-def _minor_factor(currency: Optional[str]) -> int:
+def _minor_factor(currency: str | None) -> int:
     return {"JPY": 1, "KWD": 1000}.get((currency or "GBP").upper(), 100)
 
 
@@ -77,7 +78,7 @@ async def init() -> None:
     async with _init_lock:
         if is_available():
             return
-        pool: Optional[AsyncConnectionPool] = None
+        pool: AsyncConnectionPool | None = None
         try:
             # Alembic/SQLAlchemy uses a synchronous connection; keep it off the event
             # loop before opening the application's async psycopg pool.
@@ -87,12 +88,14 @@ async def init() -> None:
             )
             await pool.open(wait=True, timeout=10)
             _pool = pool
-            logger.info("Postgres history persistence enabled; schema is at Alembic head")
+            logger.info(
+                "Postgres history persistence enabled; schema is at Alembic head"
+            )
         except Exception:
             if pool is not None:
                 try:
                     await pool.close()
-                except Exception:  # noqa: BLE001 - cleanup after failed open
+                except Exception:
                     logger.debug("Failed to close partial Postgres pool", exc_info=True)
             logger.warning(
                 "Could not initialise Postgres — retrying in the background",
@@ -133,20 +136,20 @@ async def close() -> None:
 
 async def record_session(
     *,
-    vehicle_name: Optional[str],
-    soc_percent: Optional[int],
-    target_percent: Optional[int],
-    topup_percent: Optional[int],
+    vehicle_name: str | None,
+    soc_percent: int | None,
+    target_percent: int | None,
+    topup_percent: int | None,
     action: str,
-    odometer_miles: Optional[int] = None,
-    soh_percent: Optional[int] = None,
-    session_key: Optional[str] = None,
-    vehicle_id: Optional[str] = None,
-    vin: Optional[str] = None,
-    charger_id: Optional[str] = None,
-    source_observed_at: Optional[datetime.datetime] = None,
-    plugged_in_at: Optional[datetime.datetime] = None,
-) -> Optional[int]:
+    odometer_miles: int | None = None,
+    soh_percent: int | None = None,
+    session_key: str | None = None,
+    vehicle_id: str | None = None,
+    vin: str | None = None,
+    charger_id: str | None = None,
+    source_observed_at: datetime.datetime | None = None,
+    plugged_in_at: datetime.datetime | None = None,
+) -> int | None:
     """Insert one charge-session row and return its id (None when disabled/failed).
 
     ``action`` is "configured" when Ohme was set up to top up, or
@@ -171,9 +174,21 @@ async def record_session(
                 " vin = EXCLUDED.vin, charger_id = EXCLUDED.charger_id, "
                 " source_observed_at = EXCLUDED.source_observed_at, updated_at = now() "
                 "RETURNING id",
-                (vehicle_name, soc_percent, target_percent, topup_percent, action,
-                 odometer_miles, soh_percent, session_key, vehicle_id, vin, charger_id,
-                 source_observed_at, plugged_in_at),
+                (
+                    vehicle_name,
+                    soc_percent,
+                    target_percent,
+                    topup_percent,
+                    action,
+                    odometer_miles,
+                    soh_percent,
+                    session_key,
+                    vehicle_id,
+                    vin,
+                    charger_id,
+                    source_observed_at,
+                    plugged_in_at,
+                ),
             )
             row = await cur.fetchone()
             return row[0] if row else None
@@ -183,10 +198,10 @@ async def record_session(
 
 
 async def close_session(
-    session_key: Optional[str],
+    session_key: str | None,
     *,
-    actual_energy_wh: Optional[float],
-    end_soc_percent: Optional[int] = None,
+    actual_energy_wh: float | None,
+    end_soc_percent: int | None = None,
     completion_reason: str = "unplugged",
 ) -> bool:
     """Close the durable session identified by ``session_key``. Idempotent.
@@ -222,12 +237,12 @@ async def close_session(
 
 
 async def complete_session(
-    session_key: Optional[str],
+    session_key: str | None,
     *,
     actual_energy_wh: float,
-    end_soc_percent: Optional[int],
+    end_soc_percent: int | None,
     completion_reason: str = "finished",
-) -> Optional[int]:
+) -> int | None:
     """Record charge completion while the cable may remain connected.
 
     The update is safe to repeat for every observed ``finished`` snapshot.  The
@@ -265,7 +280,7 @@ async def complete_session(
 
 
 async def record_session_event(
-    session_id: Optional[int], event_type: str, details: Optional[dict[str, Any]] = None
+    session_id: int | None, event_type: str, details: dict[str, Any] | None = None
 ) -> None:
     """Append an immutable lifecycle/control event for a durable session."""
     if _pool is None or session_id is None:
@@ -281,7 +296,7 @@ async def record_session_event(
 
 
 async def record_initial_session_event(
-    session_id: Optional[int], event_type: str, details: Optional[dict[str, Any]] = None
+    session_id: int | None, event_type: str, details: dict[str, Any] | None = None
 ) -> bool:
     """Persist one initial lifecycle event without duplicating outbox replays."""
     if _pool is None or session_id is None:
@@ -301,7 +316,7 @@ async def record_initial_session_event(
         return False
 
 
-async def get_session_id_by_key(session_key: Optional[str]) -> Optional[int]:
+async def get_session_id_by_key(session_key: str | None) -> int | None:
     """Resolve a persisted active-session key after a process restart."""
     if _pool is None or not session_key:
         return None
@@ -317,7 +332,7 @@ async def get_session_id_by_key(session_key: Optional[str]) -> Optional[int]:
         return None
 
 
-async def get_recent_sessions(limit: int) -> Optional[list[dict[str, Any]]]:
+async def get_recent_sessions(limit: int) -> list[dict[str, Any]] | None:
     """Return the most recent charge sessions, newest first.
 
     Returns None when persistence is disabled or the read fails, so the API
@@ -347,7 +362,9 @@ async def get_recent_sessions(limit: int) -> Optional[list[dict[str, Any]]]:
                 "action": row[6],
                 "odometerMiles": row[7],
                 "sohPercent": row[8],
-                "actualEnergyKwh": round(row[9] / 1000, 3) if row[9] is not None else None,
+                "actualEnergyKwh": round(row[9] / 1000, 3)
+                if row[9] is not None
+                else None,
                 "actualCost": round(row[10] / 100, 2) if row[10] is not None else None,
                 "costCurrency": row[11],
                 "costMethod": row[12],
@@ -362,7 +379,7 @@ async def get_recent_sessions(limit: int) -> Optional[list[dict[str, Any]]]:
         return None
 
 
-async def get_all_sessions() -> Optional[list[dict[str, Any]]]:
+async def get_all_sessions() -> list[dict[str, Any]] | None:
     """Return every charge session, oldest first, for a full-history export.
 
     Same shape as :func:`get_recent_sessions` but unbounded and chronological
@@ -393,7 +410,9 @@ async def get_all_sessions() -> Optional[list[dict[str, Any]]]:
                 "action": row[6],
                 "odometerMiles": row[7],
                 "sohPercent": row[8],
-                "actualEnergyKwh": round(row[9] / 1000, 3) if row[9] is not None else None,
+                "actualEnergyKwh": round(row[9] / 1000, 3)
+                if row[9] is not None
+                else None,
                 "actualCost": round(row[10] / 100, 2) if row[10] is not None else None,
                 "costCurrency": row[11],
                 "costMethod": row[12],
@@ -404,11 +423,13 @@ async def get_all_sessions() -> Optional[list[dict[str, Any]]]:
             for row in rows
         ]
     except Exception:
-        logger.warning("Failed to read all charge sessions from Postgres", exc_info=True)
+        logger.warning(
+            "Failed to read all charge sessions from Postgres", exc_info=True
+        )
         return None
 
 
-async def get_session_audit(session_id: int) -> Optional[dict[str, Any]]:
+async def get_session_audit(session_id: int) -> dict[str, Any] | None:
     """Full provenance for one session: identity, events, schedules and pricing."""
     if _pool is None:
         return None
@@ -477,7 +498,8 @@ async def get_session_audit(session_id: int) -> Optional[dict[str, Any]]:
                 "updatedAt": session[26],
             },
             "events": [
-                {"at": row[0], "type": row[1], "details": row[2] or {}} for row in events
+                {"at": row[0], "type": row[1], "details": row[2] or {}}
+                for row in events
             ],
             "schedules": [
                 {
@@ -509,7 +531,7 @@ async def get_session_audit(session_id: int) -> Optional[dict[str, Any]]:
         return None
 
 
-async def get_soh_history(limit: int) -> Optional[list[dict[str, Any]]]:
+async def get_soh_history(limit: int) -> list[dict[str, Any]] | None:
     """Battery state-of-health readings over time, oldest first, for the trend.
 
     Captured once per plug-in, SoH moves very slowly, so consecutive identical
@@ -535,7 +557,7 @@ async def get_soh_history(limit: int) -> Optional[list[dict[str, Any]]]:
     # rows come newest-first; walk oldest-first and keep only the points where
     # the value changed (plus the very first reading).
     history: list[dict[str, Any]] = []
-    prev: Optional[int] = None
+    prev: int | None = None
     for ts, soh in reversed(rows):
         if soh != prev:
             history.append({"date": ts.isoformat() if ts else None, "sohPercent": soh})
@@ -545,10 +567,10 @@ async def get_soh_history(limit: int) -> Optional[list[dict[str, Any]]]:
 
 async def record_schedule(
     *,
-    session_id: Optional[int],
+    session_id: int | None,
     slots: list[dict[str, Any]],
-    next_slot_start: Optional[datetime.datetime],
-    next_slot_end: Optional[datetime.datetime],
+    next_slot_start: datetime.datetime | None,
+    next_slot_end: datetime.datetime | None,
     reason: str = "initial",
 ) -> None:
     """Persist the Ohme charge schedule captured when a session was configured."""
@@ -562,7 +584,14 @@ async def record_schedule(
                 "VALUES (%s, %s, %s, %s, "
                 " (SELECT COALESCE(MAX(revision), 0) + 1 FROM schedule_snapshots "
                 "  WHERE session_id IS NOT DISTINCT FROM %s), %s)",
-                (session_id, next_slot_start, next_slot_end, Jsonb(slots), session_id, reason),
+                (
+                    session_id,
+                    next_slot_start,
+                    next_slot_end,
+                    Jsonb(slots),
+                    session_id,
+                    reason,
+                ),
             )
     except Exception:
         logger.warning("Failed to record charge schedule to Postgres", exc_info=True)
@@ -570,10 +599,10 @@ async def record_schedule(
 
 async def record_initial_schedule(
     *,
-    session_id: Optional[int],
+    session_id: int | None,
     slots: list[dict[str, Any]],
-    next_slot_start: Optional[datetime.datetime],
-    next_slot_end: Optional[datetime.datetime],
+    next_slot_start: datetime.datetime | None,
+    next_slot_end: datetime.datetime | None,
 ) -> bool:
     """Persist the initial schedule exactly once across durable outbox retries."""
     if _pool is None or session_id is None:
@@ -603,7 +632,7 @@ async def record_initial_schedule(
         return False
 
 
-async def record_telemetry(snap: Any, *, session_id: Optional[int] = None) -> None:
+async def record_telemetry(snap: Any, *, session_id: int | None = None) -> None:
     """Append one telemetry row from a :class:`state.StatusSnapshot`."""
     if _pool is None:
         return
@@ -654,10 +683,10 @@ async def prune_telemetry(retention_days: int) -> None:
 
 async def record_daily_stats(
     daily: list[dict[str, Any]],
-    currency: Optional[str],
+    currency: str | None,
     *,
-    window_start: Optional[datetime.date] = None,
-    window_end: Optional[datetime.date] = None,
+    window_start: datetime.date | None = None,
+    window_end: datetime.date | None = None,
 ) -> None:
     """Upsert Ohme's per-day totals (energy/savings/cost) keyed by date.
 
@@ -679,37 +708,37 @@ async def record_daily_stats(
         if day.get("energyWh") is not None:
             energy_wh = int(
                 Decimal(str(day["energyWh"])).quantize(
-                    Decimal("1"), rounding=ROUND_HALF_UP
+                    Decimal(1), rounding=ROUND_HALF_UP
                 )
             )
         else:
             energy_wh = int(
                 (Decimal(str(day.get("energyKwh") or 0)) * 1000).quantize(
-                    Decimal("1"), rounding=ROUND_HALF_UP
+                    Decimal(1), rounding=ROUND_HALF_UP
                 )
             )
         if day.get("savingsMinor") is not None:
             savings_minor = int(
                 Decimal(str(day["savingsMinor"])).quantize(
-                    Decimal("1"), rounding=ROUND_HALF_UP
+                    Decimal(1), rounding=ROUND_HALF_UP
                 )
             )
         else:
             savings_minor = int(
                 (Decimal(str(day.get("savings") or 0)) * factor).quantize(
-                    Decimal("1"), rounding=ROUND_HALF_UP
+                    Decimal(1), rounding=ROUND_HALF_UP
                 )
             )
         if day.get("costMinor") is not None:
             cost_minor = int(
                 Decimal(str(day["costMinor"])).quantize(
-                    Decimal("1"), rounding=ROUND_HALF_UP
+                    Decimal(1), rounding=ROUND_HALF_UP
                 )
             )
         else:
             cost_minor = int(
                 (Decimal(str(day.get("cost") or 0)) * factor).quantize(
-                    Decimal("1"), rounding=ROUND_HALF_UP
+                    Decimal(1), rounding=ROUND_HALF_UP
                 )
             )
         energy_kwh = Decimal(energy_wh) / 1000
@@ -717,8 +746,14 @@ async def record_daily_stats(
         cost = Decimal(cost_minor) / factor
         rows.append(
             (
-                day["date"], float(energy_kwh), float(savings), float(cost), row_currency,
-                energy_wh, savings_minor, cost_minor,
+                day["date"],
+                float(energy_kwh),
+                float(savings),
+                float(cost),
+                row_currency,
+                energy_wh,
+                savings_minor,
+                cost_minor,
                 bool(day.get("isComplete", False)),
             )
         )
@@ -762,7 +797,7 @@ async def record_daily_stats(
 
 async def get_monthly_report_rows(
     start: datetime.datetime, end: datetime.datetime
-) -> Optional[dict[str, list[dict[str, Any]]]]:
+) -> dict[str, list[dict[str, Any]]] | None:
     """Exact persisted account-day and home-session evidence for ``[start, end)``."""
     if _pool is None:
         return None
@@ -817,7 +852,7 @@ async def get_monthly_report_rows(
         return None
 
 
-async def get_single_vehicle_id() -> Optional[str]:
+async def get_single_vehicle_id() -> str | None:
     """Return the sole persisted vehicle id, or None when ambiguous/unavailable."""
     if _pool is None:
         return None
@@ -834,7 +869,7 @@ async def get_single_vehicle_id() -> Optional[str]:
         return None
 
 
-async def get_ingestion_cursor(source: str) -> Optional[datetime.datetime]:
+async def get_ingestion_cursor(source: str) -> datetime.datetime | None:
     """Last successfully ingested upstream instant for a resumable source."""
     if _pool is None:
         return None
@@ -851,7 +886,7 @@ async def get_ingestion_cursor(source: str) -> Optional[datetime.datetime]:
 
 
 async def set_ingestion_cursor(
-    source: str, cursor_at: datetime.datetime, metadata: Optional[dict[str, Any]] = None
+    source: str, cursor_at: datetime.datetime, metadata: dict[str, Any] | None = None
 ) -> None:
     """Advance an ingestion cursor only after its rows have been persisted."""
     if _pool is None:
@@ -866,10 +901,12 @@ async def set_ingestion_cursor(
                 (source, cursor_at, Jsonb(metadata or {})),
             )
     except Exception:
-        logger.warning("Failed to advance ingestion cursor for %s", source, exc_info=True)
+        logger.warning(
+            "Failed to advance ingestion cursor for %s", source, exc_info=True
+        )
 
 
-async def get_data_quality_summary() -> Optional[dict[str, Any]]:
+async def get_data_quality_summary() -> dict[str, Any] | None:
     """Aggregate persistence completeness without returning sensitive raw data."""
     if _pool is None:
         return None
@@ -918,8 +955,8 @@ async def get_data_quality_summary() -> Optional[dict[str, Any]]:
 
 
 async def get_vehicle_driving_metrics(
-    start: datetime.datetime, end: datetime.datetime, vehicle_id: Optional[str]
-) -> Optional[dict[str, Any]]:
+    start: datetime.datetime, end: datetime.datetime, vehicle_id: str | None
+) -> dict[str, Any] | None:
     """Pair each home-charge session with distance driven before the next plug-in.
 
     Only intervals fully contained in ``[start, end)`` and carrying a final
@@ -944,9 +981,9 @@ async def get_vehicle_driving_metrics(
 
     energy_miles = energy_wh = interval_count = 0
     cost_miles = cost_minor = cost_interval_count = 0
-    cost_currency: Optional[str] = None
+    cost_currency: str | None = None
     first_at = last_at = None
-    for current, nxt in zip(rows, rows[1:]):
+    for current, nxt in pairwise(rows):
         at, odometer, session_wh, session_cost, currency = current
         next_at, next_odometer = nxt[0], nxt[1]
         if at is None or next_at is None or at < start or next_at > end:
@@ -986,7 +1023,7 @@ async def get_vehicle_driving_metrics(
 
 async def get_telemetry_between(
     start: datetime.datetime, end: datetime.datetime
-) -> Optional[list[tuple]]:
+) -> list[tuple] | None:
     """Ordered session-linked telemetry rows in ``[start, end]``.
 
     Feeds :func:`energy.attribute_car_kwh` so the car's half-hourly share can be
@@ -1012,7 +1049,7 @@ async def get_telemetry_between(
         return None
 
 
-async def get_session_attribution_rows(session_id: int) -> Optional[list[tuple]]:
+async def get_session_attribution_rows(session_id: int) -> list[tuple] | None:
     """Raw counter/power rows for one explicit session, oldest first."""
     if _pool is None:
         return None
@@ -1030,7 +1067,7 @@ async def get_session_attribution_rows(session_id: int) -> Optional[list[tuple]]
         return None
 
 
-async def get_session_schedule_slots(session_id: int) -> Optional[list[dict[str, Any]]]:
+async def get_session_schedule_slots(session_id: int) -> list[dict[str, Any]] | None:
     """All distinct Ohme slots recorded for a durable charging session."""
     if _pool is None:
         return None
@@ -1081,25 +1118,24 @@ async def upsert_tariff_rates(rates: list[dict[str, Any]]) -> None:
     if not params:
         return
     try:
-        async with _pool.connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.executemany(
-                    "INSERT INTO tariff_rates "
-                    "(valid_from, valid_to, price_minor_per_kwh, currency, source) "
-                    "VALUES (%s, %s, %s, %s, %s) "
-                    "ON CONFLICT (valid_from, source) DO UPDATE SET "
-                    "valid_to = EXCLUDED.valid_to, "
-                    "price_minor_per_kwh = EXCLUDED.price_minor_per_kwh, "
-                    "currency = EXCLUDED.currency, ingested_at = now()",
-                    params,
-                )
+        async with _pool.connection() as conn, conn.cursor() as cur:
+            await cur.executemany(
+                "INSERT INTO tariff_rates "
+                "(valid_from, valid_to, price_minor_per_kwh, currency, source) "
+                "VALUES (%s, %s, %s, %s, %s) "
+                "ON CONFLICT (valid_from, source) DO UPDATE SET "
+                "valid_to = EXCLUDED.valid_to, "
+                "price_minor_per_kwh = EXCLUDED.price_minor_per_kwh, "
+                "currency = EXCLUDED.currency, ingested_at = now()",
+                params,
+            )
     except Exception:
         logger.warning("Failed to persist tariff rates", exc_info=True)
 
 
 async def get_tariff_rates(
     start: datetime.datetime, end: datetime.datetime
-) -> Optional[list[dict[str, Any]]]:
+) -> list[dict[str, Any]] | None:
     """Persisted tariff windows overlapping ``[start, end)``."""
     if _pool is None:
         return None
@@ -1128,7 +1164,7 @@ async def get_tariff_rates(
 
 
 async def record_session_reconciliation(
-    session_id: Optional[int], priced: Any, *, counter_energy_wh: float
+    session_id: int | None, priced: Any, *, counter_energy_wh: float
 ) -> None:
     """Persist tariff-bucket energy and the reconciled actual session cost."""
     if _pool is None or session_id is None:
@@ -1144,8 +1180,13 @@ async def record_session_reconciliation(
         quality = "reconciled"
     interval_params = [
         (
-            session_id, interval["start"], interval["end"], interval["energyWh"],
-            interval["costMinor"], interval["rateMinorPerKwh"], interval["currency"],
+            session_id,
+            interval["start"],
+            interval["end"],
+            interval["energyWh"],
+            interval["costMinor"],
+            interval["rateMinorPerKwh"],
+            interval["currency"],
             interval["quality"],
         )
         for interval in priced.intervals
@@ -1188,7 +1229,7 @@ async def record_session_reconciliation(
         logger.warning("Failed to persist session reconciliation", exc_info=True)
 
 
-async def get_session_telemetry(session_id: int) -> Optional[list[dict[str, Any]]]:
+async def get_session_telemetry(session_id: int) -> list[dict[str, Any]] | None:
     """Per-poll telemetry for one session's charge curve, oldest first.
 
     Rows are selected by their explicit ``telemetry.session_id`` foreign key;
@@ -1200,13 +1241,16 @@ async def get_session_telemetry(session_id: int) -> Optional[list[dict[str, Any]
         return None
     try:
         async with _pool.connection() as conn:
-            cur = await conn.execute("SELECT id FROM charge_sessions WHERE id = %s", (session_id,))
+            cur = await conn.execute(
+                "SELECT id FROM charge_sessions WHERE id = %s", (session_id,)
+            )
             row = await cur.fetchone()
             if row is None:
                 return None
             cur = await conn.execute(
                 "SELECT recorded_at, battery_percent, power_watts, session_energy_wh "
-                "FROM telemetry WHERE session_id = %s ORDER BY recorded_at", (session_id,)
+                "FROM telemetry WHERE session_id = %s ORDER BY recorded_at",
+                (session_id,),
             )
             rows = await cur.fetchall()
         return [
@@ -1234,8 +1278,13 @@ async def upsert_grid_consumption(rows: list[dict[str, Any]]) -> bool:
         return False
     params = [
         (
-            r["start"], r.get("end"), r.get("importKwh"), r.get("carKwh"),
-            r.get("houseKwh"), r.get("unattributedKwh", 0), r.get("quality", "unknown"),
+            r["start"],
+            r.get("end"),
+            r.get("importKwh"),
+            r.get("carKwh"),
+            r.get("houseKwh"),
+            r.get("unattributedKwh", 0),
+            r.get("quality", "unknown"),
         )
         for r in rows
         if r.get("start")
@@ -1243,23 +1292,22 @@ async def upsert_grid_consumption(rows: list[dict[str, Any]]) -> bool:
     if not params:
         return False
     try:
-        async with _pool.connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.executemany(
-                    "INSERT INTO grid_consumption "
-                    "(interval_start, interval_end, import_kwh, car_kwh, house_kwh, "
-                    "unattributed_kwh, quality_status) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s) "
-                    "ON CONFLICT (interval_start) DO UPDATE SET "
-                    "  interval_end = EXCLUDED.interval_end, "
-                    "  import_kwh   = EXCLUDED.import_kwh, "
-                    "  car_kwh      = EXCLUDED.car_kwh, "
-                    "  house_kwh    = EXCLUDED.house_kwh, "
-                    "  unattributed_kwh = EXCLUDED.unattributed_kwh, "
-                    "  quality_status = EXCLUDED.quality_status, "
-                    "  updated_at   = now()",
-                    params,
-                )
+        async with _pool.connection() as conn, conn.cursor() as cur:
+            await cur.executemany(
+                "INSERT INTO grid_consumption "
+                "(interval_start, interval_end, import_kwh, car_kwh, house_kwh, "
+                "unattributed_kwh, quality_status) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (interval_start) DO UPDATE SET "
+                "  interval_end = EXCLUDED.interval_end, "
+                "  import_kwh   = EXCLUDED.import_kwh, "
+                "  car_kwh      = EXCLUDED.car_kwh, "
+                "  house_kwh    = EXCLUDED.house_kwh, "
+                "  unattributed_kwh = EXCLUDED.unattributed_kwh, "
+                "  quality_status = EXCLUDED.quality_status, "
+                "  updated_at   = now()",
+                params,
+            )
         return True
     except Exception:
         logger.warning("Failed to upsert grid consumption to Postgres", exc_info=True)
@@ -1268,7 +1316,7 @@ async def upsert_grid_consumption(rows: list[dict[str, Any]]) -> bool:
 
 async def get_grid_consumption(
     start: datetime.datetime, end: datetime.datetime
-) -> Optional[list[dict[str, Any]]]:
+) -> list[dict[str, Any]] | None:
     """Half-hourly grid-import rows in ``[start, end)``, chronological.
 
     Returns None when persistence is disabled or the read fails, so the API can

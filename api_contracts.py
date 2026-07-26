@@ -8,7 +8,7 @@ their OpenAPI property sets against the corresponding TypeScript interfaces.
 from __future__ import annotations
 
 import datetime
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -26,7 +26,7 @@ class TargetUpdate(StrictRequestModel):
 
 
 class ReadyByUpdate(StrictRequestModel):
-    readyBy: Optional[str] = Field(default=None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
+    readyBy: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
 
 
 class DayTargetsUpdate(StrictRequestModel):
@@ -50,7 +50,7 @@ class TripModeUpdate(StrictRequestModel):
     targetPercent: int = Field(
         default=100, ge=settings.TARGET_MIN, le=settings.TARGET_MAX
     )
-    readyBy: Optional[str] = Field(default=None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
+    readyBy: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
 
 
 class NotificationPreferencesUpdate(StrictRequestModel):
@@ -61,7 +61,7 @@ class NotificationPreferencesUpdate(StrictRequestModel):
     weeklyDigest: bool
     failurePolls: int = Field(ge=1, le=20)
     minimumChargeKwh: float = Field(ge=0, le=100)
-    auxBatteryBelowPercent: Optional[int] = Field(default=None, ge=1, le=100)
+    auxBatteryBelowPercent: int | None = Field(default=None, ge=1, le=100)
 
     def to_settings(self) -> settings.NotificationPreferences:
         return settings.NotificationPreferences(
@@ -77,7 +77,7 @@ class NotificationPreferencesUpdate(StrictRequestModel):
 
 
 class VehicleUpdate(StrictRequestModel):
-    vehicleId: Optional[str] = None
+    vehicleId: str | None = None
 
 
 class VehicleProfileUpdate(StrictRequestModel):
@@ -86,7 +86,7 @@ class VehicleProfileUpdate(StrictRequestModel):
     targetPercent: int = Field(
         default=80, ge=settings.TARGET_MIN, le=settings.TARGET_MAX
     )
-    readyBy: Optional[str] = Field(default=None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
+    readyBy: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
 
 
 class MaxChargeUpdate(StrictRequestModel):
@@ -113,7 +113,7 @@ class TargetUpdateResponseModel(MutationOutcomeModel):
 
 
 class ReadyByUpdateResponseModel(MutationOutcomeModel):
-    readyBy: Optional[str]
+    readyBy: str | None
 
 
 class DayTargetsUpdateResponseModel(MutationOutcomeModel):
@@ -122,8 +122,8 @@ class DayTargetsUpdateResponseModel(MutationOutcomeModel):
 
 class TripModeUpdateResponseModel(MutationOutcomeModel):
     enabled: bool
-    targetPercent: Optional[int]
-    readyBy: Optional[str]
+    targetPercent: int | None
+    readyBy: str | None
 
 
 class NotificationPreferencesModel(ContractModel):
@@ -134,7 +134,7 @@ class NotificationPreferencesModel(ContractModel):
     weeklyDigest: bool
     failurePolls: int
     minimumChargeKwh: float
-    auxBatteryBelowPercent: Optional[int]
+    auxBatteryBelowPercent: int | None
     configured: bool
 
 
@@ -144,24 +144,24 @@ class NotificationPreferencesUpdateResponseModel(NotificationPreferencesModel):
 
 class VehicleModel(ContractModel):
     id: str
-    name: Optional[str]
-    model: Optional[str]
+    name: str | None
+    model: str | None
 
 
 class VehiclesResponseModel(ContractModel):
     vehicles: list[VehicleModel]
-    selected: Optional[str]
+    selected: str | None
 
 
 class VehicleUpdateResponseModel(MutationOutcomeModel):
-    vehicleId: Optional[str]
+    vehicleId: str | None
 
 
 class VehicleProfileUpdateResponseModel(MutationOutcomeModel):
     vehicleId: str
     enabled: bool
-    targetPercent: Optional[int]
-    readyBy: Optional[str]
+    targetPercent: int | None
+    readyBy: str | None
 
 
 class LocationModel(ContractModel):
@@ -170,27 +170,27 @@ class LocationModel(ContractModel):
 
 
 class VehicleHealthModel(ContractModel):
-    auxBatteryPercent: Optional[int]
-    tyrePressureWarning: Optional[bool]
-    washerFluidWarning: Optional[bool]
-    keyBatteryWarning: Optional[bool]
+    auxBatteryPercent: int | None
+    tyrePressureWarning: bool | None
+    washerFluidWarning: bool | None
+    keyBatteryWarning: bool | None
     openItems: list[str]
 
 
 class StatusVehicleModel(ContractModel):
-    name: Optional[str]
-    batteryPercent: Optional[int]
-    rangeMiles: Optional[int]
-    sohPercent: Optional[int]
-    isLocked: Optional[bool]
-    location: Optional[LocationModel]
+    name: str | None
+    batteryPercent: int | None
+    rangeMiles: int | None
+    sohPercent: int | None
+    isLocked: bool | None
+    location: LocationModel | None
     health: VehicleHealthModel
 
 
 class ChargerPowerModel(ContractModel):
     watts: float
     amps: float
-    volts: Optional[int]
+    volts: int | None
 
 
 class StatusChargerModel(ContractModel):
@@ -198,26 +198,26 @@ class StatusChargerModel(ContractModel):
     connected: bool
     online: bool
     maxCharge: bool
-    model: Optional[str]
+    model: str | None
     power: ChargerPowerModel
-    targetPercent: Optional[int]
+    targetPercent: int | None
     sessionEnergyKwh: float
-    projectedFinish: Optional[str]
+    projectedFinish: str | None
     plannedEnergyKwh: float
-    projectedCost: Optional[float]
-    projectedCostCurrency: Optional[str]
-    projectedCostMethod: Optional[Literal["agile", "intelligent_go", "average"]]
+    projectedCost: float | None
+    projectedCostCurrency: str | None
+    projectedCostMethod: Literal["agile", "intelligent_go", "average"] | None
 
 
 class TripModeModel(ContractModel):
     enabled: bool
-    targetPercent: Optional[int]
-    readyBy: Optional[str]
+    targetPercent: int | None
+    readyBy: str | None
 
 
 class VehicleProfileModel(ContractModel):
     targetPercent: int
-    readyBy: Optional[str]
+    readyBy: str | None
 
 
 class StatusConfigModel(ContractModel):
@@ -226,7 +226,7 @@ class StatusConfigModel(ContractModel):
     timezone: str
     targetMin: int
     targetMax: int
-    readyBy: Optional[str]
+    readyBy: str | None
     readyByIsManual: bool
     dayTargets: dict[str, int]
     tripMode: TripModeModel
@@ -236,18 +236,18 @@ class StatusConfigModel(ContractModel):
 
 class AutomationModel(ContractModel):
     state: Literal["idle", "pending", "configured", "error"]
-    errorCode: Optional[str]
-    lastAttemptAt: Optional[str]
+    errorCode: str | None
+    lastAttemptAt: str | None
 
 
 class StatusResponseModel(ContractModel):
     vehicle: StatusVehicleModel
     charger: StatusChargerModel
     config: StatusConfigModel
-    updatedAt: Optional[str]
+    updatedAt: str | None
     ready: bool
     automation: AutomationModel
-    lastError: Optional[str]
+    lastError: str | None
 
 
 class ChargeSlotModel(ContractModel):
@@ -259,30 +259,30 @@ class ChargeSlotModel(ContractModel):
 
 class ScheduleResponseModel(ContractModel):
     slots: list[ChargeSlotModel]
-    nextSlotStart: Optional[str]
-    nextSlotEnd: Optional[str]
+    nextSlotStart: str | None
+    nextSlotEnd: str | None
     connected: bool
-    updatedAt: Optional[str]
+    updatedAt: str | None
     timezone: str
 
 
 class ChargeSessionEntryModel(ContractModel):
     id: int
-    pluggedInAt: Optional[str]
-    vehicleName: Optional[str]
-    socPercent: Optional[int]
-    targetPercent: Optional[int]
-    topupPercent: Optional[int]
-    action: Optional[str]
-    odometerMiles: Optional[int]
-    sohPercent: Optional[int]
-    actualEnergyKwh: Optional[float]
-    actualCost: Optional[float]
-    costCurrency: Optional[str]
-    costMethod: Optional[str]
-    tariffCoverage: Optional[float]
-    quality: Optional[str]
-    completedAt: Optional[str]
+    pluggedInAt: str | None
+    vehicleName: str | None
+    socPercent: int | None
+    targetPercent: int | None
+    topupPercent: int | None
+    action: str | None
+    odometerMiles: int | None
+    sohPercent: int | None
+    actualEnergyKwh: float | None
+    actualCost: float | None
+    costCurrency: str | None
+    costMethod: str | None
+    tariffCoverage: float | None
+    quality: str | None
+    completedAt: str | None
 
 
 class SessionsResponseModel(ContractModel):
@@ -298,7 +298,7 @@ class ChargeActionResponseModel(ContractModel):
 
 class RefreshResponseModel(ContractModel):
     ok: bool
-    updatedAt: Optional[str]
+    updatedAt: str | None
     ready: bool
 
 
@@ -334,8 +334,8 @@ class EfficiencyModel(BaseModel):
     intervalCount: int
     vehicleId: str
     model_config = ConfigDict(populate_by_name=True)
-    from_: Optional[datetime.datetime] = Field(alias="from")
-    to: Optional[datetime.datetime]
+    from_: datetime.datetime | None = Field(alias="from")
+    to: datetime.datetime | None
     scope: Literal["matched_home_charging"]
 
 
@@ -360,15 +360,17 @@ class ComparisonModel(BaseModel):
 
 class StatisticsScopeModel(BaseModel):
     summary: Literal["ohme_account"]
-    vehicleId: Optional[str]
+    vehicleId: str | None
 
 
 class MetricProvenanceModel(BaseModel):
     source: str
     calculationType: str
-    observedAt: Optional[datetime.datetime]
+    observedAt: datetime.datetime | None
     completeThrough: datetime.datetime
-    quality: Literal["complete", "partial", "measured", "actual", "unavailable", "stale"]
+    quality: Literal[
+        "complete", "partial", "measured", "actual", "unavailable", "stale"
+    ]
     coverage: dict[str, Any]
 
 
@@ -383,14 +385,14 @@ class StatisticsMetadataModel(BaseModel):
 class StatisticsResponseModel(BaseModel):
     rangeDays: int
     stale: bool = False
-    currency: Optional[str]
+    currency: str | None
     window: StatisticsWindowModel
     scope: StatisticsScopeModel
     totals: StatisticsTotalsModel
     daily: list[DailyStatModel]
-    efficiency: Optional[EfficiencyModel]
-    runningCost: Optional[RunningCostModel]
-    comparison: Optional[ComparisonModel]
+    efficiency: EfficiencyModel | None
+    runningCost: RunningCostModel | None
+    comparison: ComparisonModel | None
     metadata: StatisticsMetadataModel
 
 
@@ -407,16 +409,16 @@ class TelemetryQualityModel(BaseModel):
 
 class ConsumptionQualityModel(BaseModel):
     uncertainLast30d: int
-    ingestedThrough: Optional[datetime.datetime]
+    ingestedThrough: datetime.datetime | None
 
 
 class DailyQualityModel(BaseModel):
-    completeThrough: Optional[datetime.date]
+    completeThrough: datetime.date | None
 
 
 class StatisticsCacheQualityModel(BaseModel):
     available: bool
-    ageSeconds: Optional[int]
+    ageSeconds: int | None
 
 
 class DataQualityResponseModel(BaseModel):
@@ -424,10 +426,10 @@ class DataQualityResponseModel(BaseModel):
     generatedAt: datetime.datetime
     persistenceAvailable: bool
     actualCostExpected: bool
-    sessions: Optional[SessionQualityModel]
-    telemetry: Optional[TelemetryQualityModel]
-    consumption: Optional[ConsumptionQualityModel]
-    daily: Optional[DailyQualityModel]
+    sessions: SessionQualityModel | None
+    telemetry: TelemetryQualityModel | None
+    consumption: ConsumptionQualityModel | None
+    daily: DailyQualityModel | None
     statisticsCache: StatisticsCacheQualityModel
 
 
@@ -436,7 +438,7 @@ class MonthlyReportDailyModel(BaseModel):
     energyWh: int
     savingsMinor: int
     costMinor: int
-    currency: Optional[str]
+    currency: str | None
     source: str
     isComplete: bool
     updatedAt: datetime.datetime
@@ -445,20 +447,20 @@ class MonthlyReportDailyModel(BaseModel):
 class MonthlyReportSessionModel(BaseModel):
     id: int
     pluggedInAt: datetime.datetime
-    completedAt: Optional[datetime.datetime]
-    actualEnergyWh: Optional[int]
-    actualCostMinor: Optional[int]
-    currency: Optional[str]
+    completedAt: datetime.datetime | None
+    actualEnergyWh: int | None
+    actualCostMinor: int | None
+    currency: str | None
     quality: str
-    vehicleName: Optional[str]
-    action: Optional[str]
+    vehicleName: str | None
+    action: str | None
 
 
 class MonthlyAccountSummaryModel(BaseModel):
     energyWh: int
-    savingsMinor: Optional[int]
-    costMinor: Optional[int]
-    currency: Optional[str]
+    savingsMinor: int | None
+    costMinor: int | None
+    currency: str | None
     completeDays: int
     expectedDays: int
     missingDays: int
@@ -471,8 +473,8 @@ class MonthlySessionSummaryModel(BaseModel):
     measuredEnergyCount: int
     measuredEnergyWh: int
     actualCostCount: int
-    actualCostMinor: Optional[int]
-    costCurrency: Optional[str]
+    actualCostMinor: int | None
+    costCurrency: str | None
     actualCostExpected: bool
     missingActualEnergy: int
     missingActualCost: int
@@ -496,25 +498,25 @@ class MonthlyReportResponseModel(BaseModel):
 class SessionAuditRecordModel(BaseModel):
     id: int
     pluggedInAt: datetime.datetime
-    unpluggedAt: Optional[datetime.datetime]
-    completedAt: Optional[datetime.datetime]
-    vehicleName: Optional[str]
-    sourceObservedAt: Optional[datetime.datetime]
-    socPercent: Optional[int]
-    targetPercent: Optional[int]
-    endSocPercent: Optional[int]
-    topupPercent: Optional[int]
-    action: Optional[str]
-    odometerMiles: Optional[int]
-    sohPercent: Optional[int]
-    actualEnergyWh: Optional[int]
-    actualCostMinor: Optional[int]
-    costCurrency: Optional[str]
-    costMethod: Optional[str]
-    tariffCoverage: Optional[float]
-    reconstructedEnergyWh: Optional[int]
-    reconciliationDeltaWh: Optional[int]
-    completionReason: Optional[str]
+    unpluggedAt: datetime.datetime | None
+    completedAt: datetime.datetime | None
+    vehicleName: str | None
+    sourceObservedAt: datetime.datetime | None
+    socPercent: int | None
+    targetPercent: int | None
+    endSocPercent: int | None
+    topupPercent: int | None
+    action: str | None
+    odometerMiles: int | None
+    sohPercent: int | None
+    actualEnergyWh: int | None
+    actualCostMinor: int | None
+    costCurrency: str | None
+    costMethod: str | None
+    tariffCoverage: float | None
+    reconstructedEnergyWh: int | None
+    reconciliationDeltaWh: int | None
+    completionReason: str | None
     quality: str
     updatedAt: datetime.datetime
 
@@ -527,8 +529,8 @@ class SessionAuditEventModel(BaseModel):
 
 class SessionAuditScheduleModel(BaseModel):
     recordedAt: datetime.datetime
-    nextSlotStart: Optional[datetime.datetime]
-    nextSlotEnd: Optional[datetime.datetime]
+    nextSlotStart: datetime.datetime | None
+    nextSlotEnd: datetime.datetime | None
     slots: list[dict[str, Any]]
     revision: int
     reason: str
@@ -538,9 +540,9 @@ class SessionAuditIntervalModel(BaseModel):
     start: datetime.datetime
     end: datetime.datetime
     energyWh: int
-    costMinor: Optional[int]
-    rateMinorPerKwh: Optional[float]
-    currency: Optional[str]
+    costMinor: int | None
+    rateMinorPerKwh: float | None
+    currency: str | None
     quality: str
     source: str
 

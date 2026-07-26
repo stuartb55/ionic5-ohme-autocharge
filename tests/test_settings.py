@@ -26,20 +26,21 @@ def _write_raw(path, data) -> None:
 
 # --- parse_hhmm ------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "value,expected",
     [
         ("00:00", (0, 0)),
         ("07:30", (7, 30)),
         ("23:59", (23, 59)),
-        ("7:30", None),     # hour must be zero-padded
-        ("24:00", None),    # hour out of range
-        ("12:60", None),    # minute out of range
-        ("0630", None),     # missing colon
+        ("7:30", None),  # hour must be zero-padded
+        ("24:00", None),  # hour out of range
+        ("12:60", None),  # minute out of range
+        ("0630", None),  # missing colon
         ("nonsense", None),
         ("", None),
         (None, None),
-        (730, None),        # not a string
+        (730, None),  # not a string
     ],
 )
 def test_parse_hhmm(value, expected):
@@ -47,6 +48,7 @@ def test_parse_hhmm(value, expected):
 
 
 # --- charge target ---------------------------------------------------------
+
 
 def test_target_round_trip(settings_path):
     assert settings.save_target(75) is True
@@ -59,9 +61,9 @@ def test_load_target_none_when_unset(settings_path):
 
 def test_load_target_rejects_out_of_range(settings_path):
     # save coerces to int but load enforces the TARGET_MIN..TARGET_MAX bounds.
-    settings.save_target(5)     # below TARGET_MIN (10)
+    settings.save_target(5)  # below TARGET_MIN (10)
     assert settings.load_target() is None
-    settings.save_target(150)   # above TARGET_MAX (100)
+    settings.save_target(150)  # above TARGET_MAX (100)
     assert settings.load_target() is None
 
 
@@ -71,6 +73,7 @@ def test_load_target_none_on_non_numeric(settings_path):
 
 
 # --- ready-by --------------------------------------------------------------
+
 
 def test_ready_by_set_and_clear(settings_path):
     settings.save_ready_by("07:15")
@@ -85,6 +88,7 @@ def test_load_ready_by_ignores_invalid_persisted_value(settings_path):
 
 
 # --- per-weekday targets ---------------------------------------------------
+
 
 def test_day_targets_round_trip(settings_path):
     settings.save_day_targets({0: 90, 6: 70})
@@ -110,6 +114,7 @@ def test_save_empty_day_targets_clears_key(settings_path):
 
 # --- one-session trip mode -------------------------------------------------
 
+
 def test_trip_mode_round_trip_and_clear(settings_path):
     assert settings.load_trip_mode() is None
     assert settings.save_trip_mode(100, "06:30") is True
@@ -133,6 +138,7 @@ def test_load_trip_mode_rejects_invalid_values(settings_path, raw):
 
 # --- notification preferences --------------------------------------------
 
+
 def test_notification_preferences_round_trip(settings_path):
     preferences = settings.NotificationPreferences(
         plug_in=False,
@@ -145,13 +151,18 @@ def test_notification_preferences_round_trip(settings_path):
 
 
 def test_notification_preferences_validate_each_persisted_field(settings_path):
-    _write_raw(settings_path, {"notificationPreferences": {
-        "plugIn": "yes",
-        "chargeComplete": False,
-        "failurePolls": 99,
-        "minimumChargeKwh": -1,
-        "auxBatteryBelowPercent": 0,
-    }})
+    _write_raw(
+        settings_path,
+        {
+            "notificationPreferences": {
+                "plugIn": "yes",
+                "chargeComplete": False,
+                "failurePolls": 99,
+                "minimumChargeKwh": -1,
+                "auxBatteryBelowPercent": 0,
+            }
+        },
+    )
     loaded = settings.load_notification_preferences()
     assert loaded.plug_in is True
     assert loaded.charge_complete is False
@@ -161,6 +172,7 @@ def test_notification_preferences_validate_each_persisted_field(settings_path):
 
 
 # --- vehicle id ------------------------------------------------------------
+
 
 def test_vehicle_id_set_and_clear(settings_path):
     settings.save_vehicle_id("vin-123")
@@ -188,18 +200,24 @@ def test_vehicle_profiles_round_trip_and_clear(settings_path):
 
 
 def test_vehicle_profiles_skip_invalid_entries(settings_path):
-    _write_raw(settings_path, {"vehicleProfiles": {
-        "good": {"targetPercent": 90, "readyBy": "06:15"},
-        "low": {"targetPercent": 5, "readyBy": None},
-        "bad-time": {"targetPercent": 80, "readyBy": "25:00"},
-        "bad-shape": "profile",
-    }})
+    _write_raw(
+        settings_path,
+        {
+            "vehicleProfiles": {
+                "good": {"targetPercent": 90, "readyBy": "06:15"},
+                "low": {"targetPercent": 5, "readyBy": None},
+                "bad-time": {"targetPercent": 80, "readyBy": "25:00"},
+                "bad-shape": "profile",
+            }
+        },
+    )
     assert settings.load_vehicle_profiles() == {
         "good": settings.VehicleProfile(90, "06:15")
     }
 
 
 # --- session-active marker -------------------------------------------------
+
 
 def test_session_active_round_trip(settings_path):
     assert settings.load_session_active() is False  # default when unset
@@ -260,6 +278,7 @@ def test_pending_sessions_ignore_invalid_entries(settings_path):
 
 # --- preservation & robustness ---------------------------------------------
 
+
 def test_setters_preserve_other_keys(settings_path):
     settings.save_target(70)
     settings.save_ready_by("06:30")
@@ -275,9 +294,7 @@ def test_setters_preserve_other_keys(settings_path):
     assert settings.load_ready_by() == "06:30"
     assert settings.load_day_targets() == {0: 90}
     assert settings.load_vehicle_id() == "v1"
-    assert settings.load_vehicle_profiles() == {
-        "v1": settings.VehicleProfile(85, None)
-    }
+    assert settings.load_vehicle_profiles() == {"v1": settings.VehicleProfile(85, None)}
     assert settings.load_trip_mode() == (95, None)
     assert settings.load_notification_preferences().weekly_digest is False
     assert settings.load_session_active() is True

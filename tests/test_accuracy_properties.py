@@ -1,10 +1,11 @@
 """Property-based invariants for the energy and money accounting boundaries."""
 
 import datetime as dt
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 
-from hypothesis import given, strategies as st
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 import energy
 import octopus
@@ -13,8 +14,12 @@ UTC = dt.timezone.utc
 
 
 @given(
-    imported=st.floats(min_value=0, max_value=100, allow_nan=False, allow_infinity=False),
-    attributed=st.floats(min_value=0, max_value=120, allow_nan=False, allow_infinity=False),
+    imported=st.floats(
+        min_value=0, max_value=100, allow_nan=False, allow_infinity=False
+    ),
+    attributed=st.floats(
+        min_value=0, max_value=120, allow_nan=False, allow_infinity=False
+    ),
     uncertain=st.booleans(),
 )
 def test_usage_split_always_conserves_metered_import(imported, attributed, uncertain):
@@ -42,11 +47,19 @@ def test_fully_covered_bucket_has_exact_wh_and_half_up_minor_cost(kwh, price):
     end = start + dt.timedelta(minutes=30)
     priced = octopus.price_energy_buckets(
         {start.isoformat(): float(kwh)},
-        [{"from": start.isoformat(), "to": end.isoformat(), "pricePerKwh": float(price)}],
+        [
+            {
+                "from": start.isoformat(),
+                "to": end.isoformat(),
+                "pricePerKwh": float(price),
+            }
+        ],
     )
 
-    expected_wh = int((kwh * 1000).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-    expected_minor = int((kwh * price * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    expected_wh = int((kwh * 1000).quantize(Decimal(1), rounding=ROUND_HALF_UP))
+    expected_minor = int(
+        (kwh * price * 100).quantize(Decimal(1), rounding=ROUND_HALF_UP)
+    )
     assert priced.energy_wh == expected_wh
     assert priced.cost_minor == expected_minor
     assert priced.coverage == 1.0

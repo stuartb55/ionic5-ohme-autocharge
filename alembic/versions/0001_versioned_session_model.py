@@ -144,8 +144,17 @@ def downgrade() -> None:
     op.execute("ALTER TABLE daily_stats DROP COLUMN IF EXISTS is_complete")
     op.execute("ALTER TABLE daily_stats DROP COLUMN IF EXISTS source")
     for column in (
-        "updated_at", "quality_status", "completion_reason", "actual_energy_wh",
-        "end_soc_percent", "completed_at", "unplugged_at", "source_observed_at",
-        "charger_id", "vin", "vehicle_id", "session_key",
+        "updated_at",
+        "quality_status",
+        "completion_reason",
+        "actual_energy_wh",
+        "end_soc_percent",
+        "completed_at",
+        "unplugged_at",
+        "source_observed_at",
+        "charger_id",
+        "vin",
+        "vehicle_id",
+        "session_key",
     ):
         op.execute(f"ALTER TABLE charge_sessions DROP COLUMN IF EXISTS {column}")

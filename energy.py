@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import datetime
 from dataclasses import dataclass, field
-from typing import Optional
+from itertools import pairwise
 
 # Octopus consumption is reported on half-hour boundaries (:00 and :30), so the
 # car share is bucketed onto the same grid to line the two series up.
@@ -26,7 +26,7 @@ class EnergyAttribution:
     issue_count: int = 0
 
 
-def _parse(ts) -> Optional[datetime.datetime]:
+def _parse(ts) -> datetime.datetime | None:
     """Parse an ISO timestamp (or pass through a datetime) to an aware UTC datetime."""
     if isinstance(ts, datetime.datetime):
         dt = ts
@@ -40,7 +40,7 @@ def _parse(ts) -> Optional[datetime.datetime]:
     return dt.astimezone(datetime.timezone.utc)
 
 
-def _canon(ts) -> Optional[str]:
+def _canon(ts) -> str | None:
     """Canonical UTC ISO key for a half-hour boundary, so the car buckets and the
     Octopus import rows agree on the same key regardless of source offset/format."""
     dt = _parse(ts)
@@ -85,7 +85,14 @@ def attribute_car_kwh(
         dt = _parse(recorded_at)
         if dt is not None and session_id is not None and energy_wh is not None:
             rows.append(
-                (dt, int(session_id), float(energy_wh), float(power_watts or 0), str(status), bool(connected))
+                (
+                    dt,
+                    int(session_id),
+                    float(energy_wh),
+                    float(power_watts or 0),
+                    str(status),
+                    bool(connected),
+                )
             )
     rows.sort(key=lambda r: r[0])
 
@@ -100,8 +107,13 @@ def attribute_car_kwh(
                 result.uncertain_slots.add(_slot_floor(recorded_at).isoformat())
                 result.issue_count += 1
     for (t0, sid0, e0, p0, status0, connected0), (
-        t1, sid1, e1, p1, status1, connected1,
-    ) in zip(rows, rows[1:]):
+        t1,
+        sid1,
+        e1,
+        p1,
+        status1,
+        connected1,
+    ) in pairwise(rows):
         if sid0 != sid1:
             continue
         span = (t1 - t0).total_seconds()
@@ -133,9 +145,9 @@ def attribute_car_kwh(
             overlap = (min(t1, w_end) - max(t0, w_start)).total_seconds()
             if overlap > 0:
                 key = w_start.isoformat()
-                result.car_by_slot[key] = (
-                    result.car_by_slot.get(key, 0.0) + (delta_wh / 1000) * (overlap / span)
-                )
+                result.car_by_slot[key] = result.car_by_slot.get(key, 0.0) + (
+                    delta_wh / 1000
+                ) * (overlap / span)
             w_start = w_end
     return result
 

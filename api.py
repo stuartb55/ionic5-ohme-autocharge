@@ -25,9 +25,9 @@ import json
 import logging
 import os
 import time
-from decimal import Decimal, ROUND_HALF_UP
 from contextlib import asynccontextmanager
-from typing import Any, Literal, Optional
+from decimal import ROUND_HALF_UP, Decimal
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
@@ -37,6 +37,14 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 import bluelink
+import config
+import db
+import energy
+import main
+import ntfy
+import octopus
+import ohme_client
+import settings
 from api_contracts import (
     ApplyStatus,
     ChargeActionResponseModel,
@@ -66,14 +74,6 @@ from api_contracts import (
     VehicleUpdate,
     VehicleUpdateResponseModel,
 )
-import config
-import db
-import energy
-import main
-import ntfy
-import octopus
-import ohme_client
-import settings
 from state import StatusSnapshot, store
 
 logger = logging.getLogger(__name__)
@@ -124,7 +124,9 @@ _quiet_access_filter = _QuietAccessLogFilter()
 
 # Comma-separated list of allowed CORS origins. Empty (default) means same-origin
 # only — which is the production setup, where nginx serves the SPA and proxies /api.
-CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+CORS_ORIGINS = [
+    o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()
+]
 # Host-header allowlist protects an anonymous LAN service from DNS rebinding.
 # Production deployments must add their real hostname and LAN IP explicitly.
 TRUSTED_HOSTS = [
@@ -145,7 +147,7 @@ SUMMARY_CACHE_TTL = 300
 # Ohme request, and the endpoint is unauthenticated on the LAN, so a stuck
 # client (or an eager finger) must not be able to hammer the upstream API.
 REFRESH_MIN_INTERVAL = 10.0
-_last_refresh_at: Optional[float] = None  # monotonic time of the last attempt
+_last_refresh_at: float | None = None  # monotonic time of the last attempt
 
 # Backoff schedule for the initial Ohme login. Login happens once per process
 # start; failures there (the home server booting before its network is up, an
@@ -154,7 +156,7 @@ LOGIN_RETRY_INITIAL = 5.0
 LOGIN_RETRY_MAX = 300.0
 
 # The running poll task, so /api/health can report whether it is still alive.
-_poll_task: Optional[asyncio.Task] = None
+_poll_task: asyncio.Task | None = None
 
 
 def _next_poll_delay(consecutive_failures: int) -> float:
@@ -174,11 +176,13 @@ def _next_poll_delay(consecutive_failures: int) -> float:
     return float(min(config.POLL_INTERVAL * factor, config.MAX_POLL_BACKOFF))
 
 
-def _iso(dt: Optional[datetime.datetime]) -> Optional[str]:
+def _iso(dt: datetime.datetime | None) -> str | None:
     return dt.isoformat() if dt is not None else None
 
 
-def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None) -> StatusSnapshot:
+def build_snapshot(
+    client: Any, *, connected: bool, error: str | None = None
+) -> StatusSnapshot:
     """Translate the live Ohme client state into a serialisable snapshot.
 
     Assumes ``async_get_charge_session`` (and, once at startup,
@@ -191,7 +195,7 @@ def build_snapshot(client: Any, *, connected: bool, error: Optional[str] = None)
     power = client.power
     try:
         status_value = client.status.value
-    except Exception:  # pragma: no cover - defensive: malformed session
+    except Exception:  # noqa: BLE001  # pragma: no cover - defensive: malformed session
         status_value = "unknown"
 
     # Ohme's own configured target time, read back from the charge rule (valid
@@ -356,8 +360,11 @@ async def _maybe_refresh_live_soc(status: Any) -> None:
             return
     try:
         vehicle = await bluelink.get_vehicle_state_async(store.selected_vehicle_id)
-    except Exception:  # noqa: BLE001 - a failed refresh just leaves the prior reading
-        logger.warning("Live SOC refresh from Bluelink failed — keeping last reading", exc_info=True)
+    except Exception:
+        logger.warning(
+            "Live SOC refresh from Bluelink failed — keeping last reading",
+            exc_info=True,
+        )
         return
     store.record_vehicle_state(vehicle)
     logger.info("Live SOC refreshed: %s%%", vehicle.soc)
@@ -427,7 +434,9 @@ _HEALTH_WARNINGS = (
 )
 
 
-async def _maybe_notify_vehicle_health(prev: StatusSnapshot, snap: StatusSnapshot) -> None:
+async def _maybe_notify_vehicle_health(
+    prev: StatusSnapshot, snap: StatusSnapshot
+) -> None:
     """Notify when a vehicle-health warning newly appears (False/None → True).
 
     Comparing the previous snapshot to the new one makes this edge-triggered:
@@ -444,7 +453,9 @@ async def _maybe_notify_vehicle_health(prev: StatusSnapshot, snap: StatusSnapsho
         if getattr(snap, attr) is True and getattr(prev, attr) is not True
     ]
     # Anything newly reported open that wasn't open before.
-    raised.extend(f"{item} open" for item in snap.open_items if item not in prev.open_items)
+    raised.extend(
+        f"{item} open" for item in snap.open_items if item not in prev.open_items
+    )
     threshold = preferences.aux_battery_below_percent
     if (
         threshold is not None
@@ -464,7 +475,7 @@ async def _maybe_notify_vehicle_health(prev: StatusSnapshot, snap: StatusSnapsho
 
 
 # Signature of the last telemetry row written, to skip identical idle repeats.
-_last_telemetry_sig: Optional[tuple] = None
+_last_telemetry_sig: tuple | None = None
 
 
 async def _maybe_record_telemetry(snap: StatusSnapshot) -> None:
@@ -485,14 +496,16 @@ async def _maybe_record_telemetry(snap: StatusSnapshot) -> None:
         return
     _last_telemetry_sig = sig
     if snap.connected and store.active_session_id is None and store.active_session_key:
-        store.active_session_id = await db.get_session_id_by_key(store.active_session_key)
+        store.active_session_id = await db.get_session_id_by_key(
+            store.active_session_key
+        )
     await db.record_telemetry(
         snap, session_id=store.active_session_id if snap.connected else None
     )
 
 
 async def _reconcile_session(
-    session_id: Optional[int], counter_energy_wh: float, *, trigger: str
+    session_id: int | None, counter_energy_wh: float, *, trigger: str
 ) -> None:
     """Price one durable session when telemetry and tariff coverage agree."""
     if session_id is None:
@@ -512,13 +525,17 @@ async def _reconcile_session(
     end = rows[-1][0] + datetime.timedelta(minutes=30)
     # A daytime Intelligent Go slot still needs the tariff's overnight price as
     # evidence, so include the surrounding day when loading persisted rates.
-    rate_start = start - datetime.timedelta(days=1) if octopus.is_intelligent_go() else start
+    rate_start = (
+        start - datetime.timedelta(days=1) if octopus.is_intelligent_go() else start
+    )
     rate_end = end + datetime.timedelta(days=1) if octopus.is_intelligent_go() else end
     rates = await db.get_tariff_rates(rate_start, rate_end)
     if not rates:
         rates = store.agile_rates
     smart_slots = (
-        await db.get_session_schedule_slots(session_id) if octopus.is_intelligent_go() else None
+        await db.get_session_schedule_slots(session_id)
+        if octopus.is_intelligent_go()
+        else None
     )
     priced = octopus.price_energy_buckets(
         attribution.car_by_slot, rates, smart_slots=smart_slots
@@ -548,7 +565,7 @@ async def _reconcile_finished_session(snap: StatusSnapshot) -> None:
 
 
 async def _reconcile_unplugged_session(
-    session_key: Optional[str], session_id: Optional[int], energy_wh: Optional[float]
+    session_key: str | None, session_id: int | None, energy_wh: float | None
 ) -> None:
     """Retry reconciliation at the final physical session boundary."""
     resolved_id = session_id
@@ -668,16 +685,18 @@ async def poll_loop() -> None:
 
                 # Refresh Ohme's daily totals into Postgres on a slow cadence so
                 # the history is populated even when nobody opens the dashboard.
-                if db.is_available():
-                    if now_mono - last_daily_sync >= config.DAILY_STATS_INTERVAL:
-                        await _persist_daily_stats(client)
-                        # Pull recent Octopus household consumption and break out
-                        # the car share (no-op when consumption isn't configured).
-                        await _persist_grid_consumption()
-                        # Same slow cadence: stop the per-poll telemetry table
-                        # from growing without bound.
-                        await db.prune_telemetry(config.TELEMETRY_RETENTION_DAYS)
-                        last_daily_sync = now_mono
+                if (
+                    db.is_available()
+                    and now_mono - last_daily_sync >= config.DAILY_STATS_INTERVAL
+                ):
+                    await _persist_daily_stats(client)
+                    # Pull recent Octopus household consumption and break out
+                    # the car share (no-op when consumption isn't configured).
+                    await _persist_grid_consumption()
+                    # Same slow cadence: stop the per-poll telemetry table
+                    # from growing without bound.
+                    await db.prune_telemetry(config.TELEMETRY_RETENTION_DAYS)
+                    last_daily_sync = now_mono
 
                 # Send the weekly summary digest if it's due (no-op otherwise).
                 await _maybe_send_weekly_digest(client)
@@ -694,11 +713,15 @@ async def poll_loop() -> None:
                     try:
                         client = await _recreate_ohme_client(client)
                         ohme_session_failures = 0
-                        logger.info("Recreated Ohme client after repeated session failures")
+                        logger.info(
+                            "Recreated Ohme client after repeated session failures"
+                        )
                     except asyncio.CancelledError:
                         raise
                     except Exception:
-                        logger.warning("Could not recreate Ohme client yet", exc_info=True)
+                        logger.warning(
+                            "Could not recreate Ohme client yet", exc_info=True
+                        )
                 # Alert exactly once when the failure streak crosses the
                 # threshold; ntfy.send swallows its own errors, so this can
                 # never make the poll failure worse.
@@ -736,7 +759,7 @@ async def lifespan(app: FastAPI):
     db_reconnect_task = asyncio.create_task(db.reconnect_loop(db_stop))
 
     global _poll_task
-    task: Optional[asyncio.Task] = None
+    task: asyncio.Task | None = None
     if not DISABLE_POLLING:
         task = asyncio.create_task(poll_loop())
         task.add_done_callback(_on_poll_task_done)
@@ -750,7 +773,7 @@ async def lifespan(app: FastAPI):
                 await task
             except asyncio.CancelledError:
                 pass
-            except Exception:  # noqa: BLE001 - already logged by _on_poll_task_done
+            except Exception:  # noqa: BLE001, S110 - already logged by _on_poll_task_done
                 pass
             _poll_task = None
         db_stop.set()
@@ -773,7 +796,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 async def require_csrf_header(
-    x_requested_with: Optional[str] = Header(default=None),
+    x_requested_with: str | None = Header(default=None),
 ) -> None:
     """Require the SPA's custom header on every state-changing request.
 
@@ -815,30 +838,33 @@ _summary_cache: dict[str, Any] = {"key": None, "value": None, "at": 0.0}
 # Convert bucket timestamps in that zone — not the host's — so a bucket starting
 # at 23:00 UTC during BST isn't attributed to the previous calendar date.
 try:
-    _STATS_TZ: Optional[ZoneInfo] = ZoneInfo(config.TIMEZONE)
+    _STATS_TZ: ZoneInfo | None = ZoneInfo(config.TIMEZONE)
 except Exception:  # noqa: BLE001 - bad TIMEZONE value; fall back to host-local
-    logger.warning("Unknown TIMEZONE %r — using host-local time for daily stats", config.TIMEZONE)
+    logger.warning(
+        "Unknown TIMEZONE %r — using host-local time for daily stats", config.TIMEZONE
+    )
     _STATS_TZ = None
 
-def _money_amount(node: Any) -> tuple[Decimal, Optional[str]]:
+
+def _money_amount(node: Any) -> tuple[Decimal, str | None]:
     """Return Ohme's exact minor-unit amount and currency code."""
     if not isinstance(node, dict):
-        return Decimal("0"), None
+        return Decimal(0), None
     try:
         amount = Decimal(str(node.get("amount") or 0))
     except (TypeError, ValueError, ArithmeticError):
-        amount = Decimal("0")
+        amount = Decimal(0)
     if not amount.is_finite():
-        amount = Decimal("0")
+        amount = Decimal(0)
     currency = node.get("currencyCode")
     return amount, currency
 
 
-def _minor_factor(currency: Optional[str]) -> int:
+def _minor_factor(currency: str | None) -> int:
     return {"JPY": 1, "KWD": 1000}.get(str(currency or "GBP").upper(), 100)
 
 
-def _money(node: Any) -> tuple[float, Optional[str]]:
+def _money(node: Any) -> tuple[float, str | None]:
     """Return (amount_in_major_units, currencyCode) from an Ohme Money dict."""
     amount, currency = _money_amount(node)
     factor = _minor_factor(currency)
@@ -853,10 +879,12 @@ def _whole_units(value: Any) -> int:
         return 0
     if not amount.is_finite() or amount < 0:
         return 0
-    return int(amount.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    return int(amount.quantize(Decimal(1), rounding=ROUND_HALF_UP))
 
 
-def _statistics_window(days: int, now: Optional[datetime.datetime] = None) -> dict[str, Any]:
+def _statistics_window(
+    days: int, now: datetime.datetime | None = None
+) -> dict[str, Any]:
     """The last ``days`` complete local calendar days and prior comparison window."""
     tz = _STATS_TZ or datetime.timezone.utc
     local_now = now.astimezone(tz) if now is not None else datetime.datetime.now(tz)
@@ -936,10 +964,10 @@ def parse_summary(summary: dict[str, Any], days: int) -> dict[str, Any]:
                 # The response model deliberately omits them from the public API.
                 "energyWh": energy_wh,
                 "savingsMinor": int(
-                    day_saved_amount.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+                    day_saved_amount.quantize(Decimal(1), rounding=ROUND_HALF_UP)
                 ),
                 "costMinor": int(
-                    day_cost_amount.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+                    day_cost_amount.quantize(Decimal(1), rounding=ROUND_HALF_UP)
                 ),
                 "currency": day_currency,
             }
@@ -964,7 +992,9 @@ def parse_summary(summary: dict[str, Any], days: int) -> dict[str, Any]:
 # --- endpoints -----------------------------------------------------------------
 
 
-def _monthly_window(month: Optional[str]) -> tuple[str, datetime.datetime, datetime.datetime]:
+def _monthly_window(
+    month: str | None,
+) -> tuple[str, datetime.datetime, datetime.datetime]:
     """Resolve an explicit/default month to a DST-safe local half-open window."""
     tz = _STATS_TZ or datetime.timezone.utc
     today = datetime.datetime.now(tz).date()
@@ -976,7 +1006,9 @@ def _monthly_window(month: Optional[str]) -> tuple[str, datetime.datetime, datet
         try:
             start_day = datetime.date.fromisoformat(f"{month}-01")
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail="month must be YYYY-MM") from exc
+            raise HTTPException(
+                status_code=400, detail="month must be YYYY-MM"
+            ) from exc
     if start_day.month == 12:
         end_day = datetime.date(start_day.year + 1, 1, 1)
     else:
@@ -1014,11 +1046,16 @@ def _build_monthly_report(
     currency = next(iter(daily_currencies)) if len(daily_currencies) == 1 else None
 
     configured_completed = [
-        row for row in sessions
+        row
+        for row in sessions
         if row["action"] == "configured" and row["completedAt"] is not None
     ]
-    with_energy = [row for row in configured_completed if row["actualEnergyWh"] is not None]
-    with_cost = [row for row in configured_completed if row["actualCostMinor"] is not None]
+    with_energy = [
+        row for row in configured_completed if row["actualEnergyWh"] is not None
+    ]
+    with_cost = [
+        row for row in configured_completed if row["actualCostMinor"] is not None
+    ]
     cost_currencies = {row["currency"] for row in with_cost if row["currency"]}
     cost_currency = next(iter(cost_currencies)) if len(cost_currencies) == 1 else None
     quality_counts: dict[str, int] = {}
@@ -1037,7 +1074,9 @@ def _build_monthly_report(
             "savingsMinor": (
                 sum(row["savingsMinor"] for row in complete_daily) if currency else None
             ),
-            "costMinor": sum(row["costMinor"] for row in complete_daily) if currency else None,
+            "costMinor": sum(row["costMinor"] for row in complete_daily)
+            if currency
+            else None,
             "currency": currency,
             "completeDays": complete_days,
             "expectedDays": expected_days,
@@ -1052,13 +1091,16 @@ def _build_monthly_report(
             "actualCostCount": len(with_cost),
             "actualCostMinor": (
                 sum(row["actualCostMinor"] for row in with_cost)
-                if cost_currency is not None else None
+                if cost_currency is not None
+                else None
             ),
             "costCurrency": cost_currency,
             "actualCostExpected": actual_cost_expected,
             "missingActualEnergy": len(configured_completed) - len(with_energy),
             "missingActualCost": (
-                len(configured_completed) - len(with_cost) if actual_cost_expected else 0
+                len(configured_completed) - len(with_cost)
+                if actual_cost_expected
+                else 0
             ),
             "qualityCounts": quality_counts,
         },
@@ -1070,49 +1112,94 @@ def _build_monthly_report(
 def _monthly_report_csv(report: dict[str, Any]) -> str:
     """Flatten report summary and evidence into one spreadsheet-friendly file."""
     fields = [
-        "recordType", "month", "date", "sessionId", "pluggedInAt", "completedAt",
-        "vehicleName", "action", "quality", "energyWh", "costMinor", "savingsMinor",
-        "currency", "source", "isComplete", "completeDays", "expectedDays", "missingDays",
-        "sessionCount", "measuredEnergyCount", "actualCostCount", "missingActualEnergy",
-        "missingActualCost", "accountEnergyWh", "accountCostMinor", "accountSavingsMinor",
-        "measuredSessionEnergyWh", "actualSessionCostMinor", "actualSessionCostCurrency",
+        "recordType",
+        "month",
+        "date",
+        "sessionId",
+        "pluggedInAt",
+        "completedAt",
+        "vehicleName",
+        "action",
+        "quality",
+        "energyWh",
+        "costMinor",
+        "savingsMinor",
+        "currency",
+        "source",
+        "isComplete",
+        "completeDays",
+        "expectedDays",
+        "missingDays",
+        "sessionCount",
+        "measuredEnergyCount",
+        "actualCostCount",
+        "missingActualEnergy",
+        "missingActualCost",
+        "accountEnergyWh",
+        "accountCostMinor",
+        "accountSavingsMinor",
+        "measuredSessionEnergyWh",
+        "actualSessionCostMinor",
+        "actualSessionCostCurrency",
     ]
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=fields)
     writer.writeheader()
     account = report["account"]
     home = report["homeSessions"]
-    writer.writerow({
-        "recordType": "summary", "month": report["month"], "quality": account["quality"],
-        "accountEnergyWh": account["energyWh"],
-        "accountCostMinor": account["costMinor"],
-        "accountSavingsMinor": account["savingsMinor"], "currency": account["currency"],
-        "completeDays": account["completeDays"], "expectedDays": account["expectedDays"],
-        "missingDays": account["missingDays"], "sessionCount": home["total"],
-        "measuredEnergyCount": home["measuredEnergyCount"],
-        "actualCostCount": home["actualCostCount"],
-        "missingActualEnergy": home["missingActualEnergy"],
-        "missingActualCost": home["missingActualCost"],
-        "measuredSessionEnergyWh": home["measuredEnergyWh"],
-        "actualSessionCostMinor": home["actualCostMinor"],
-        "actualSessionCostCurrency": home["costCurrency"],
-    })
+    writer.writerow(
+        {
+            "recordType": "summary",
+            "month": report["month"],
+            "quality": account["quality"],
+            "accountEnergyWh": account["energyWh"],
+            "accountCostMinor": account["costMinor"],
+            "accountSavingsMinor": account["savingsMinor"],
+            "currency": account["currency"],
+            "completeDays": account["completeDays"],
+            "expectedDays": account["expectedDays"],
+            "missingDays": account["missingDays"],
+            "sessionCount": home["total"],
+            "measuredEnergyCount": home["measuredEnergyCount"],
+            "actualCostCount": home["actualCostCount"],
+            "missingActualEnergy": home["missingActualEnergy"],
+            "missingActualCost": home["missingActualCost"],
+            "measuredSessionEnergyWh": home["measuredEnergyWh"],
+            "actualSessionCostMinor": home["actualCostMinor"],
+            "actualSessionCostCurrency": home["costCurrency"],
+        }
+    )
     for row in report["daily"]:
-        writer.writerow({
-            "recordType": "daily", "month": report["month"], "date": row["date"],
-            "quality": "complete" if row["isComplete"] else "incomplete",
-            "energyWh": row["energyWh"], "costMinor": row["costMinor"],
-            "savingsMinor": row["savingsMinor"], "currency": row["currency"],
-            "source": row["source"], "isComplete": row["isComplete"],
-        })
+        writer.writerow(
+            {
+                "recordType": "daily",
+                "month": report["month"],
+                "date": row["date"],
+                "quality": "complete" if row["isComplete"] else "incomplete",
+                "energyWh": row["energyWh"],
+                "costMinor": row["costMinor"],
+                "savingsMinor": row["savingsMinor"],
+                "currency": row["currency"],
+                "source": row["source"],
+                "isComplete": row["isComplete"],
+            }
+        )
     for row in report["sessions"]:
-        writer.writerow({
-            "recordType": "session", "month": report["month"], "sessionId": row["id"],
-            "pluggedInAt": row["pluggedInAt"], "completedAt": row["completedAt"],
-            "vehicleName": row["vehicleName"], "action": row["action"],
-            "quality": row["quality"], "energyWh": row["actualEnergyWh"],
-            "costMinor": row["actualCostMinor"], "currency": row["currency"],
-        })
+        writer.writerow(
+            {
+                "recordType": "session",
+                "month": report["month"],
+                "sessionId": row["id"],
+                "pluggedInAt": row["pluggedInAt"],
+                "completedAt": row["completedAt"],
+                "vehicleName": row["vehicleName"],
+                "action": row["action"],
+                "quality": row["quality"],
+                "energyWh": row["actualEnergyWh"],
+                "costMinor": row["actualCostMinor"],
+                "currency": row["currency"],
+            }
+        )
     return output.getvalue()
 
 
@@ -1144,7 +1231,7 @@ async def _reapply_target_if_connected(
         store.record_vehicle_state(vehicle)
         soc = vehicle.soc
         vehicle_id = vehicle.vehicle_id
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.warning(
             "Could not refresh SOC from Bluelink — using the plug-in reading",
             exc_info=True,
@@ -1188,7 +1275,7 @@ async def _reapply_target_if_connected(
             reason="target_reapplied",
         )
         return "applied"
-    except Exception:  # noqa: BLE001 - never let an Ohme hiccup fail the settings write
+    except Exception:
         logger.warning("Could not re-apply charge target to Ohme", exc_info=True)
         return "failed"
 
@@ -1250,7 +1337,9 @@ async def get_data_quality() -> DataQualityResponseModel:
     """Read-only completeness counters for operations and alerting."""
     generated_at = datetime.datetime.now(datetime.timezone.utc)
     cache_available = _summary_cache["value"] is not None
-    cache_age = max(0, round(time.time() - _summary_cache["at"])) if cache_available else None
+    cache_age = (
+        max(0, round(time.time() - _summary_cache["at"])) if cache_available else None
+    )
     summary = await db.get_data_quality_summary()
     if summary is None:
         return DataQualityResponseModel(
@@ -1285,7 +1374,7 @@ async def get_data_quality() -> DataQualityResponseModel:
 
 @app.get("/api/reports/monthly", response_model=MonthlyReportResponseModel)
 async def get_monthly_report(
-    month: Optional[str] = Query(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    month: str | None = Query(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
     format: Literal["json", "csv"] = Query(default="json"),
 ) -> MonthlyReportResponseModel | Response:
     """Auditable calendar-month account totals and measured home sessions."""
@@ -1323,7 +1412,10 @@ async def set_charge_target(update: TargetUpdate) -> JSONResponse:
     applied = await _reapply_target_if_connected()
     _reflect_effective_target()
     logger.info(
-        "Charge target set to %s%% (persisted=%s, applied=%s)", target, persisted, applied
+        "Charge target set to %s%% (persisted=%s, applied=%s)",
+        target,
+        persisted,
+        applied,
     )
     return JSONResponse(
         {
@@ -1351,7 +1443,12 @@ async def set_ready_by(update: ReadyByUpdate) -> JSONResponse:
     # Reuse the target reapply: it re-reads the SOC and calls set_target, which
     # now carries the ready-by time.
     applied = await _reapply_target_if_connected()
-    logger.info("Ready-by time set to %s (persisted=%s, applied=%s)", ready_by, persisted, applied)
+    logger.info(
+        "Ready-by time set to %s (persisted=%s, applied=%s)",
+        ready_by,
+        persisted,
+        applied,
+    )
     return JSONResponse(
         {
             "readyBy": ready_by,
@@ -1378,7 +1475,12 @@ async def set_day_targets(update: DayTargetsUpdate) -> JSONResponse:
     persisted = settings.save_day_targets(day_targets)
     applied = await _reapply_target_if_connected()
     _reflect_effective_target()
-    logger.info("Per-weekday targets set to %s (persisted=%s, applied=%s)", day_targets, persisted, applied)
+    logger.info(
+        "Per-weekday targets set to %s (persisted=%s, applied=%s)",
+        day_targets,
+        persisted,
+        applied,
+    )
     return JSONResponse(
         {
             "dayTargets": {str(d): p for d, p in day_targets.items()},
@@ -1454,14 +1556,18 @@ async def get_vehicles() -> JSONResponse:
     """
     try:
         vehicles = await bluelink.list_vehicles_async()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("Could not list vehicles from Bluelink", exc_info=True)
-        raise HTTPException(status_code=502, detail="Could not list vehicles from Bluelink") from exc
+        raise HTTPException(
+            status_code=502, detail="Could not list vehicles from Bluelink"
+        ) from exc
     public_vehicles = [
         {key: vehicle.get(key) for key in ("id", "name", "model")}
         for vehicle in vehicles
     ]
-    return JSONResponse({"vehicles": public_vehicles, "selected": store.selected_vehicle_id})
+    return JSONResponse(
+        {"vehicles": public_vehicles, "selected": store.selected_vehicle_id}
+    )
 
 
 @app.put(
@@ -1475,7 +1581,7 @@ async def set_vehicle(update: VehicleUpdate) -> JSONResponse:
     vehicle_id = update.vehicleId or None
     try:
         vehicles = await bluelink.list_vehicles_async()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("Could not validate Hyundai vehicle selection", exc_info=True)
         raise HTTPException(
             status_code=502, detail="Could not validate vehicle with Bluelink"
@@ -1488,7 +1594,12 @@ async def set_vehicle(update: VehicleUpdate) -> JSONResponse:
     store.set_vehicle_id(vehicle_id)
     persisted = settings.save_vehicle_id(vehicle_id)
     applied = await _reapply_target_if_connected()
-    logger.info("Vehicle selection set to %s (persisted=%s, applied=%s)", vehicle_id, persisted, applied)
+    logger.info(
+        "Vehicle selection set to %s (persisted=%s, applied=%s)",
+        vehicle_id,
+        persisted,
+        applied,
+    )
     return JSONResponse(
         {
             "vehicleId": vehicle_id,
@@ -1517,7 +1628,8 @@ async def set_vehicle_profile(update: VehicleProfileUpdate) -> JSONResponse:
     active_vehicle_id = store.selected_vehicle_id or store.last_vehicle_id
     applied = (
         await _reapply_target_if_connected(allow_zero_topup=True)
-        if active_vehicle_id == update.vehicleId else "not_connected"
+        if active_vehicle_id == update.vehicleId
+        else "not_connected"
     )
     _reflect_effective_target()
     profile = profiles.get(update.vehicleId)
@@ -1545,7 +1657,8 @@ async def get_status() -> JSONResponse:
             "isLocked": store.status.is_locked,
             "location": (
                 {"latitude": store.status.latitude, "longitude": store.status.longitude}
-                if store.status.latitude is not None and store.status.longitude is not None
+                if store.status.latitude is not None
+                and store.status.longitude is not None
                 else None
             ),
             # Read-only vehicle health. Each field is null when the car didn't
@@ -1592,7 +1705,9 @@ async def get_status() -> JSONResponse:
             # Ready-by departure time (HH:MM): the user's override if set, else
             # Ohme's own configured time (which exists even when unplugged), else
             # null. readyByIsManual flags whether the value is our stored override.
-            "readyBy": store.ready_by if store.ready_by is not None else store.status.ohme_ready_by,
+            "readyBy": store.ready_by
+            if store.ready_by is not None
+            else store.status.ohme_ready_by,
             "readyByIsManual": store.ready_by is not None,
             # Per-weekday target overrides {"0".."6": percent}; empty when none.
             # charger.targetPercent reflects today's effective target.
@@ -1643,7 +1758,7 @@ _TARIFF_CACHE_TTL = 1800  # 30 min; Octopus rates change at most once a day
 _tariff_cache: dict[str, Any] = {"value": None, "at": 0.0}
 
 
-async def _refresh_tariff_rates() -> Optional[dict[str, Any]]:
+async def _refresh_tariff_rates() -> dict[str, Any] | None:
     """Fetch, cache and persist tariff windows for forecasts and actual costs."""
     rates = await octopus.fetch_rates()
     if rates is None:
@@ -1672,18 +1787,23 @@ async def get_tariff() -> JSONResponse:
     if not octopus.is_enabled():
         return JSONResponse({"enabled": False, "rates": [], "cheapest": []})
     now = time.time()
-    if _tariff_cache["value"] is not None and now - _tariff_cache["at"] < _TARIFF_CACHE_TTL:
+    if (
+        _tariff_cache["value"] is not None
+        and now - _tariff_cache["at"] < _TARIFF_CACHE_TTL
+    ):
         return JSONResponse(_tariff_cache["value"])
     payload = await _refresh_tariff_rates()
     if payload is None:
         if _tariff_cache["value"] is not None:
             return JSONResponse(_tariff_cache["value"])
-        return JSONResponse({"enabled": True, "currency": "GBP", "rates": [], "cheapest": []})
+        return JSONResponse(
+            {"enabled": True, "currency": "GBP", "rates": [], "cheapest": []}
+        )
     return JSONResponse(payload)
 
 
 @app.get("/api/energy-usage")
-async def get_energy_usage(date: Optional[str] = Query(default=None)) -> JSONResponse:
+async def get_energy_usage(date: str | None = Query(default=None)) -> JSONResponse:
     """Half-hourly whole-house import vs car charging for a single day.
 
     ``date`` is a ``YYYY-MM-DD`` string in the configured timezone; it defaults to
@@ -1710,7 +1830,9 @@ async def get_energy_usage(date: Optional[str] = Query(default=None)) -> JSONRes
         try:
             day = datetime.date.fromisoformat(date)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD") from exc
+            raise HTTPException(
+                status_code=400, detail="date must be YYYY-MM-DD"
+            ) from exc
     else:
         day = latest_day
 
@@ -1786,7 +1908,9 @@ _EXPORT_FIELDS = (
 
 
 @app.get("/api/sessions/export")
-async def export_sessions(format: str = Query(default="csv", pattern="^(csv|json)$")) -> Response:
+async def export_sessions(
+    format: str = Query(default="csv", pattern="^(csv|json)$"),
+) -> Response:
     """Download the *full* charge-session history as a CSV or JSON file.
 
     Unlike ``/api/sessions`` (which serves the few most recent for the card),
@@ -1803,14 +1927,18 @@ async def export_sessions(format: str = Query(default="csv", pattern="^(csv|json
 
     if format == "json":
         body = json.dumps(sessions, indent=2)
-        return Response(content=body, media_type="application/json", headers=disposition)
+        return Response(
+            content=body, media_type="application/json", headers=disposition
+        )
 
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=_EXPORT_FIELDS, extrasaction="ignore")
     writer.writeheader()
     writer.writerows(sessions)
     return Response(
-        content=buffer.getvalue(), media_type="text/csv; charset=utf-8", headers=disposition
+        content=buffer.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers=disposition,
     )
 
 
@@ -1866,13 +1994,16 @@ async def _persist_daily_stats(client: Any, days: int = 90) -> None:
     try:
         async with store.client_lock:
             summary = await ohme_client.get_charge_summary(
-                client,
-                start_ts=window["startMs"], end_ts=window["endMs"]
+                client, start_ts=window["startMs"], end_ts=window["endMs"]
             )
     except Exception:
-        logger.warning("Could not fetch charge summary for daily-stats persist", exc_info=True)
+        logger.warning(
+            "Could not fetch charge summary for daily-stats persist", exc_info=True
+        )
         return
-    parsed = parse_summary({k: v for k, v in summary.items() if k != "granularity"}, days)
+    parsed = parse_summary(
+        {k: v for k, v in summary.items() if k != "granularity"}, days
+    )
     parsed["daily"] = _complete_daily_series(parsed["daily"], window)
     _cache_avg_price(parsed)
     await db.record_daily_stats(
@@ -1907,7 +2038,9 @@ async def _persist_grid_consumption(days: int = 3) -> None:
         return
     # Widen the telemetry read a little before the window so the first slot's
     # cumulative-energy delta has a preceding reading to diff against.
-    tele_from = period_from - datetime.timedelta(seconds=max(config.POLL_INTERVAL * 2, 600))
+    tele_from = period_from - datetime.timedelta(
+        seconds=max(config.POLL_INTERVAL * 2, 600)
+    )
     telemetry = await db.get_telemetry_between(tele_from, now)
     attribution = energy.attribute_car_kwh(
         telemetry or [], max_gap_seconds=max(config.POLL_INTERVAL * 3, 15 * 60)
@@ -1937,7 +2070,9 @@ def _cache_avg_price(parsed: dict[str, Any]) -> None:
 
 def _now_local() -> datetime.datetime:
     """Current time in the configured timezone (host-local if it's unset/bad)."""
-    return datetime.datetime.now(_STATS_TZ) if _STATS_TZ else datetime.datetime.now()
+    return (
+        datetime.datetime.now(_STATS_TZ) if _STATS_TZ else datetime.datetime.now()  # noqa: DTZ005 - explicit host-local fallback
+    )
 
 
 def _format_digest(parsed: dict[str, Any]) -> str:
@@ -1948,7 +2083,11 @@ def _format_digest(parsed: dict[str, Any]) -> str:
     symbol = "£" if currency == "GBP" else ""
 
     def money(value: float) -> str:
-        return f"{symbol}{value:.2f}" if symbol else f"{value:.2f} {currency or ''}".strip()
+        return (
+            f"{symbol}{value:.2f}"
+            if symbol
+            else f"{value:.2f} {currency or ''}".strip()
+        )
 
     return "\n".join(
         [
@@ -1975,7 +2114,10 @@ async def _maybe_send_weekly_digest(client: Any) -> None:
     ):
         return
     now_local = _now_local()
-    if now_local.weekday() != config.WEEKLY_DIGEST_DAY or now_local.hour != config.WEEKLY_DIGEST_HOUR:
+    if (
+        now_local.weekday() != config.WEEKLY_DIGEST_DAY
+        or now_local.hour != config.WEEKLY_DIGEST_HOUR
+    ):
         return
     today = now_local.date()
     if store.last_digest_date == today:
@@ -1985,8 +2127,7 @@ async def _maybe_send_weekly_digest(client: Any) -> None:
     try:
         async with store.client_lock:
             summary = await ohme_client.get_charge_summary(
-                client,
-                start_ts=window["startMs"], end_ts=window["endMs"]
+                client, start_ts=window["startMs"], end_ts=window["endMs"]
             )
     except Exception:
         logger.warning("Weekly digest: could not fetch charge summary", exc_info=True)
@@ -1994,13 +2135,15 @@ async def _maybe_send_weekly_digest(client: Any) -> None:
     parsed = parse_summary({k: v for k, v in summary.items() if k != "granularity"}, 7)
     # Mark sent before awaiting ntfy so a slow/failed send can't double-fire.
     store.last_digest_date = today
-    await ntfy.send(_format_digest(parsed), title="Weekly charging summary", tags="bar_chart")
+    await ntfy.send(
+        _format_digest(parsed), title="Weekly charging summary", tags="bar_chart"
+    )
     logger.info("Sent weekly charging digest")
 
 
 async def _previous_period_totals(
     client: Any, window: dict[str, Any]
-) -> Optional[dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Totals for the equal-length window immediately before the current one.
 
     Used for the month-over-month comparison. Best-effort: None on any failure,
@@ -2009,11 +2152,12 @@ async def _previous_period_totals(
     try:
         async with store.client_lock:
             summary = await ohme_client.get_charge_summary(
-                client,
-                start_ts=window["previousStartMs"], end_ts=window["startMs"]
+                client, start_ts=window["previousStartMs"], end_ts=window["startMs"]
             )
-    except Exception:  # noqa: BLE001
-        logger.warning("Could not fetch previous-period summary for comparison", exc_info=True)
+    except Exception:
+        logger.warning(
+            "Could not fetch previous-period summary for comparison", exc_info=True
+        )
         return None
     totals = parse_summary(
         {k: v for k, v in summary.items() if k != "granularity"}, window["days"]
@@ -2025,7 +2169,7 @@ async def _previous_period_totals(
     }
 
 
-async def _driving_metrics(window: dict[str, Any]) -> Optional[dict[str, Any]]:
+async def _driving_metrics(window: dict[str, Any]) -> dict[str, Any] | None:
     """Fully-contained, single-vehicle charge-to-drive intervals for this window."""
     if not db.is_available():
         return None
@@ -2039,7 +2183,7 @@ async def _driving_metrics(window: dict[str, Any]) -> Optional[dict[str, Any]]:
     )
 
 
-def _efficiency(metrics: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+def _efficiency(metrics: dict[str, Any] | None) -> dict[str, Any] | None:
     """Distance after home charging divided by matched final charger energy."""
     if not metrics or metrics["energyWh"] <= 0 or metrics["milesDriven"] <= 0:
         return None
@@ -2056,9 +2200,13 @@ def _efficiency(metrics: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
     }
 
 
-def _running_cost(metrics: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+def _running_cost(metrics: dict[str, Any] | None) -> dict[str, Any] | None:
     """Actual reconciled home-charging cost per matched odometer mile."""
-    if not metrics or metrics.get("costMinor") is None or metrics["costMilesDriven"] <= 0:
+    if (
+        not metrics
+        or metrics.get("costMinor") is None
+        or metrics["costMilesDriven"] <= 0
+    ):
         return None
     currency = metrics.get("costCurrency") or "GBP"
     factor = {"JPY": 1, "KWD": 1000}.get(currency, 100)
@@ -2076,7 +2224,7 @@ def _running_cost(metrics: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]
 def _statistics_metadata(
     parsed: dict[str, Any],
     window: dict[str, Any],
-    metrics: Optional[dict[str, Any]],
+    metrics: dict[str, Any] | None,
     fetched_at: datetime.datetime,
 ) -> dict[str, Any]:
     """Attach auditable source, method, freshness and coverage to each metric family."""
@@ -2136,7 +2284,9 @@ def _statistics_metadata(
         "efficiency": {
             "source": "charge_sessions.actual_energy_wh+bluelink_odometer",
             "calculationType": "same_vehicle_charge_to_next_plugin",
-            "observedAt": metrics["to"].isoformat() if metrics and metrics.get("to") else None,
+            "observedAt": metrics["to"].isoformat()
+            if metrics and metrics.get("to")
+            else None,
             "completeThrough": complete_through,
             "quality": "measured" if efficiency else "unavailable",
             "coverage": {
@@ -2150,12 +2300,16 @@ def _statistics_metadata(
         "runningCost": {
             "source": "charge_sessions.reconciled_actual_cost+bluelink_odometer",
             "calculationType": "same_vehicle_actual_cost_to_next_plugin",
-            "observedAt": metrics["to"].isoformat() if metrics and metrics.get("to") else None,
+            "observedAt": metrics["to"].isoformat()
+            if metrics and metrics.get("to")
+            else None,
             "completeThrough": complete_through,
             "quality": "actual" if running_cost else "unavailable",
             "coverage": {
                 "vehicleId": metrics.get("vehicleId") if metrics else None,
-                "matchedIntervals": running_cost["intervalCount"] if running_cost else 0,
+                "matchedIntervals": running_cost["intervalCount"]
+                if running_cost
+                else 0,
                 "matchedMiles": running_cost["milesDriven"] if running_cost else 0,
                 "costMethod": "tariff_interval_reconciliation",
             },
@@ -2208,17 +2362,20 @@ async def get_statistics(
     try:
         async with store.client_lock:
             summary = await ohme_client.get_charge_summary(
-                client,
-                start_ts=window["startMs"], end_ts=window["endMs"]
+                client, start_ts=window["startMs"], end_ts=window["endMs"]
             )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("Failed to fetch charge summary", exc_info=True)
         if _summary_cache["key"] == cache_key and _summary_cache["value"] is not None:
             return _stale_statistics(now - _summary_cache["at"], type(exc).__name__)
-        raise HTTPException(status_code=502, detail="Could not fetch statistics from Ohme") from exc
+        raise HTTPException(
+            status_code=502, detail="Could not fetch statistics from Ohme"
+        ) from exc
 
     # async_get_charge_summary returns granularity as an enum; drop it before serialising.
-    parsed = parse_summary({k: v for k, v in summary.items() if k != "granularity"}, days)
+    parsed = parse_summary(
+        {k: v for k, v in summary.items() if k != "granularity"}, days
+    )
     parsed["stale"] = False
     parsed["daily"] = _complete_daily_series(parsed["daily"], window)
     parsed["window"] = {
@@ -2269,16 +2426,24 @@ async def _charge_action(name: str, action: Any) -> JSONResponse:
             await action(client)
             charger_status = await ohme_client.get_charger_status(client)
             store.update(
-                build_snapshot(client, connected=ohme_client.is_connected(charger_status))
+                build_snapshot(
+                    client, connected=ohme_client.is_connected(charger_status)
+                )
             )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("Charge control '%s' failed", name, exc_info=True)
-        raise HTTPException(status_code=502, detail=f"Could not {name} via Ohme") from exc
+        raise HTTPException(
+            status_code=502, detail=f"Could not {name} via Ohme"
+        ) from exc
     logger.info("Charge control '%s' requested from the dashboard", name)
     await db.record_session_event(
         store.active_session_id,
         "charge_control",
-        {"action": name, "status": store.status.charger_status, "maxCharge": store.status.max_charge},
+        {
+            "action": name,
+            "status": store.status.charger_status,
+            "maxCharge": store.status.max_charge,
+        },
     )
     return JSONResponse(
         {
@@ -2321,7 +2486,9 @@ async def set_max_charge(update: MaxChargeUpdate) -> JSONResponse:
     disabling returns to smart charging.
     """
     action = "enable max charge" if update.enabled else "disable max charge"
-    return await _charge_action(action, lambda c: ohme_client.set_max_charge(c, update.enabled))
+    return await _charge_action(
+        action, lambda c: ohme_client.set_max_charge(c, update.enabled)
+    )
 
 
 @app.post(
@@ -2361,11 +2528,15 @@ async def refresh() -> JSONResponse:
             charger_status = await ohme_client.get_charger_status(client)
             connected = ohme_client.is_connected(charger_status)
             store.update(build_snapshot(client, connected=connected))
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("Manual refresh failed", exc_info=True)
-        raise HTTPException(status_code=502, detail="Could not refresh from Ohme") from exc
+        raise HTTPException(
+            status_code=502, detail="Could not refresh from Ohme"
+        ) from exc
 
     # Drop the statistics cache so the next request re-fetches from Ohme.
     _summary_cache.update(key=None, value=None, at=0.0)
 
-    return JSONResponse({"ok": True, "updatedAt": store.status.updated_at, "ready": store.ready})
+    return JSONResponse(
+        {"ok": True, "updatedAt": store.status.updated_at, "ready": store.ready}
+    )

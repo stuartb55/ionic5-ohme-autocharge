@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+
 from ohme import ChargerStatus, OhmeApiClient
 
 import config
@@ -99,7 +100,9 @@ async def set_target(
     # has already reached. Ohme represents "stop here" as a zero top-up; never
     # send a negative percentage to its internal API.
     topup = max(0, target_percent - current_soc)
-    await bounded(client.async_set_target(target_percent=topup, target_time=target_time))
+    await bounded(
+        client.async_set_target(target_percent=topup, target_time=target_time)
+    )
     # Refresh so client.slots reflects the new schedule.  This is deliberately
     # a separate bounded operation: a successful write followed by a hung read
     # is reported as an uncertain/failed apply and retried safely by the plug-in

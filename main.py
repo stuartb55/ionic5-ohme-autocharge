@@ -16,10 +16,10 @@ import uuid
 from collections.abc import Awaitable, Callable
 
 import bluelink
-import ohme_client
-import ntfy
 import config
 import db
+import ntfy
+import ohme_client
 import settings
 from state import store
 
@@ -86,7 +86,7 @@ def _slot_payloads(slots) -> list[dict]:
     for slot in slots:
         try:
             payload = slot.to_dict()
-        except Exception:  # noqa: BLE001 - optional audit evidence only
+        except Exception:  # noqa: BLE001, S112 - optional audit evidence only
             continue
         if isinstance(payload, dict):
             payloads.append(payload)
@@ -194,14 +194,14 @@ async def _record_pending_session_row(session_key: str, payload: dict) -> int | 
         vehicle_id=payload.get("vehicleId"),
         vin=payload.get("vin"),
         charger_id=payload.get("chargerId"),
-        source_observed_at=_restore_outbox_timestamp(
-            payload.get("sourceObservedAt")
-        ),
+        source_observed_at=_restore_outbox_timestamp(payload.get("sourceObservedAt")),
         plugged_in_at=_restore_outbox_timestamp(payload.get("pluggedInAt")),
     )
 
 
-async def ensure_pending_sessions(*, active_session_key: str | None = None) -> int | None:
+async def ensure_pending_sessions(
+    *, active_session_key: str | None = None
+) -> int | None:
     """Drain durable session rows into Postgres, retrying safely on every poll.
 
     ``db.record_session`` uses ``session_key`` as an idempotency key, so a crash
@@ -218,7 +218,10 @@ async def ensure_pending_sessions(*, active_session_key: str | None = None) -> i
     for session_key, payload in list(pending.items()):
         session_id = None
         if payload.get("rowPersisted") is True:
-            if session_key == active_session_key and store.active_session_id is not None:
+            if (
+                session_key == active_session_key
+                and store.active_session_id is not None
+            ):
                 session_id = store.active_session_id
             else:
                 session_id = await db.get_session_id_by_key(session_key)
@@ -243,7 +246,9 @@ async def ensure_pending_sessions(*, active_session_key: str | None = None) -> i
         initial_event = payload.get("initialEvent")
         if isinstance(initial_event, dict):
             event_type = initial_event.get("type")
-            if not isinstance(event_type, str) or not await db.record_initial_session_event(
+            if not isinstance(
+                event_type, str
+            ) or not await db.record_initial_session_event(
                 session_id,
                 event_type,
                 initial_event.get("details")
@@ -289,7 +294,10 @@ async def handle_plugin_event(
     Returns True only when Ohme has been successfully updated (or no update was needed)."""
     session_key = session_key or uuid.uuid4().hex
     plugged_in_at = plugged_in_at or datetime.datetime.now(datetime.timezone.utc)
-    logger.info("Plug-in detected (session=%s) — fetching vehicle state from Bluelink...", session_key)
+    logger.info(
+        "Plug-in detected (session=%s) — fetching vehicle state from Bluelink...",
+        session_key,
+    )
     store.record_automation_attempt("pending")
     try:
         # hyundai_kia_connect_api is synchronous; run it in a thread (bounded by
@@ -297,7 +305,9 @@ async def handle_plugin_event(
         vehicle = await bluelink.get_vehicle_state_async(store.selected_vehicle_id)
     except Exception:
         store.record_automation_attempt("error", "bluelink_read_failed")
-        logger.exception("Failed to fetch SOC from Hyundai Bluelink — will retry next poll")
+        logger.exception(
+            "Failed to fetch SOC from Hyundai Bluelink — will retry next poll"
+        )
         await _notify_plugin_failure(
             "Couldn't read the battery SOC from Bluelink — this charge may not be "
             "configured yet. Retrying automatically."
@@ -418,7 +428,9 @@ async def handle_plugin_event(
             lines.append(f"Schedule: {schedule}")
         if store.notification_preferences.plug_in:
             await ntfy.send(
-                "\n".join(lines), title=f"{vehicle_name} plugged in", tags="electric_plug"
+                "\n".join(lines),
+                title=f"{vehicle_name} plugged in",
+                tags="electric_plug",
             )
         store.plugin_failure_notified = False
         store.record_automation_attempt("configured")
@@ -443,12 +455,12 @@ async def _notify_plugin_failure(message: str) -> None:
         return
     store.plugin_failure_notified = True
     if store.notification_preferences.problems:
-        await ntfy.send(message, title="Autocharge problem", priority="high", tags="warning")
+        await ntfy.send(
+            message, title="Autocharge problem", priority="high", tags="warning"
+        )
 
 
-UnplugHook = Callable[
-    [str | None, int | None, float | None], Awaitable[None]
-]
+UnplugHook = Callable[[str | None, int | None, float | None], Awaitable[None]]
 
 
 class PlugInDetector:
@@ -488,16 +500,22 @@ class PlugInDetector:
             return
         self.session_key = settings.load_session_key() or uuid.uuid4().hex
         self.plugged_in_at = datetime.datetime.now(datetime.timezone.utc)
-        settings.save_session_marker(self.session_key, handled=settings.load_session_active())
+        settings.save_session_marker(
+            self.session_key, handled=settings.load_session_active()
+        )
         store.active_session_key = self.session_key
         if settings.load_session_active():
             self.session_handled = True
             store.record_automation_attempt("configured")
-            logger.info("Car already connected on startup — session already handled before restart")
+            logger.info(
+                "Car already connected on startup — session already handled before restart"
+            )
         else:
             self.session_handled = False
             store.record_automation_attempt("pending")
-            logger.info("Car connected on startup with no handled session — will configure on next poll")
+            logger.info(
+                "Car connected on startup with no handled session — will configure on next poll"
+            )
 
     async def update(self, client, status) -> bool:
         """Advance the state machine for one poll. Calls
@@ -584,7 +602,7 @@ class PlugInDetector:
             if self.on_unplug is not None:
                 try:
                     await self.on_unplug(session_key, session_id, final_energy)
-                except Exception:  # noqa: BLE001 - best-effort reporting hook
+                except Exception:
                     logger.warning("Unplug reconciliation failed", exc_info=True)
             if store.trip_mode_enabled:
                 await db.record_session_event(
@@ -618,7 +636,11 @@ async def run_loop() -> None:
         store.charge_target,
     )
     if config.NTFY_TOPIC:
-        logger.info("Ntfy notifications enabled (url=%s, topic=%s)", config.NTFY_URL, config.NTFY_TOPIC)
+        logger.info(
+            "Ntfy notifications enabled (url=%s, topic=%s)",
+            config.NTFY_URL,
+            config.NTFY_TOPIC,
+        )
     else:
         logger.info("Ntfy notifications disabled — set NTFY_TOPIC to enable")
 
@@ -641,8 +663,10 @@ async def run_loop() -> None:
     try:
         initial_status = await ohme_client.get_charger_status(client)
         detector.prime(initial_status)
-    except Exception:
-        logger.warning("Could not determine initial charge state — will treat as disconnected")
+    except Exception:  # noqa: BLE001 - a failed prime is recoverable
+        logger.warning(
+            "Could not determine initial charge state — will treat as disconnected"
+        )
 
     try:
         session_failures = 0
@@ -663,7 +687,9 @@ async def run_loop() -> None:
                         replacement = None
                         await ohme_client.close_client(previous)
                         session_failures = 0
-                        logger.info("Recreated Ohme client after repeated session failures")
+                        logger.info(
+                            "Recreated Ohme client after repeated session failures"
+                        )
                     except asyncio.CancelledError:
                         if replacement is not None:
                             await ohme_client.close_client(replacement)
@@ -671,7 +697,9 @@ async def run_loop() -> None:
                     except Exception:
                         if replacement is not None:
                             await ohme_client.close_client(replacement)
-                        logger.warning("Could not recreate Ohme client yet", exc_info=True)
+                        logger.warning(
+                            "Could not recreate Ohme client yet", exc_info=True
+                        )
 
             await asyncio.sleep(config.POLL_INTERVAL)
     finally:

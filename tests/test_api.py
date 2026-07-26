@@ -23,7 +23,9 @@ from state import StatusSnapshot, store
 def _vstate(soc, *, range_miles=150, odometer_miles=10000, vehicle_id=None):
     """Build a Bluelink VehicleState for patching bluelink.get_vehicle_state."""
     return bluelink.VehicleState(
-        soc=soc, range_miles=range_miles, odometer_miles=odometer_miles,
+        soc=soc,
+        range_miles=range_miles,
+        odometer_miles=odometer_miles,
         vehicle_id=vehicle_id,
     )
 
@@ -98,8 +100,12 @@ def _populate_snapshot():
             target_percent=80,
             session_energy_wh=4500.0,
             slots=[
-                {"start": "2026-06-02T01:00:00+01:00", "end": "2026-06-02T03:30:00+01:00",
-                 "power": 7.4, "energy": 18.5}
+                {
+                    "start": "2026-06-02T01:00:00+01:00",
+                    "end": "2026-06-02T03:30:00+01:00",
+                    "power": 7.4,
+                    "energy": 18.5,
+                }
             ],
             next_slot_start="2026-06-02T01:00:00+01:00",
             next_slot_end="2026-06-02T03:30:00+01:00",
@@ -128,7 +134,10 @@ def test_version_defaults_to_dev(client, monkeypatch):
 def test_health_503_when_poll_task_dead(client):
     dead = MagicMock()
     dead.done.return_value = True
-    with patch.object(api, "DISABLE_POLLING", False), patch.object(api, "_poll_task", dead):
+    with (
+        patch.object(api, "DISABLE_POLLING", False),
+        patch.object(api, "_poll_task", dead),
+    ):
         resp = client.get("/api/health")
     assert resp.status_code == 503
     body = resp.json()
@@ -139,7 +148,10 @@ def test_health_503_when_poll_task_dead(client):
 def test_health_ok_while_poll_task_running(client):
     alive = MagicMock()
     alive.done.return_value = False
-    with patch.object(api, "DISABLE_POLLING", False), patch.object(api, "_poll_task", alive):
+    with (
+        patch.object(api, "DISABLE_POLLING", False),
+        patch.object(api, "_poll_task", alive),
+    ):
         resp = client.get("/api/health")
     assert resp.status_code == 200
     assert resp.json()["pollAlive"] is True
@@ -158,7 +170,10 @@ def test_ready_separates_operational_state_from_liveness(client):
     alive.done.return_value = False
     store.client = MagicMock()
     _populate_snapshot()
-    with patch.object(api, "DISABLE_POLLING", False), patch.object(api, "_poll_task", alive):
+    with (
+        patch.object(api, "DISABLE_POLLING", False),
+        patch.object(api, "_poll_task", alive),
+    ):
         assert client.get("/api/ready").status_code == 200
         store.record_poll_failure("poll_failed")
         assert client.get("/api/ready").status_code == 503
@@ -171,8 +186,10 @@ def test_rejects_untrusted_host_header(client):
 
 
 def test_data_quality_reports_unavailable_without_persistence(client):
-    with patch("db.get_data_quality_summary", new=AsyncMock(return_value=None)), \
-         patch("db.is_available", return_value=False):
+    with (
+        patch("db.get_data_quality_summary", new=AsyncMock(return_value=None)),
+        patch("db.is_available", return_value=False),
+    ):
         body = client.get("/api/data-quality").json()
     assert body["status"] == "unavailable"
     assert body["persistenceAvailable"] is False
@@ -181,37 +198,64 @@ def test_data_quality_reports_unavailable_without_persistence(client):
 
 # --- monthly reports -------------------------------------------------------
 
+
 def _monthly_evidence():
     start = dt.datetime(2026, 6, 1, tzinfo=dt.timezone.utc)
     return {
         "daily": [
             {
-                "date": dt.date(2026, 6, 1), "energyWh": 4200,
-                "savingsMinor": 80, "costMinor": 50, "currency": "GBP",
-                "source": "ohme_summary", "isComplete": True, "updatedAt": start,
+                "date": dt.date(2026, 6, 1),
+                "energyWh": 4200,
+                "savingsMinor": 80,
+                "costMinor": 50,
+                "currency": "GBP",
+                "source": "ohme_summary",
+                "isComplete": True,
+                "updatedAt": start,
             },
             {
-                "date": dt.date(2026, 6, 2), "energyWh": 0,
-                "savingsMinor": 0, "costMinor": 0, "currency": "GBP",
-                "source": "ohme_summary", "isComplete": True, "updatedAt": start,
+                "date": dt.date(2026, 6, 2),
+                "energyWh": 0,
+                "savingsMinor": 0,
+                "costMinor": 0,
+                "currency": "GBP",
+                "source": "ohme_summary",
+                "isComplete": True,
+                "updatedAt": start,
             },
         ],
         "sessions": [
             {
-                "id": 1, "pluggedInAt": start, "completedAt": start + dt.timedelta(hours=2),
-                "actualEnergyWh": 4100, "actualCostMinor": 49, "currency": "GBP",
-                "quality": "reconciled", "vehicleName": "IONIQ 5", "action": "configured",
+                "id": 1,
+                "pluggedInAt": start,
+                "completedAt": start + dt.timedelta(hours=2),
+                "actualEnergyWh": 4100,
+                "actualCostMinor": 49,
+                "currency": "GBP",
+                "quality": "reconciled",
+                "vehicleName": "IONIQ 5",
+                "action": "configured",
             },
             {
-                "id": 2, "pluggedInAt": start + dt.timedelta(days=2),
+                "id": 2,
+                "pluggedInAt": start + dt.timedelta(days=2),
                 "completedAt": start + dt.timedelta(days=2, hours=1),
-                "actualEnergyWh": None, "actualCostMinor": None, "currency": None,
-                "quality": "missing_actual", "vehicleName": "IONIQ 5", "action": "configured",
+                "actualEnergyWh": None,
+                "actualCostMinor": None,
+                "currency": None,
+                "quality": "missing_actual",
+                "vehicleName": "IONIQ 5",
+                "action": "configured",
             },
             {
-                "id": 3, "pluggedInAt": start + dt.timedelta(days=3), "completedAt": None,
-                "actualEnergyWh": None, "actualCostMinor": None, "currency": None,
-                "quality": "validated", "vehicleName": "IONIQ 5",
+                "id": 3,
+                "pluggedInAt": start + dt.timedelta(days=3),
+                "completedAt": None,
+                "actualEnergyWh": None,
+                "actualCostMinor": None,
+                "currency": None,
+                "quality": "validated",
+                "vehicleName": "IONIQ 5",
                 "action": "skipped_at_target",
             },
         ],
@@ -219,8 +263,13 @@ def _monthly_evidence():
 
 
 def test_monthly_report_keeps_account_and_measured_session_scopes_separate(client):
-    with patch("db.get_monthly_report_rows", new=AsyncMock(return_value=_monthly_evidence())), \
-         patch("octopus.is_enabled", return_value=True):
+    with (
+        patch(
+            "db.get_monthly_report_rows",
+            new=AsyncMock(return_value=_monthly_evidence()),
+        ),
+        patch("octopus.is_enabled", return_value=True),
+    ):
         response = client.get("/api/reports/monthly?month=2026-06")
     assert response.status_code == 200
     body = response.json()
@@ -242,12 +291,16 @@ def test_monthly_report_keeps_account_and_measured_session_scopes_separate(clien
     assert body["homeSessions"]["missingActualEnergy"] == 1
     assert body["homeSessions"]["missingActualCost"] == 1
     assert body["homeSessions"]["qualityCounts"] == {
-        "reconciled": 1, "missing_actual": 1, "validated": 1
+        "reconciled": 1,
+        "missing_actual": 1,
+        "validated": 1,
     }
 
 
 def test_monthly_report_csv_is_an_attachment_with_summary_and_evidence(client):
-    with patch("db.get_monthly_report_rows", new=AsyncMock(return_value=_monthly_evidence())):
+    with patch(
+        "db.get_monthly_report_rows", new=AsyncMock(return_value=_monthly_evidence())
+    ):
         response = client.get("/api/reports/monthly?month=2026-06&format=csv")
     assert response.status_code == 200
     assert response.headers["content-disposition"] == (
@@ -279,14 +332,19 @@ def test_monthly_window_uses_local_calendar_boundaries_across_dst():
 def test_data_quality_flags_only_applicable_completeness_problems(client):
     summary = {
         "sessions": {
-            "total": 10, "completed": 8, "missingActualEnergy": 1, "missingActualCost": 2
+            "total": 10,
+            "completed": 8,
+            "missingActualEnergy": 1,
+            "missingActualCost": 2,
         },
         "telemetry": {"unlinkedLast24h": 0},
         "consumption": {"uncertainLast30d": 3, "ingestedThrough": None},
         "daily": {"completeThrough": dt.date(2026, 7, 9)},
     }
-    with patch("db.get_data_quality_summary", new=AsyncMock(return_value=summary)), \
-         patch("octopus.is_enabled", return_value=False):
+    with (
+        patch("db.get_data_quality_summary", new=AsyncMock(return_value=summary)),
+        patch("octopus.is_enabled", return_value=False),
+    ):
         body = client.get("/api/data-quality").json()
     assert body["status"] == "attention"
     assert body["actualCostExpected"] is False
@@ -363,7 +421,9 @@ async def test_make_client_with_retry_eventually_succeeds():
     with (
         patch(
             "ohme_client.make_client",
-            new=AsyncMock(side_effect=[RuntimeError("boom"), RuntimeError("boom"), ohme]),
+            new=AsyncMock(
+                side_effect=[RuntimeError("boom"), RuntimeError("boom"), ohme]
+            ),
         ),
         patch("asyncio.sleep", new=AsyncMock()) as mock_sleep,
     ):
@@ -409,7 +469,10 @@ def test_statistics_parses_summary(client):
                 "energyChargedTotalWh": 42000,
                 "costStats": {
                     "moneyCostTotal": {"currencyCode": "GBP", "amount": "525"},
-                    "moneySavedVsStandardTariff": {"currencyCode": "GBP", "amount": "840"},
+                    "moneySavedVsStandardTariff": {
+                        "currencyCode": "GBP",
+                        "amount": "840",
+                    },
                     "averageKwhPrice": {"currencyCode": "GBP", "amount": "7.284"},
                 },
                 "carbonStats": {"carbonSavedVsGasCarGrams": 12000},
@@ -420,7 +483,10 @@ def test_statistics_parses_summary(client):
                     "energyChargedTotalWh": 18500,
                     "costStats": {
                         "moneyCostTotal": {"currencyCode": "GBP", "amount": "230"},
-                        "moneySavedVsStandardTariff": {"currencyCode": "GBP", "amount": "370"},
+                        "moneySavedVsStandardTariff": {
+                            "currencyCode": "GBP",
+                            "amount": "370",
+                        },
                     },
                 }
             ],
@@ -449,14 +515,21 @@ def test_statistics_parses_summary(client):
     assert body["metadata"]["daily"]["quality"] == "partial"
     assert body["metadata"]["daily"]["coverage"]["completeDays"] == 1
     assert body["metadata"]["daily"]["coverage"]["missingDays"] == 6
-    assert body["metadata"]["daily"]["completeThrough"] != body["window"]["completeThrough"]
+    assert (
+        body["metadata"]["daily"]["completeThrough"]
+        != body["window"]["completeThrough"]
+    )
 
 
 def _summary_client(energy_wh=42000):
     """An Ohme client whose summary reports a fixed total energy, no daily rows."""
     mock_client = MagicMock()
     mock_client.async_get_charge_summary = AsyncMock(
-        return_value={"granularity": "DAY", "totalStats": {"energyChargedTotalWh": energy_wh}, "stats": []}
+        return_value={
+            "granularity": "DAY",
+            "totalStats": {"energyChargedTotalWh": energy_wh},
+            "stats": [],
+        }
     )
     return mock_client
 
@@ -465,14 +538,21 @@ def test_statistics_includes_efficiency_when_data_available(client):
     store.client = _summary_client(energy_wh=42000)  # 42 kWh charged
     store.set_vehicle_id("car-1")
     metrics = {
-        "vehicleId": "car-1", "milesDriven": 168, "energyWh": 42000,
-        "intervalCount": 3, "from": dt.datetime(2026, 5, 1, tzinfo=dt.timezone.utc),
+        "vehicleId": "car-1",
+        "milesDriven": 168,
+        "energyWh": 42000,
+        "intervalCount": 3,
+        "from": dt.datetime(2026, 5, 1, tzinfo=dt.timezone.utc),
         "to": dt.datetime(2026, 5, 20, tzinfo=dt.timezone.utc),
-        "costMilesDriven": 0, "costMinor": None, "costIntervalCount": 0,
+        "costMilesDriven": 0,
+        "costMinor": None,
+        "costIntervalCount": 0,
         "costCurrency": None,
     }
-    with patch("db.is_available", return_value=True), \
-         patch("db.get_vehicle_driving_metrics", new=AsyncMock(return_value=metrics)):
+    with (
+        patch("db.is_available", return_value=True),
+        patch("db.get_vehicle_driving_metrics", new=AsyncMock(return_value=metrics)),
+    ):
         body = client.get("/api/statistics?days=30").json()
 
     assert body["efficiency"]["milesDriven"] == 168
@@ -522,10 +602,16 @@ def test_statistics_includes_period_comparison(client):
 
 
 def test_statistics_comparison_null_when_previous_fetch_fails(client):
-    cur = {"granularity": "DAY", "totalStats": {"energyChargedTotalWh": 42000}, "stats": []}
+    cur = {
+        "granularity": "DAY",
+        "totalStats": {"energyChargedTotalWh": 42000},
+        "stats": [],
+    }
     mock_client = MagicMock()
     # Current fetch succeeds; the previous-window fetch raises.
-    mock_client.async_get_charge_summary = AsyncMock(side_effect=[cur, RuntimeError("boom")])
+    mock_client.async_get_charge_summary = AsyncMock(
+        side_effect=[cur, RuntimeError("boom")]
+    )
     store.client = mock_client
 
     body = client.get("/api/statistics?days=7").json()
@@ -534,8 +620,10 @@ def test_statistics_comparison_null_when_previous_fetch_fails(client):
 
 def test_statistics_efficiency_null_when_no_odometer_span(client):
     store.client = _summary_client()
-    with patch("db.is_available", return_value=True), \
-         patch("db.get_single_vehicle_id", new=AsyncMock(return_value=None)):
+    with (
+        patch("db.is_available", return_value=True),
+        patch("db.get_single_vehicle_id", new=AsyncMock(return_value=None)),
+    ):
         body = client.get("/api/statistics?days=90").json()
     assert body["efficiency"] is None
 
@@ -548,7 +636,9 @@ def _summary_client_with_cost(energy_wh=42000, cost_minor="5250"):
             "granularity": "DAY",
             "totalStats": {
                 "energyChargedTotalWh": energy_wh,
-                "costStats": {"moneyCostTotal": {"amount": cost_minor, "currencyCode": "GBP"}},
+                "costStats": {
+                    "moneyCostTotal": {"amount": cost_minor, "currencyCode": "GBP"}
+                },
             },
             "stats": [],
         }
@@ -560,14 +650,21 @@ def test_statistics_includes_running_cost_when_data_available(client):
     store.client = _summary_client_with_cost(cost_minor="5250")  # £52.50 spent
     store.set_vehicle_id("car-1")
     metrics = {
-        "vehicleId": "car-1", "milesDriven": 210, "energyWh": 42000,
-        "intervalCount": 4, "from": dt.datetime(2026, 5, 1, tzinfo=dt.timezone.utc),
+        "vehicleId": "car-1",
+        "milesDriven": 210,
+        "energyWh": 42000,
+        "intervalCount": 4,
+        "from": dt.datetime(2026, 5, 1, tzinfo=dt.timezone.utc),
         "to": dt.datetime(2026, 5, 20, tzinfo=dt.timezone.utc),
-        "costMilesDriven": 210, "costMinor": 5250, "costIntervalCount": 4,
+        "costMilesDriven": 210,
+        "costMinor": 5250,
+        "costIntervalCount": 4,
         "costCurrency": "GBP",
     }
-    with patch("db.is_available", return_value=True), \
-         patch("db.get_vehicle_driving_metrics", new=AsyncMock(return_value=metrics)):
+    with (
+        patch("db.is_available", return_value=True),
+        patch("db.get_vehicle_driving_metrics", new=AsyncMock(return_value=metrics)),
+    ):
         body = client.get("/api/statistics?days=30").json()
     assert body["runningCost"]["costPerMile"] == 0.25
     assert body["runningCost"]["milesDriven"] == 210
@@ -588,8 +685,10 @@ def test_statistics_response_contract_is_published_in_openapi(client):
 
 def test_statistics_running_cost_null_without_miles(client):
     store.client = _summary_client_with_cost()
-    with patch("db.is_available", return_value=True), \
-         patch("db.get_single_vehicle_id", new=AsyncMock(return_value=None)):
+    with (
+        patch("db.is_available", return_value=True),
+        patch("db.get_single_vehicle_id", new=AsyncMock(return_value=None)),
+    ):
         body = client.get("/api/statistics?days=30").json()
     assert body["runningCost"] is None
 
@@ -597,14 +696,22 @@ def test_statistics_running_cost_null_without_miles(client):
 def test_statistics_running_cost_null_without_cost(client):
     store.client = _summary_client()  # no costStats -> costTotal 0
     metrics = {
-        "vehicleId": "car-1", "milesDriven": 210, "energyWh": 42000,
-        "intervalCount": 4, "from": None, "to": None,
-        "costMilesDriven": 0, "costMinor": None, "costIntervalCount": 0,
+        "vehicleId": "car-1",
+        "milesDriven": 210,
+        "energyWh": 42000,
+        "intervalCount": 4,
+        "from": None,
+        "to": None,
+        "costMilesDriven": 0,
+        "costMinor": None,
+        "costIntervalCount": 0,
         "costCurrency": None,
     }
     store.set_vehicle_id("car-1")
-    with patch("db.is_available", return_value=True), \
-         patch("db.get_vehicle_driving_metrics", new=AsyncMock(return_value=metrics)):
+    with (
+        patch("db.is_available", return_value=True),
+        patch("db.get_vehicle_driving_metrics", new=AsyncMock(return_value=metrics)),
+    ):
         body = client.get("/api/statistics?days=30").json()
     assert body["runningCost"] is None
 
@@ -619,7 +726,9 @@ def test_parse_summary_buckets_days_in_account_timezone():
     start = dt.datetime(2025, 6, 1, 23, 30, tzinfo=dt.timezone.utc)
     summary = {
         "totalStats": {},
-        "stats": [{"startTime": int(start.timestamp() * 1000), "energyChargedTotalWh": 1000}],
+        "stats": [
+            {"startTime": int(start.timestamp() * 1000), "energyChargedTotalWh": 1000}
+        ],
     }
 
     with patch.object(api, "_STATS_TZ", ZoneInfo("Europe/London")):
@@ -673,7 +782,9 @@ def test_statistics_window_uses_complete_local_days_across_dst(now, expected_hou
 
     assert window["end"].date() - window["start"].date() == dt.timedelta(days=7)
     assert window["start"].hour == window["end"].hour == 0
-    elapsed = window["end"].astimezone(dt.timezone.utc) - window["start"].astimezone(dt.timezone.utc)
+    elapsed = window["end"].astimezone(dt.timezone.utc) - window["start"].astimezone(
+        dt.timezone.utc
+    )
     assert elapsed == dt.timedelta(hours=expected_hours)
 
 
@@ -796,7 +907,9 @@ def test_sessions_disabled_when_persistence_off(client):
 
 
 def test_sessions_returns_rows_and_passes_limit(client):
-    rows = [{"id": 1, "pluggedInAt": "2026-06-01T21:42:00+00:00", "action": "configured"}]
+    rows = [
+        {"id": 1, "pluggedInAt": "2026-06-01T21:42:00+00:00", "action": "configured"}
+    ]
     with patch("db.get_recent_sessions", new=AsyncMock(return_value=rows)) as mock_get:
         body = client.get("/api/sessions?limit=5").json()
 
@@ -839,15 +952,32 @@ def test_sessions_export_csv(client):
     assert "attachment; filename=" in res.headers["content-disposition"]
     lines = res.text.strip().splitlines()
     assert lines[0].split(",") == [
-        "id", "pluggedInAt", "vehicleName", "socPercent", "targetPercent",
-        "topupPercent", "action", "odometerMiles", "sohPercent", "actualEnergyKwh",
-        "actualCost", "costCurrency", "costMethod", "tariffCoverage", "quality", "completedAt",
+        "id",
+        "pluggedInAt",
+        "vehicleName",
+        "socPercent",
+        "targetPercent",
+        "topupPercent",
+        "action",
+        "odometerMiles",
+        "sohPercent",
+        "actualEnergyKwh",
+        "actualCost",
+        "costCurrency",
+        "costMethod",
+        "tariffCoverage",
+        "quality",
+        "completedAt",
     ]
-    assert lines[1].startswith("1,2026-06-01T21:42:00+00:00,IONIQ 5,62,80,18,configured")
+    assert lines[1].startswith(
+        "1,2026-06-01T21:42:00+00:00,IONIQ 5,62,80,18,configured"
+    )
 
 
 def test_sessions_export_json(client):
-    rows = [{"id": 1, "pluggedInAt": "2026-06-01T21:42:00+00:00", "action": "configured"}]
+    rows = [
+        {"id": 1, "pluggedInAt": "2026-06-01T21:42:00+00:00", "action": "configured"}
+    ]
     with patch("db.get_all_sessions", new=AsyncMock(return_value=rows)):
         res = client.get("/api/sessions/export?format=json")
 
@@ -877,8 +1007,14 @@ def test_session_telemetry_404_for_unknown_session(client):
 
 
 def test_session_telemetry_returns_points(client):
-    pts = [{"at": "2026-06-01T20:05:00+00:00", "socPercent": 62,
-            "powerWatts": 7400.0, "sessionEnergyKwh": 1.5}]
+    pts = [
+        {
+            "at": "2026-06-01T20:05:00+00:00",
+            "socPercent": 62,
+            "powerWatts": 7400.0,
+            "sessionEnergyKwh": 1.5,
+        }
+    ]
     with (
         patch("db.is_available", return_value=True),
         patch("db.get_session_telemetry", new=AsyncMock(return_value=pts)) as mock_get,
@@ -892,31 +1028,62 @@ def test_session_audit_returns_typed_provenance(client):
     at = dt.datetime(2026, 6, 1, 20, 0, tzinfo=dt.timezone.utc)
     audit = {
         "session": {
-            "id": 7, "sessionKey": "key-7", "pluggedInAt": at,
+            "id": 7,
+            "sessionKey": "key-7",
+            "pluggedInAt": at,
             "unpluggedAt": at + dt.timedelta(hours=2),
-            "completedAt": at + dt.timedelta(hours=1), "vehicleName": "IONIQ 5",
-            "vehicleId": "car-1", "vin": "VIN", "chargerId": "charger-1",
-            "sourceObservedAt": at, "socPercent": 50, "targetPercent": 80,
-            "endSocPercent": 80, "topupPercent": 30, "action": "configured",
-            "odometerMiles": 12000, "sohPercent": 98, "actualEnergyWh": 18000,
-            "actualCostMinor": 123, "costCurrency": "GBP", "costMethod": "actual_agile",
-            "tariffCoverage": 1.0, "reconstructedEnergyWh": 17990,
-            "reconciliationDeltaWh": 10, "completionReason": "finished",
-            "quality": "reconciled", "updatedAt": at + dt.timedelta(hours=2),
+            "completedAt": at + dt.timedelta(hours=1),
+            "vehicleName": "IONIQ 5",
+            "vehicleId": "car-1",
+            "vin": "VIN",
+            "chargerId": "charger-1",
+            "sourceObservedAt": at,
+            "socPercent": 50,
+            "targetPercent": 80,
+            "endSocPercent": 80,
+            "topupPercent": 30,
+            "action": "configured",
+            "odometerMiles": 12000,
+            "sohPercent": 98,
+            "actualEnergyWh": 18000,
+            "actualCostMinor": 123,
+            "costCurrency": "GBP",
+            "costMethod": "actual_agile",
+            "tariffCoverage": 1.0,
+            "reconstructedEnergyWh": 17990,
+            "reconciliationDeltaWh": 10,
+            "completionReason": "finished",
+            "quality": "reconciled",
+            "updatedAt": at + dt.timedelta(hours=2),
         },
         "events": [{"at": at, "type": "target_configured", "details": {"target": 80}}],
-        "schedules": [{
-            "recordedAt": at, "nextSlotStart": at, "nextSlotEnd": at + dt.timedelta(hours=1),
-            "slots": [], "revision": 1, "reason": "initial",
-        }],
-        "intervals": [{
-            "start": at, "end": at + dt.timedelta(minutes=30), "energyWh": 4000,
-            "costMinor": 20, "rateMinorPerKwh": 5.0, "currency": "GBP",
-            "quality": "priced", "source": "ohme_counter",
-        }],
+        "schedules": [
+            {
+                "recordedAt": at,
+                "nextSlotStart": at,
+                "nextSlotEnd": at + dt.timedelta(hours=1),
+                "slots": [],
+                "revision": 1,
+                "reason": "initial",
+            }
+        ],
+        "intervals": [
+            {
+                "start": at,
+                "end": at + dt.timedelta(minutes=30),
+                "energyWh": 4000,
+                "costMinor": 20,
+                "rateMinorPerKwh": 5.0,
+                "currency": "GBP",
+                "quality": "priced",
+                "source": "ohme_counter",
+            }
+        ],
     }
-    with patch("db.is_available", return_value=True), \
-         patch("db.get_session_audit", new=AsyncMock(return_value=audit)):
+    with (
+        patch("db.is_available", return_value=True),
+        patch("db.get_session_audit", new=AsyncMock(return_value=audit)),
+    ):
         response = client.get("/api/sessions/7/audit")
     assert response.status_code == 200
     body = response.json()
@@ -928,8 +1095,10 @@ def test_session_audit_returns_typed_provenance(client):
 
 
 def test_session_audit_404_when_unknown(client):
-    with patch("db.is_available", return_value=True), \
-         patch("db.get_session_audit", new=AsyncMock(return_value=None)):
+    with (
+        patch("db.is_available", return_value=True),
+        patch("db.get_session_audit", new=AsyncMock(return_value=None)),
+    ):
         assert client.get("/api/sessions/999/audit").status_code == 404
 
 
@@ -963,22 +1132,36 @@ def test_energy_usage_disabled_when_consumption_off(client):
 
 
 def test_energy_usage_disabled_when_persistence_off(client):
-    with patch("octopus.consumption_is_enabled", return_value=True), \
-        patch("db.is_available", return_value=False):
+    with (
+        patch("octopus.consumption_is_enabled", return_value=True),
+        patch("db.is_available", return_value=False),
+    ):
         body = client.get("/api/energy-usage").json()
     assert body["enabled"] is False
 
 
 def test_energy_usage_returns_slots_and_totals(client):
     slots = [
-        {"start": "2026-06-01T00:00:00+00:00", "end": "2026-06-01T00:30:00+00:00",
-         "importKwh": 1.5, "carKwh": 1.0, "houseKwh": 0.5},
-        {"start": "2026-06-01T00:30:00+00:00", "end": "2026-06-01T01:00:00+00:00",
-         "importKwh": 0.4, "carKwh": 0.0, "houseKwh": 0.4},
+        {
+            "start": "2026-06-01T00:00:00+00:00",
+            "end": "2026-06-01T00:30:00+00:00",
+            "importKwh": 1.5,
+            "carKwh": 1.0,
+            "houseKwh": 0.5,
+        },
+        {
+            "start": "2026-06-01T00:30:00+00:00",
+            "end": "2026-06-01T01:00:00+00:00",
+            "importKwh": 0.4,
+            "carKwh": 0.0,
+            "houseKwh": 0.4,
+        },
     ]
-    with patch("octopus.consumption_is_enabled", return_value=True), \
-        patch("db.is_available", return_value=True), \
-        patch("db.get_grid_consumption", new=AsyncMock(return_value=slots)):
+    with (
+        patch("octopus.consumption_is_enabled", return_value=True),
+        patch("db.is_available", return_value=True),
+        patch("db.get_grid_consumption", new=AsyncMock(return_value=slots)),
+    ):
         body = client.get("/api/energy-usage?date=2026-06-01").json()
 
     assert body["enabled"] is True
@@ -987,24 +1170,33 @@ def test_energy_usage_returns_slots_and_totals(client):
     assert body["timezone"]
     assert body["slots"] == slots
     assert body["totals"] == {
-        "importKwh": 1.9, "carKwh": 1.0, "houseKwh": 0.9, "unattributedKwh": 0.0,
+        "importKwh": 1.9,
+        "carKwh": 1.0,
+        "houseKwh": 0.9,
+        "unattributedKwh": 0.0,
     }
 
 
 async def test_consumption_backfill_advances_cursor_only_after_success(monkeypatch):
     monkeypatch.setattr(config, "CONSUMPTION_BACKFILL_DAYS", 30)
-    consumption = [{
-        "from": "2026-07-09T00:00:00Z",
-        "to": "2026-07-09T00:30:00Z",
-        "importKwh": 1.0,
-    }]
-    with patch("octopus.consumption_is_enabled", return_value=True), \
-         patch("db.is_available", return_value=True), \
-         patch("db.get_ingestion_cursor", new=AsyncMock(return_value=None)), \
-         patch("octopus.fetch_consumption", new=AsyncMock(return_value=consumption)) as fetch, \
-         patch("db.get_telemetry_between", new=AsyncMock(return_value=[])), \
-         patch("db.upsert_grid_consumption", new=AsyncMock(return_value=True)), \
-         patch("db.set_ingestion_cursor", new=AsyncMock()) as advance:
+    consumption = [
+        {
+            "from": "2026-07-09T00:00:00Z",
+            "to": "2026-07-09T00:30:00Z",
+            "importKwh": 1.0,
+        }
+    ]
+    with (
+        patch("octopus.consumption_is_enabled", return_value=True),
+        patch("db.is_available", return_value=True),
+        patch("db.get_ingestion_cursor", new=AsyncMock(return_value=None)),
+        patch(
+            "octopus.fetch_consumption", new=AsyncMock(return_value=consumption)
+        ) as fetch,
+        patch("db.get_telemetry_between", new=AsyncMock(return_value=[])),
+        patch("db.upsert_grid_consumption", new=AsyncMock(return_value=True)),
+        patch("db.set_ingestion_cursor", new=AsyncMock()) as advance,
+    ):
         await api._persist_grid_consumption()
 
     period_from, period_to = fetch.await_args.args
@@ -1027,9 +1219,11 @@ def test_energy_usage_defaults_to_yesterday(client):
         captured["end"] = end
         return []
 
-    with patch("octopus.consumption_is_enabled", return_value=True), \
-        patch("db.is_available", return_value=True), \
-        patch("db.get_grid_consumption", new=fake_get):
+    with (
+        patch("octopus.consumption_is_enabled", return_value=True),
+        patch("db.is_available", return_value=True),
+        patch("db.get_grid_consumption", new=fake_get),
+    ):
         body = client.get("/api/energy-usage").json()
 
     # Default date is yesterday in the configured timezone — compute it through
@@ -1043,8 +1237,10 @@ def test_energy_usage_defaults_to_yesterday(client):
 
 
 def test_energy_usage_rejects_bad_date(client):
-    with patch("octopus.consumption_is_enabled", return_value=True), \
-        patch("db.is_available", return_value=True):
+    with (
+        patch("octopus.consumption_is_enabled", return_value=True),
+        patch("db.is_available", return_value=True),
+    ):
         assert client.get("/api/energy-usage?date=not-a-date").status_code == 400
 
 
@@ -1058,13 +1254,17 @@ def test_soh_history_validates_limit(client):
 
 async def test_notifies_when_charging_finishes():
     snap = StatusSnapshot(
-        vehicle_name="IONIQ 5", charger_status="finished", connected=True,
+        vehicle_name="IONIQ 5",
+        charger_status="finished",
+        connected=True,
         session_energy_wh=18500.0,
     )
-    with patch("ntfy.send", new=AsyncMock()) as mock_notify, \
-         patch("db.complete_session", new=AsyncMock()) as complete, \
-         patch("db.record_session_event", new=AsyncMock()) as event, \
-         patch("api._reconcile_finished_session", new=AsyncMock()) as reconcile:
+    with (
+        patch("ntfy.send", new=AsyncMock()) as mock_notify,
+        patch("db.complete_session", new=AsyncMock()) as complete,
+        patch("db.record_session_event", new=AsyncMock()) as event,
+        patch("api._reconcile_finished_session", new=AsyncMock()) as reconcile,
+    ):
         await api._maybe_notify_finished("charging", snap)
 
     mock_notify.assert_awaited_once()
@@ -1084,16 +1284,18 @@ async def test_finished_session_finalizes_without_an_in_memory_transition():
     store.active_session_key = "session-1"
     store.active_session_id = 42
     snap = StatusSnapshot(
-        vehicle_name="IONIQ 5", charger_status="finished", connected=True,
-        battery_percent=80, session_energy_wh=18500.0,
+        vehicle_name="IONIQ 5",
+        charger_status="finished",
+        connected=True,
+        battery_percent=80,
+        session_energy_wh=18500.0,
     )
-    with patch(
-        "db.complete_session", new=AsyncMock(side_effect=[42, None])
-    ) as complete, patch(
-        "db.record_session_event", new=AsyncMock()
-    ) as event, patch(
-        "api._reconcile_finished_session", new=AsyncMock()
-    ) as reconcile, patch("ntfy.send", new=AsyncMock()) as notify:
+    with (
+        patch("db.complete_session", new=AsyncMock(side_effect=[42, None])) as complete,
+        patch("db.record_session_event", new=AsyncMock()) as event,
+        patch("api._reconcile_finished_session", new=AsyncMock()) as reconcile,
+        patch("ntfy.send", new=AsyncMock()) as notify,
+    ):
         # The edge was consumed by an on-demand snapshot update, so no alert is
         # emitted; durable processing must still proceed from the current state.
         await api._maybe_notify_finished("finished", snap)
@@ -1116,7 +1318,9 @@ async def test_notifies_when_short_topup_finishes_from_plugged_in():
     # A brief charge can go plugged_in→finished between two polls without ever
     # being sampled as "charging"; energy was added, so it should still notify.
     snap = StatusSnapshot(
-        vehicle_name="IONIQ 5", charger_status="finished", connected=True,
+        vehicle_name="IONIQ 5",
+        charger_status="finished",
+        connected=True,
         session_energy_wh=2300.0,
     )
     with patch("ntfy.send", new=AsyncMock()) as mock_notify:
@@ -1133,16 +1337,22 @@ async def test_reconcile_finished_session_prices_measured_energy():
         (t0, 42, 0.0, 7400.0, "charging", True),
         (t0 + dt.timedelta(minutes=5), 42, 500.0, 7400.0, "finished", True),
     ]
-    rates = [{
-        "from": t0.isoformat(),
-        "to": (t0 + dt.timedelta(minutes=30)).isoformat(),
-        "pricePerKwh": 0.10,
-    }]
-    snap = StatusSnapshot(connected=True, charger_status="finished", session_energy_wh=500.0)
-    with patch("db.get_session_attribution_rows", new=AsyncMock(return_value=rows)), \
-         patch("db.get_tariff_rates", new=AsyncMock(return_value=rates)), \
-         patch("db.record_session_reconciliation", new=AsyncMock()) as record, \
-         patch("db.record_session_event", new=AsyncMock()) as event:
+    rates = [
+        {
+            "from": t0.isoformat(),
+            "to": (t0 + dt.timedelta(minutes=30)).isoformat(),
+            "pricePerKwh": 0.10,
+        }
+    ]
+    snap = StatusSnapshot(
+        connected=True, charger_status="finished", session_energy_wh=500.0
+    )
+    with (
+        patch("db.get_session_attribution_rows", new=AsyncMock(return_value=rows)),
+        patch("db.get_tariff_rates", new=AsyncMock(return_value=rates)),
+        patch("db.record_session_reconciliation", new=AsyncMock()) as record,
+        patch("db.record_session_event", new=AsyncMock()) as event,
+    ):
         await api._reconcile_finished_session(snap)
     priced = record.call_args.args[1]
     assert priced.energy_wh == 500
@@ -1152,7 +1362,9 @@ async def test_reconcile_finished_session_prices_measured_energy():
     assert event.call_args.args[1] == "session_reconciled"
 
 
-async def test_reconcile_intelligent_go_uses_ohme_slots_and_surrounding_rates(monkeypatch):
+async def test_reconcile_intelligent_go_uses_ohme_slots_and_surrounding_rates(
+    monkeypatch,
+):
     monkeypatch.setattr(config, "OCTOPUS_PRODUCT_CODE", "INTELLI-VAR-24-10-29")
     t0 = dt.datetime(2026, 6, 1, 12, tzinfo=dt.timezone.utc)
     rows = [
@@ -1171,15 +1383,24 @@ async def test_reconcile_intelligent_go_uses_ohme_slots_and_surrounding_rates(mo
             "pricePerKwh": 0.30,
         },
     ]
-    slots = [{"start": t0.isoformat(), "end": (t0 + dt.timedelta(minutes=30)).isoformat()}]
-    with patch("db.get_session_attribution_rows", new=AsyncMock(return_value=rows)), \
-         patch("db.get_tariff_rates", new=AsyncMock(return_value=rates)) as get_rates, \
-         patch("db.get_session_schedule_slots", new=AsyncMock(return_value=slots)) as get_slots, \
-         patch("db.record_session_reconciliation", new=AsyncMock()) as record, \
-         patch("db.record_session_event", new=AsyncMock()):
+    slots = [
+        {"start": t0.isoformat(), "end": (t0 + dt.timedelta(minutes=30)).isoformat()}
+    ]
+    with (
+        patch("db.get_session_attribution_rows", new=AsyncMock(return_value=rows)),
+        patch("db.get_tariff_rates", new=AsyncMock(return_value=rates)) as get_rates,
+        patch(
+            "db.get_session_schedule_slots", new=AsyncMock(return_value=slots)
+        ) as get_slots,
+        patch("db.record_session_reconciliation", new=AsyncMock()) as record,
+        patch("db.record_session_event", new=AsyncMock()),
+    ):
         await api._reconcile_session(42, 1000.0, trigger="finished")
 
-    assert get_rates.await_args.args == (t0 - dt.timedelta(days=1), t0 + dt.timedelta(minutes=35, days=1))
+    assert get_rates.await_args.args == (
+        t0 - dt.timedelta(days=1),
+        t0 + dt.timedelta(minutes=35, days=1),
+    )
     get_slots.assert_awaited_once_with(42)
     priced = record.call_args.args[1]
     assert priced.cost_minor == 8
@@ -1187,9 +1408,10 @@ async def test_reconcile_intelligent_go_uses_ohme_slots_and_surrounding_rates(mo
 
 
 async def test_unplug_reconciliation_resolves_durable_session_after_restart():
-    with patch(
-        "db.get_session_id_by_key", new=AsyncMock(return_value=42)
-    ) as lookup, patch("api._reconcile_session", new=AsyncMock()) as reconcile:
+    with (
+        patch("db.get_session_id_by_key", new=AsyncMock(return_value=42)) as lookup,
+        patch("api._reconcile_session", new=AsyncMock()) as reconcile,
+    ):
         await api._reconcile_unplugged_session("session-1", None, 18500.0)
 
     lookup.assert_awaited_once_with("session-1")
@@ -1200,7 +1422,7 @@ async def test_unplug_reconciliation_resolves_durable_session_after_restart():
     "prev,new",
     [
         ("finished", "finished"),  # no transition
-        ("unknown", "finished"),   # restart while already finished
+        ("unknown", "finished"),  # restart while already finished
         ("charging", "charging"),  # still charging
         ("plugged_in", "finished"),  # never actually charged (0 kWh added)
     ],
@@ -1215,7 +1437,9 @@ async def test_no_finish_notification_without_charging_transition(prev, new):
 async def test_notifies_when_health_warning_newly_raised():
     prev = StatusSnapshot(vehicle_name="IONIQ 5")  # nothing wrong before
     snap = StatusSnapshot(
-        vehicle_name="IONIQ 5", tyre_pressure_warning=True, open_items=["Boot"],
+        vehicle_name="IONIQ 5",
+        tyre_pressure_warning=True,
+        open_items=["Boot"],
     )
     with patch("ntfy.send", new=AsyncMock()) as mock_notify:
         await api._maybe_notify_vehicle_health(prev, snap)
@@ -1246,28 +1470,40 @@ async def test_no_health_notification_when_warning_clears_on_unplug():
 
 
 async def test_notification_preferences_suppress_delivery_only():
-    store.notification_preferences = settings.NotificationPreferences(charge_complete=False)
+    store.notification_preferences = settings.NotificationPreferences(
+        charge_complete=False
+    )
     store.active_session_key = "session-1"
     snap = StatusSnapshot(
-        vehicle_name="IONIQ 5", charger_status="finished", connected=True,
+        vehicle_name="IONIQ 5",
+        charger_status="finished",
+        connected=True,
         session_energy_wh=18500.0,
     )
-    with patch("ntfy.send", new=AsyncMock()) as notify, \
-         patch("db.complete_session", new=AsyncMock()) as complete, \
-         patch("db.record_session_event", new=AsyncMock()), \
-         patch("api._reconcile_finished_session", new=AsyncMock()):
+    with (
+        patch("ntfy.send", new=AsyncMock()) as notify,
+        patch("db.complete_session", new=AsyncMock()) as complete,
+        patch("db.record_session_event", new=AsyncMock()),
+        patch("api._reconcile_finished_session", new=AsyncMock()),
+    ):
         await api._maybe_notify_finished("charging", snap)
     notify.assert_not_called()
     complete.assert_not_awaited()
 
 
 async def test_completion_minimum_suppresses_only_small_charge_alert():
-    store.notification_preferences = settings.NotificationPreferences(minimum_charge_kwh=2.0)
-    snap = StatusSnapshot(charger_status="finished", connected=True, session_energy_wh=1500.0)
-    with patch("ntfy.send", new=AsyncMock()) as notify, \
-         patch("db.complete_session", new=AsyncMock()), \
-         patch("db.record_session_event", new=AsyncMock()), \
-         patch("api._reconcile_finished_session", new=AsyncMock()):
+    store.notification_preferences = settings.NotificationPreferences(
+        minimum_charge_kwh=2.0
+    )
+    snap = StatusSnapshot(
+        charger_status="finished", connected=True, session_energy_wh=1500.0
+    )
+    with (
+        patch("ntfy.send", new=AsyncMock()) as notify,
+        patch("db.complete_session", new=AsyncMock()),
+        patch("db.record_session_event", new=AsyncMock()),
+        patch("api._reconcile_finished_session", new=AsyncMock()),
+    ):
         await api._maybe_notify_finished("charging", snap)
     notify.assert_not_called()
 
@@ -1307,7 +1543,9 @@ async def test_live_soc_refreshes_when_charging_and_due(monkeypatch):
     store.last_soc = 60
     store.last_soc_at = None  # no reading yet -> due immediately
 
-    with patch("bluelink.get_vehicle_state", return_value=_vstate(67, range_miles=210)) as mock_get:
+    with patch(
+        "bluelink.get_vehicle_state", return_value=_vstate(67, range_miles=210)
+    ) as mock_get:
         await api._maybe_refresh_live_soc(ChargerStatus.CHARGING)
 
     mock_get.assert_called_once()
@@ -1332,6 +1570,7 @@ async def test_live_soc_skips_when_not_charging(monkeypatch):
 
 async def test_live_soc_skips_when_recently_read(monkeypatch):
     import time as _time
+
     from ohme import ChargerStatus
 
     monkeypatch.setattr(config, "LIVE_SOC_INTERVAL", 1800)
@@ -1346,6 +1585,7 @@ async def test_live_soc_skips_when_recently_read(monkeypatch):
 
 async def test_live_soc_refreshes_when_reading_is_stale(monkeypatch):
     import time as _time
+
     from ohme import ChargerStatus
 
     monkeypatch.setattr(config, "LIVE_SOC_INTERVAL", 1800)
@@ -1426,13 +1666,27 @@ def test_tariff_disabled_returns_enabled_false(client):
 
 def test_tariff_returns_rates_and_cheapest(client):
     rates = [
-        {"from": "2026-06-26T17:00:00Z", "to": "2026-06-26T17:30:00Z", "pricePerKwh": 0.20},
-        {"from": "2026-06-26T17:30:00Z", "to": "2026-06-26T18:00:00Z", "pricePerKwh": 0.08},
-        {"from": "2026-06-26T18:00:00Z", "to": "2026-06-26T18:30:00Z", "pricePerKwh": 0.15},
+        {
+            "from": "2026-06-26T17:00:00Z",
+            "to": "2026-06-26T17:30:00Z",
+            "pricePerKwh": 0.20,
+        },
+        {
+            "from": "2026-06-26T17:30:00Z",
+            "to": "2026-06-26T18:00:00Z",
+            "pricePerKwh": 0.08,
+        },
+        {
+            "from": "2026-06-26T18:00:00Z",
+            "to": "2026-06-26T18:30:00Z",
+            "pricePerKwh": 0.15,
+        },
     ]
-    with patch("octopus.is_enabled", return_value=True), \
-         patch("octopus.fetch_rates", new=AsyncMock(return_value=rates)), \
-         patch("db.upsert_tariff_rates", new=AsyncMock()) as persist:
+    with (
+        patch("octopus.is_enabled", return_value=True),
+        patch("octopus.fetch_rates", new=AsyncMock(return_value=rates)),
+        patch("db.upsert_tariff_rates", new=AsyncMock()) as persist,
+    ):
         body = client.get("/api/tariff").json()
     assert body["enabled"] is True
     assert len(body["rates"]) == 3
@@ -1443,16 +1697,31 @@ def test_tariff_returns_rates_and_cheapest(client):
 
 
 def test_tariff_caches_between_requests(client):
-    rates = [{"from": "2026-06-26T17:00:00Z", "to": "2026-06-26T17:30:00Z", "pricePerKwh": 0.1}]
+    rates = [
+        {
+            "from": "2026-06-26T17:00:00Z",
+            "to": "2026-06-26T17:30:00Z",
+            "pricePerKwh": 0.1,
+        }
+    ]
     fetch = AsyncMock(return_value=rates)
-    with patch("octopus.is_enabled", return_value=True), patch("octopus.fetch_rates", new=fetch):
+    with (
+        patch("octopus.is_enabled", return_value=True),
+        patch("octopus.fetch_rates", new=fetch),
+    ):
         client.get("/api/tariff")
         client.get("/api/tariff")
     fetch.assert_awaited_once()  # second request served from cache
 
 
 def test_tariff_serves_stale_cache_on_fetch_failure(client):
-    good = [{"from": "2026-06-26T17:00:00Z", "to": "2026-06-26T17:30:00Z", "pricePerKwh": 0.1}]
+    good = [
+        {
+            "from": "2026-06-26T17:00:00Z",
+            "to": "2026-06-26T17:30:00Z",
+            "pricePerKwh": 0.1,
+        }
+    ]
     with patch("octopus.is_enabled", return_value=True):
         with patch("octopus.fetch_rates", new=AsyncMock(return_value=good)):
             client.get("/api/tariff")
@@ -1505,8 +1774,10 @@ def test_set_vehicle_clear_with_null(client):
 def test_invalid_vehicle_selection_changes_nothing(client):
     store.set_vehicle_id("car-1")
     settings.save_vehicle_id("car-1")
-    with patch("bluelink.list_vehicles", return_value=[{"id": "car-1"}]), \
-         patch("api._reapply_target_if_connected", new=AsyncMock()) as reapply:
+    with (
+        patch("bluelink.list_vehicles", return_value=[{"id": "car-1"}]),
+        patch("api._reapply_target_if_connected", new=AsyncMock()) as reapply,
+    ):
         response = client.put("/api/settings/vehicle", json={"vehicleId": "stale-car"})
     assert response.status_code == 422
     assert store.selected_vehicle_id == "car-1"
@@ -1515,14 +1786,22 @@ def test_invalid_vehicle_selection_changes_nothing(client):
 
 
 def test_vehicle_profile_persists_and_appears_in_status(client):
-    response = client.put("/api/settings/vehicle-profile", json={
-        "vehicleId": "car-2", "enabled": True,
-        "targetPercent": 95, "readyBy": "05:45",
-    })
+    response = client.put(
+        "/api/settings/vehicle-profile",
+        json={
+            "vehicleId": "car-2",
+            "enabled": True,
+            "targetPercent": 95,
+            "readyBy": "05:45",
+        },
+    )
     assert response.status_code == 200
     assert response.json() == {
-        "vehicleId": "car-2", "enabled": True, "targetPercent": 95,
-        "readyBy": "05:45", "persistenceStatus": "saved",
+        "vehicleId": "car-2",
+        "enabled": True,
+        "targetPercent": 95,
+        "readyBy": "05:45",
+        "persistenceStatus": "saved",
         "applyStatus": "not_connected",
     }
     assert settings.load_vehicle_profiles() == {
@@ -1535,14 +1814,24 @@ def test_vehicle_profile_persists_and_appears_in_status(client):
 
 def test_vehicle_profile_removal_restores_global_default(client):
     store.set_charge_target(80)
-    client.put("/api/settings/vehicle-profile", json={
-        "vehicleId": "car-2", "enabled": True,
-        "targetPercent": 95, "readyBy": None,
-    })
-    response = client.put("/api/settings/vehicle-profile", json={
-        "vehicleId": "car-2", "enabled": False,
-        "targetPercent": 95, "readyBy": None,
-    })
+    client.put(
+        "/api/settings/vehicle-profile",
+        json={
+            "vehicleId": "car-2",
+            "enabled": True,
+            "targetPercent": 95,
+            "readyBy": None,
+        },
+    )
+    response = client.put(
+        "/api/settings/vehicle-profile",
+        json={
+            "vehicleId": "car-2",
+            "enabled": False,
+            "targetPercent": 95,
+            "readyBy": None,
+        },
+    )
     assert response.json()["enabled"] is False
     assert settings.load_vehicle_profiles() == {}
     assert store.effective_target_for("car-2") == 80
@@ -1552,13 +1841,21 @@ def test_active_vehicle_profile_reapplies_immediately(client):
     _populate_snapshot()
     store.client = MagicMock(slots=[], next_slot_start=None, next_slot_end=None)
     store.last_vehicle_id = "car-2"
-    with patch(
-        "bluelink.get_vehicle_state", return_value=_vstate(55, vehicle_id="car-2")
-    ), patch("ohme_client.set_target", new=AsyncMock()) as set_target:
-        body = client.put("/api/settings/vehicle-profile", json={
-            "vehicleId": "car-2", "enabled": True,
-            "targetPercent": 90, "readyBy": "06:15",
-        }).json()
+    with (
+        patch(
+            "bluelink.get_vehicle_state", return_value=_vstate(55, vehicle_id="car-2")
+        ),
+        patch("ohme_client.set_target", new=AsyncMock()) as set_target,
+    ):
+        body = client.put(
+            "/api/settings/vehicle-profile",
+            json={
+                "vehicleId": "car-2",
+                "enabled": True,
+                "targetPercent": 90,
+                "readyBy": "06:15",
+            },
+        ).json()
     assert body["applyStatus"] == "applied"
     set_target.assert_awaited_once_with(
         store.client, current_soc=55, target_percent=90, target_time=(6, 15)
@@ -1567,10 +1864,18 @@ def test_active_vehicle_profile_reapplies_immediately(client):
 
 @pytest.mark.parametrize("vehicle_id", ["", "x" * 201])
 def test_vehicle_profile_rejects_invalid_vehicle_id(client, vehicle_id):
-    assert client.put("/api/settings/vehicle-profile", json={
-        "vehicleId": vehicle_id, "enabled": True,
-        "targetPercent": 90, "readyBy": None,
-    }).status_code == 422
+    assert (
+        client.put(
+            "/api/settings/vehicle-profile",
+            json={
+                "vehicleId": vehicle_id,
+                "enabled": True,
+                "targetPercent": 90,
+                "readyBy": None,
+            },
+        ).status_code
+        == 422
+    )
 
 
 def test_selected_vehicle_id_falls_back_to_env(client, monkeypatch):
@@ -1585,7 +1890,9 @@ def test_selected_vehicle_id_falls_back_to_env(client, monkeypatch):
 
 
 async def test_telemetry_dedupes_identical_idle_rows():
-    snap = StatusSnapshot(connected=False, charger_status="unplugged", battery_percent=None)
+    snap = StatusSnapshot(
+        connected=False, charger_status="unplugged", battery_percent=None
+    )
     with patch("db.record_telemetry", new=AsyncMock()) as mock_rec:
         await api._maybe_record_telemetry(snap)
         await api._maybe_record_telemetry(snap)  # identical + disconnected -> skipped
@@ -1594,24 +1901,36 @@ async def test_telemetry_dedupes_identical_idle_rows():
 
 async def test_telemetry_records_when_idle_state_changes():
     with patch("db.record_telemetry", new=AsyncMock()) as mock_rec:
-        await api._maybe_record_telemetry(StatusSnapshot(connected=False, charger_status="unplugged"))
-        await api._maybe_record_telemetry(StatusSnapshot(connected=False, charger_status="finished"))
+        await api._maybe_record_telemetry(
+            StatusSnapshot(connected=False, charger_status="unplugged")
+        )
+        await api._maybe_record_telemetry(
+            StatusSnapshot(connected=False, charger_status="finished")
+        )
     assert mock_rec.await_count == 2
 
 
 async def test_telemetry_always_records_while_connected():
-    snap = StatusSnapshot(connected=True, charger_status="charging", session_energy_wh=1000.0)
+    snap = StatusSnapshot(
+        connected=True, charger_status="charging", session_energy_wh=1000.0
+    )
     with patch("db.record_telemetry", new=AsyncMock()) as mock_rec:
         await api._maybe_record_telemetry(snap)
-        await api._maybe_record_telemetry(snap)  # identical but connected -> still recorded
+        await api._maybe_record_telemetry(
+            snap
+        )  # identical but connected -> still recorded
     assert mock_rec.await_count == 2
 
 
 async def test_telemetry_resolves_durable_session_after_restart():
     store.active_session_key = "session-1"
-    snap = StatusSnapshot(connected=True, charger_status="charging", session_energy_wh=1000.0)
-    with patch("db.get_session_id_by_key", new=AsyncMock(return_value=42)) as lookup, \
-         patch("db.record_telemetry", new=AsyncMock()) as record:
+    snap = StatusSnapshot(
+        connected=True, charger_status="charging", session_energy_wh=1000.0
+    )
+    with (
+        patch("db.get_session_id_by_key", new=AsyncMock(return_value=42)) as lookup,
+        patch("db.record_telemetry", new=AsyncMock()) as record,
+    ):
         await api._maybe_record_telemetry(snap)
         await api._maybe_record_telemetry(snap)
     lookup.assert_awaited_once_with("session-1")
@@ -1623,10 +1942,10 @@ async def test_telemetry_resolves_durable_session_after_restart():
 # --- weekly digest --------------------------------------------------------------
 
 
-import datetime as _dt  # noqa: E402
+import datetime as _dt
 
 # 2026-06-01 is a Monday (weekday 0).
-_MONDAY_8AM = _dt.datetime(2026, 6, 1, 8, 0)
+_MONDAY_8AM = _dt.datetime(2026, 6, 1, 8, 0, tzinfo=_dt.timezone.utc)
 
 
 def test_format_digest_gbp():
@@ -1702,8 +2021,12 @@ async def test_weekly_digest_disabled_without_ntfy(monkeypatch):
 
 async def test_weekly_digest_can_be_disabled_by_preference(monkeypatch):
     monkeypatch.setattr(config, "NTFY_TOPIC", "topic")
-    monkeypatch.setattr(api, "_now_local", lambda: dt.datetime(2026, 6, 1, 8, 0))
-    store.notification_preferences = settings.NotificationPreferences(weekly_digest=False)
+    monkeypatch.setattr(
+        api, "_now_local", lambda: dt.datetime(2026, 6, 1, 8, 0, tzinfo=dt.timezone.utc)
+    )
+    store.notification_preferences = settings.NotificationPreferences(
+        weekly_digest=False
+    )
     with patch("ntfy.send", new=AsyncMock()) as notify:
         await api._maybe_send_weekly_digest(_summary_client())
     notify.assert_not_called()
@@ -1733,9 +2056,12 @@ def test_simple_post_endpoints_require_csrf_header(path):
 def test_all_mutations_require_exact_ui_header(path, payload):
     with TestClient(api.app) as bare:
         assert bare.put(path, json=payload).status_code == 403
-        assert bare.put(
-            path, json=payload, headers={"X-Requested-With": "some-client"}
-        ).status_code == 403
+        assert (
+            bare.put(
+                path, json=payload, headers={"X-Requested-With": "some-client"}
+            ).status_code
+            == 403
+        )
 
 
 @pytest.mark.parametrize(
@@ -1747,7 +2073,9 @@ def test_charge_controls_503_when_no_client(client, method, path):
 
 
 def test_max_charge_503_when_no_client(client):
-    assert client.put("/api/charge/max-charge", json={"enabled": True}).status_code == 503
+    assert (
+        client.put("/api/charge/max-charge", json={"enabled": True}).status_code == 503
+    )
 
 
 def test_pause_calls_ohme_and_rebuilds_snapshot(client):
@@ -1866,7 +2194,9 @@ def test_ready_by_reflected_in_status(client):
     assert body["config"]["readyBy"] == "08:00"
 
 
-@pytest.mark.parametrize("bad", ["7:30", "24:00", "07:60", "0730", "garbage", "07:30:00"])
+@pytest.mark.parametrize(
+    "bad", ["7:30", "24:00", "07:60", "0730", "garbage", "07:30:00"]
+)
 def test_set_ready_by_rejects_bad_time(client, bad):
     resp = client.put("/api/settings/ready-by", json={"readyBy": bad})
     assert resp.status_code == 422
@@ -1887,8 +2217,10 @@ def test_set_ready_by_passes_target_time_to_ohme(client):
     store.status = StatusSnapshot(connected=True)
     store.ready = True
 
-    with patch("bluelink.get_vehicle_state", return_value=_vstate(55)), \
-         patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
+    with (
+        patch("bluelink.get_vehicle_state", return_value=_vstate(55)),
+        patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target,
+    ):
         body = client.put("/api/settings/ready-by", json={"readyBy": "07:30"}).json()
 
     assert body["applyStatus"] == "applied"
@@ -1900,7 +2232,9 @@ def test_set_ready_by_passes_target_time_to_ohme(client):
 
 
 def test_set_day_targets_updates_store_and_persists(client):
-    resp = client.put("/api/settings/day-targets", json={"dayTargets": {"4": 100, "5": 90}})
+    resp = client.put(
+        "/api/settings/day-targets", json={"dayTargets": {"4": 100, "5": 90}}
+    )
     assert resp.status_code == 200
     body = resp.json()
     assert body["dayTargets"] == {"4": 100, "5": 90}
@@ -1936,6 +2270,7 @@ def test_day_targets_in_status_config(client):
 
 # --- one-session trip mode -------------------------------------------------
 
+
 def test_trip_mode_persists_and_is_reflected_in_status(client):
     response = client.put(
         "/api/settings/trip-mode",
@@ -1951,22 +2286,28 @@ def test_trip_mode_persists_and_is_reflected_in_status(client):
     }
     assert settings.load_trip_mode() == (100, "06:30")
     assert client.get("/api/status").json()["config"]["tripMode"] == {
-        "enabled": True, "targetPercent": 100, "readyBy": "06:30"
+        "enabled": True,
+        "targetPercent": 100,
+        "readyBy": "06:30",
     }
 
 
 def test_trip_mode_applies_immediately_when_connected(client):
     _populate_snapshot()
     store.client = MagicMock(slots=[], next_slot_start=None, next_slot_end=None)
-    with patch("bluelink.get_vehicle_state", return_value=_vstate(55)), \
-         patch("ohme_client.set_target", new=AsyncMock()) as set_target:
+    with (
+        patch("bluelink.get_vehicle_state", return_value=_vstate(55)),
+        patch("ohme_client.set_target", new=AsyncMock()) as set_target,
+    ):
         body = client.put(
             "/api/settings/trip-mode",
             json={"enabled": True, "targetPercent": 100, "readyBy": "05:45"},
         ).json()
     assert body["applyStatus"] == "applied"
     assert set_target.await_args.kwargs == {
-        "current_soc": 55, "target_percent": 100, "target_time": (5, 45)
+        "current_soc": 55,
+        "target_percent": 100,
+        "target_time": (5, 45),
     }
 
 
@@ -1991,8 +2332,10 @@ def test_trip_mode_cancel_stops_higher_schedule_when_normal_target_reached(clien
     store.set_charge_target(80)
     store.set_trip_mode(100, "05:45")
     settings.save_trip_mode(100, "05:45")
-    with patch("bluelink.get_vehicle_state", return_value=_vstate(90)), \
-         patch("ohme_client.set_target", new=AsyncMock()) as set_target:
+    with (
+        patch("bluelink.get_vehicle_state", return_value=_vstate(90)),
+        patch("ohme_client.set_target", new=AsyncMock()) as set_target,
+    ):
         body = client.put(
             "/api/settings/trip-mode",
             json={"enabled": False, "targetPercent": 100, "readyBy": None},
@@ -2013,6 +2356,7 @@ def test_trip_mode_rejects_invalid_target(client, target):
 
 
 # --- configurable notifications ------------------------------------------
+
 
 def _notification_payload(**overrides):
     payload = settings.NotificationPreferences().to_json()
@@ -2040,14 +2384,21 @@ def test_notification_preferences_persist_and_appear_in_status(client, monkeypat
 
 @pytest.mark.parametrize(
     "field,value",
-    [("failurePolls", 0), ("failurePolls", 21), ("minimumChargeKwh", -1),
-     ("auxBatteryBelowPercent", 101)],
+    [
+        ("failurePolls", 0),
+        ("failurePolls", 21),
+        ("minimumChargeKwh", -1),
+        ("auxBatteryBelowPercent", 101),
+    ],
 )
 def test_notification_preferences_reject_invalid_thresholds(client, field, value):
-    assert client.put(
-        "/api/settings/notifications",
-        json=_notification_payload(**{field: value}),
-    ).status_code == 422
+    assert (
+        client.put(
+            "/api/settings/notifications",
+            json=_notification_payload(**{field: value}),
+        ).status_code
+        == 422
+    )
 
 
 def test_effective_target_prefers_todays_override(client, monkeypatch):
@@ -2077,8 +2428,10 @@ def test_set_target_reapplies_to_ohme_with_fresh_soc(client):
     store.status = StatusSnapshot(connected=True)
     store.ready = True
 
-    with patch("bluelink.get_vehicle_state", return_value=_vstate(68, range_miles=205)), \
-         patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
+    with (
+        patch("bluelink.get_vehicle_state", return_value=_vstate(68, range_miles=205)),
+        patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target,
+    ):
         body = client.put("/api/settings/target", json={"targetPercent": 90}).json()
 
     assert body["applyStatus"] == "applied"
@@ -2097,8 +2450,10 @@ def test_set_target_falls_back_to_plugin_soc_when_bluelink_fails(client):
     store.status = StatusSnapshot(connected=True)
     store.ready = True
 
-    with patch("bluelink.get_vehicle_state", side_effect=RuntimeError("Bluelink down")), \
-         patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
+    with (
+        patch("bluelink.get_vehicle_state", side_effect=RuntimeError("Bluelink down")),
+        patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target,
+    ):
         body = client.put("/api/settings/target", json={"targetPercent": 90}).json()
 
     assert body["applyStatus"] == "applied"
@@ -2113,8 +2468,10 @@ def test_set_target_does_not_reapply_when_fresh_soc_at_target(client):
     store.status = StatusSnapshot(connected=True)
     store.ready = True
 
-    with patch("bluelink.get_vehicle_state", return_value=_vstate(85)), \
-         patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
+    with (
+        patch("bluelink.get_vehicle_state", return_value=_vstate(85)),
+        patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target,
+    ):
         body = client.put("/api/settings/target", json={"targetPercent": 85}).json()
 
     assert body["applyStatus"] == "already_at_target"
@@ -2126,8 +2483,10 @@ def test_set_target_does_not_reapply_when_disconnected(client):
     store.last_soc = 50
     store.status = StatusSnapshot(connected=False)
 
-    with patch("bluelink.get_vehicle_state") as mock_soc, \
-         patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target:
+    with (
+        patch("bluelink.get_vehicle_state") as mock_soc,
+        patch("ohme_client.set_target", new=AsyncMock()) as mock_set_target,
+    ):
         body = client.put("/api/settings/target", json={"targetPercent": 90}).json()
 
     assert body["applyStatus"] == "not_connected"
@@ -2141,8 +2500,10 @@ def test_failed_live_apply_is_explicit_and_releases_client_lock(client):
     store.last_soc = 50
     store.status = StatusSnapshot(connected=True)
     store.ready = True
-    with patch("bluelink.get_vehicle_state", return_value=_vstate(55)), \
-         patch("ohme_client.set_target", new=AsyncMock(side_effect=TimeoutError)):
+    with (
+        patch("bluelink.get_vehicle_state", return_value=_vstate(55)),
+        patch("ohme_client.set_target", new=AsyncMock(side_effect=TimeoutError)),
+    ):
         body = client.put("/api/settings/target", json={"targetPercent": 90}).json()
     assert body["persistenceStatus"] == "saved"
     assert body["applyStatus"] == "failed"
@@ -2163,9 +2524,11 @@ async def test_recreate_ohme_client_preserves_session_identity():
     replacement = MagicMock()
     store.active_session_id = 42
     store.active_session_key = "durable-key"
-    with patch("ohme_client.make_client", new=AsyncMock(return_value=replacement)), \
-         patch("ohme_client.update_device_info", new=AsyncMock()), \
-         patch("ohme_client.close_client", new=AsyncMock()) as close:
+    with (
+        patch("ohme_client.make_client", new=AsyncMock(return_value=replacement)),
+        patch("ohme_client.update_device_info", new=AsyncMock()),
+        patch("ohme_client.close_client", new=AsyncMock()) as close,
+    ):
         result = await api._recreate_ohme_client(previous)
     assert result is replacement
     assert store.client is replacement
@@ -2347,8 +2710,16 @@ def test_build_snapshot_prices_slots_against_agile_rates():
     # Two 1h slots, each priced against its own half-of-the-window Agile rate.
     client.slots = [slot(10.0, 2, 3), slot(10.0, 3, 4)]
     store.agile_rates = [
-        {"from": base.replace(hour=2).isoformat(), "to": base.replace(hour=3).isoformat(), "pricePerKwh": 0.05},
-        {"from": base.replace(hour=3).isoformat(), "to": base.replace(hour=4).isoformat(), "pricePerKwh": 0.25},
+        {
+            "from": base.replace(hour=2).isoformat(),
+            "to": base.replace(hour=3).isoformat(),
+            "pricePerKwh": 0.05,
+        },
+        {
+            "from": base.replace(hour=3).isoformat(),
+            "to": base.replace(hour=4).isoformat(),
+            "pricePerKwh": 0.25,
+        },
     ]
     store.avg_price_per_kwh = 0.10  # would give £2.00 — Agile must win
     snap = api.build_snapshot(client, connected=True)
@@ -2423,7 +2794,9 @@ def test_build_snapshot_projects_finish_from_last_slot_end():
 
 
 def test_build_snapshot_no_projected_finish_without_slots_or_when_disconnected():
-    assert api.build_snapshot(_charging_client(), connected=True).projected_finish is None
+    assert (
+        api.build_snapshot(_charging_client(), connected=True).projected_finish is None
+    )
     client = _charging_client()
     slot = MagicMock()
     slot.to_dict.return_value = {}
@@ -2452,22 +2825,38 @@ def _access_record(method: str, path: str, status: int) -> logging.LogRecord:
     )
 
 
-@pytest.mark.parametrize("path", ["/api/health", "/api/status", "/api/schedule", "/api/statistics"])
+@pytest.mark.parametrize(
+    "path", ["/api/health", "/api/status", "/api/schedule", "/api/statistics"]
+)
 def test_quiet_filter_drops_successful_polling_gets(path):
     assert api._quiet_access_filter.filter(_access_record("GET", path, 200)) is False
 
 
 def test_quiet_filter_keeps_polling_endpoint_errors():
-    assert api._quiet_access_filter.filter(_access_record("GET", "/api/health", 503)) is True
+    assert (
+        api._quiet_access_filter.filter(_access_record("GET", "/api/health", 503))
+        is True
+    )
 
 
 def test_quiet_filter_keeps_other_paths_and_methods():
-    assert api._quiet_access_filter.filter(_access_record("GET", "/api/other", 200)) is True
-    assert api._quiet_access_filter.filter(_access_record("POST", "/api/status", 200)) is True
+    assert (
+        api._quiet_access_filter.filter(_access_record("GET", "/api/other", 200))
+        is True
+    )
+    assert (
+        api._quiet_access_filter.filter(_access_record("POST", "/api/status", 200))
+        is True
+    )
 
 
 def test_quiet_filter_ignores_query_string():
-    assert api._quiet_access_filter.filter(_access_record("GET", "/api/statistics?days=7", 200)) is False
+    assert (
+        api._quiet_access_filter.filter(
+            _access_record("GET", "/api/statistics?days=7", 200)
+        )
+        is False
+    )
 
 
 def test_quiet_filter_installed_on_startup(client):
@@ -2484,9 +2873,9 @@ def test_next_poll_delay_baseline_when_healthy(monkeypatch):
 def test_next_poll_delay_grows_exponentially_then_caps(monkeypatch):
     monkeypatch.setattr(config, "POLL_INTERVAL", 180)
     monkeypatch.setattr(config, "MAX_POLL_BACKOFF", 1800)
-    assert api._next_poll_delay(1) == 180   # first failure: still one interval
-    assert api._next_poll_delay(2) == 360   # 180 * 2
-    assert api._next_poll_delay(3) == 720   # 180 * 4
+    assert api._next_poll_delay(1) == 180  # first failure: still one interval
+    assert api._next_poll_delay(2) == 360  # 180 * 2
+    assert api._next_poll_delay(3) == 720  # 180 * 4
     assert api._next_poll_delay(4) == 1440  # 180 * 8
     assert api._next_poll_delay(5) == 1800  # 180 * 16 -> capped
     assert api._next_poll_delay(50) == 1800  # long outage stays at the cap

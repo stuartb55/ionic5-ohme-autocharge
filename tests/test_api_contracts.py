@@ -7,16 +7,13 @@ from pathlib import Path
 
 import api
 
-
 _FRONTEND_TYPES = Path(__file__).parents[1] / "frontend" / "src" / "api" / "types.ts"
 
 
 def _typescript_interfaces(source: str) -> dict[str, tuple[list[str], set[str]]]:
     """Return direct parents and top-level properties for exported interfaces."""
     interfaces: dict[str, tuple[list[str], set[str]]] = {}
-    pattern = re.compile(
-        r"export\s+interface\s+(\w+)(?:\s+extends\s+([^\{]+))?\s*\{"
-    )
+    pattern = re.compile(r"export\s+interface\s+(\w+)(?:\s+extends\s+([^\{]+))?\s*\{")
     for match in pattern.finditer(source):
         depth = 1
         cursor = match.end()
@@ -37,7 +34,9 @@ def _typescript_interfaces(source: str) -> dict[str, tuple[list[str], set[str]]]
                 if field:
                     properties.add(field.group(1))
             nested += line.count("{") - line.count("}")
-        parents = [part.strip() for part in (match.group(2) or "").split(",") if part.strip()]
+        parents = [
+            part.strip() for part in (match.group(2) or "").split(",") if part.strip()
+        ]
         interfaces[match.group(1)] = (parents, properties)
     return interfaces
 
@@ -90,13 +89,18 @@ def test_core_routes_publish_typed_openapi_responses():
         "/api/settings/target": "TargetUpdateResponseModel",
     }
     for path, model in expected.items():
-        operation = "get" if path in {
-            "/api/status",
-            "/api/schedule",
-            "/api/sessions",
-            "/api/vehicles",
-        } else "put"
-        response_schema = schema["paths"][path][operation]["responses"]["200"]["content"][
-            "application/json"
-        ]["schema"]
+        operation = (
+            "get"
+            if path
+            in {
+                "/api/status",
+                "/api/schedule",
+                "/api/sessions",
+                "/api/vehicles",
+            }
+            else "put"
+        )
+        response_schema = schema["paths"][path][operation]["responses"]["200"][
+            "content"
+        ]["application/json"]["schema"]
         assert response_schema == {"$ref": f"#/components/schemas/{model}"}
