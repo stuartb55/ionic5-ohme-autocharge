@@ -5,6 +5,18 @@ import { scheduleFixture, sessionAuditFixture, sessionsFixture, statisticsFixtur
 // of the jsdom base URL used by the test environment.
 export const handlers = [
   http.get('*/api/status', () => HttpResponse.json(statusFixture)),
+  http.get('*/api/integrations', () =>
+    HttpResponse.json({
+      integrations: [
+        { id: 'ohme', name: 'Ohme charger', configured: true, status: 'healthy', detail: 'Live charger connection is healthy.' },
+        { id: 'bluelink', name: 'Hyundai Bluelink', configured: true, status: 'healthy', detail: 'Vehicle data was read successfully.' },
+        { id: 'history', name: 'Charging history', configured: false, status: 'disabled', detail: 'Set DATABASE_URL to enable history and evidence reports.' },
+        { id: 'tariff', name: 'Octopus tariff', configured: false, status: 'disabled', detail: 'Set tariff settings to enable pricing.' },
+        { id: 'energy', name: 'Household energy', configured: false, status: 'disabled', detail: 'Set account settings to enable energy attribution.' },
+        { id: 'notifications', name: 'Notifications', configured: true, status: 'configured', detail: 'ntfy delivery is configured.' },
+      ],
+    }),
+  ),
   http.get('*/api/data-quality', () =>
     HttpResponse.json({
       status: 'ok',
@@ -88,6 +100,19 @@ export const handlers = [
     };
     return HttpResponse.json({
       enabled: body.enabled,
+      targetPercent: body.enabled ? body.targetPercent : null,
+      readyBy: body.enabled ? body.readyBy : null,
+      persistenceStatus: 'saved',
+      applyStatus: 'not_connected',
+    });
+  }),
+  http.put('*/api/settings/tomorrow-override', async ({ request }) => {
+    const body = (await request.json()) as {
+      enabled: boolean; targetPercent: number; readyBy: string | null;
+    };
+    return HttpResponse.json({
+      enabled: body.enabled,
+      date: body.enabled ? '2026-06-03' : null,
       targetPercent: body.enabled ? body.targetPercent : null,
       readyBy: body.enabled ? body.readyBy : null,
       persistenceStatus: 'saved',

@@ -3,6 +3,7 @@ import type {
   DayTargetsUpdateResponse,
   DataQualityResponse,
   EnergyUsageResponse,
+  IntegrationsResponse,
   NotificationPreferences,
   NotificationPreferencesUpdateResponse,
   ReadyByUpdateResponse,
@@ -16,6 +17,7 @@ import type {
   StatisticsResponse,
   StatusResponse,
   TargetUpdateResponse,
+  TomorrowOverrideUpdateResponse,
   TripModeUpdateResponse,
   TariffResponse,
   VehicleUpdateResponse,
@@ -101,6 +103,8 @@ export interface VersionResponse {
 
 export const api = {
   getStatus: (signal?: AbortSignal) => getJson<StatusResponse>('/api/status', signal),
+  getIntegrations: (signal?: AbortSignal) =>
+    getJson<IntegrationsResponse>('/api/integrations', signal),
   getDataQuality: (signal?: AbortSignal) =>
     getJson<DataQualityResponse>('/api/data-quality', signal),
   getSchedule: (signal?: AbortSignal) => getJson<ScheduleResponse>('/api/schedule', signal),
@@ -160,6 +164,16 @@ export const api = {
     signal?: AbortSignal,
   ) => putJson<TripModeUpdateResponse>(
     '/api/settings/trip-mode',
+    { enabled, targetPercent, readyBy },
+    signal,
+  ),
+  setTomorrowOverride: (
+    enabled: boolean,
+    targetPercent = 80,
+    readyBy: string | null = null,
+    signal?: AbortSignal,
+  ) => putJson<TomorrowOverrideUpdateResponse>(
+    '/api/settings/tomorrow-override',
     { enabled, targetPercent, readyBy },
     signal,
   ),

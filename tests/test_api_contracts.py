@@ -61,10 +61,12 @@ def test_frontend_top_level_contracts_match_openapi():
         "SessionsResponseModel": "SessionsResponse",
         "DataQualityResponseModel": "DataQualityResponse",
         "VehiclesResponseModel": "VehiclesResponse",
+        "IntegrationsResponseModel": "IntegrationsResponse",
         "TargetUpdateResponseModel": "TargetUpdateResponse",
         "ReadyByUpdateResponseModel": "ReadyByUpdateResponse",
         "DayTargetsUpdateResponseModel": "DayTargetsUpdateResponse",
         "TripModeUpdateResponseModel": "TripModeUpdateResponse",
+        "TomorrowOverrideUpdateResponseModel": "TomorrowOverrideUpdateResponse",
         "NotificationPreferencesUpdateResponseModel": (
             "NotificationPreferencesUpdateResponse"
         ),
@@ -88,6 +90,7 @@ def test_core_routes_publish_typed_openapi_responses():
         "/api/sessions": "SessionsResponseModel",
         "/api/data-quality": "DataQualityResponseModel",
         "/api/vehicles": "VehiclesResponseModel",
+        "/api/integrations": "IntegrationsResponseModel",
         "/api/settings/target": "TargetUpdateResponseModel",
     }
     for path, model in expected.items():
@@ -100,6 +103,7 @@ def test_core_routes_publish_typed_openapi_responses():
                 "/api/sessions",
                 "/api/data-quality",
                 "/api/vehicles",
+                "/api/integrations",
             }
             else "put"
         )

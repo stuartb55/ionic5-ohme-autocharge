@@ -205,6 +205,9 @@ export function StatusSection({
         </span>
         {vehicle.sohPercent != null && <span>Battery health {vehicle.sohPercent}%</span>}
         {status.config.tripMode.enabled && <span className="trip-active">Trip charge active</span>}
+        {!status.config.tripMode.enabled && status.config.tomorrowOverride.enabled && (
+          <span className="trip-active">Tomorrow plan active</span>
+        )}
       </div>
 
       {onChargeChanged && <ChargeControls status={status} onChanged={onChargeChanged} />}

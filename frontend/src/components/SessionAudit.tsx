@@ -55,6 +55,7 @@ const DETAIL_LABELS: Record<string, string> = {
   target: 'Charge target',
   trigger: 'Calculated after',
   tripMode: 'Trip charge',
+  targetSource: 'Target source',
 };
 
 const eventLabel = (value: string) => EVENT_LABELS[value] ?? label(value);

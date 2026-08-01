@@ -10,6 +10,7 @@ Per the repo's timezone rule, ``_today_weekday`` is patched to a fixed day rathe
 than asserting against the real clock.
 """
 
+import datetime
 import json
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -95,6 +96,31 @@ def test_vehicle_profile_precedes_global_defaults_but_not_trip(monkeypatch):
     s.set_trip_mode(100, "04:30")
     assert s.effective_target_for("car-2") == 100
     assert s.ready_by_tuple_for("car-2") == (4, 30)
+
+
+def test_tomorrow_override_is_immediate_but_trip_still_wins(monkeypatch):
+    monkeypatch.setattr(config, "CHARGE_TARGET", 80)
+    today = datetime.date(2026, 8, 1)
+    s = AppState()
+    s.set_vehicle_profiles({"car-2": settings.VehicleProfile(85, "07:00")})
+    s.set_date_override(settings.DateOverride(today + datetime.timedelta(days=1), 95, "06:15"))
+    with patch("state._today_local_date", return_value=today):
+        assert s.effective_target_for("car-2") == 95
+        assert s.effective_ready_by_for("car-2") == "06:15"
+        assert s.effective_target_source_for("car-2") == "tomorrow"
+        s.set_trip_mode(100, "05:30")
+        assert s.effective_target_for("car-2") == 100
+        assert s.effective_target_source_for("car-2") == "trip"
+
+
+def test_dated_override_expires_after_departure_day():
+    today = datetime.date(2026, 8, 3)
+    s = AppState()
+    s.set_date_override(settings.DateOverride(datetime.date(2026, 8, 2), 95, None))
+    with patch("state._today_local_date", return_value=today):
+        assert s.date_override_enabled is False
+        assert s.expire_date_override() is True
+        assert s.date_override is None
 
 
 def test_last_observed_vehicle_selects_effective_profile(monkeypatch):
