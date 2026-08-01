@@ -398,8 +398,11 @@ def test_intelligent_go_managed_session_prices_authoritative_counter(monkeypatch
 
     assert priced.cost_minor == 216  # live example: 31.372 kWh at 6.9p/kWh
     assert priced.coverage == 1.0
+    assert priced.cost_method == "actual_intelligent_go_counter"
     assert priced.counter_priced is True
+    assert priced.energy_wh == 15_000
     assert priced.intervals[0]["rateMinorPerKwh"] == 6.9
+    assert priced.intervals[0]["quality"] == "counter_reconstructed"
 
 
 def test_intelligent_go_uses_peak_rate_outside_ohme_slot(monkeypatch):

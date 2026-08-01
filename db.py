@@ -1111,20 +1111,25 @@ async def get_unpriced_session_counters(
 ) -> list[tuple[int, int]] | None:
     """Completed measured sessions whose actual cost still needs reconciliation.
 
-    Oldest repair attempts are returned first. Reconciliation updates
-    ``updated_at`` even when evidence is still incomplete, so repeated bounded
-    passes naturally rotate through a large backlog rather than starving newer
-    sessions behind one permanently incomplete record.
+    Sessions with the oldest attempt (or no attempt yet) are returned first.
+    Both skipped and completed reconciliation events advance the ordering, so
+    repeated bounded passes rotate fairly even when a session has no telemetry.
     """
     if _pool is None:
         return None
     try:
         async with _pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT id, actual_energy_wh FROM charge_sessions "
-                "WHERE completed_at IS NOT NULL AND action = 'configured' "
-                "AND actual_energy_wh IS NOT NULL AND actual_cost_minor IS NULL "
-                "ORDER BY updated_at, id LIMIT %s",
+                "SELECT cs.id, cs.actual_energy_wh FROM charge_sessions cs "
+                "WHERE cs.completed_at IS NOT NULL "
+                "AND cs.action = 'configured' "
+                "AND cs.actual_energy_wh IS NOT NULL "
+                "AND cs.actual_cost_minor IS NULL "
+                "ORDER BY COALESCE((SELECT MAX(event.occurred_at) "
+                "FROM session_events event WHERE event.session_id = cs.id "
+                "AND event.event_type IN "
+                "('reconciliation_skipped', 'session_reconciled')), "
+                "cs.updated_at), cs.id LIMIT %s",
                 (limit,),
             )
             return [(int(row[0]), int(row[1])) for row in await cur.fetchall()]

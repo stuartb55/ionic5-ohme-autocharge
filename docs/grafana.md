@@ -34,7 +34,7 @@ In Grafana add a **PostgreSQL** datasource:
 | `grid_consumption`   | every `DAILY_STATS_INTERVAL` (when Octopus consumption is configured) | half-hourly whole-house import split into car vs rest-of-house |
 | `session_events`     | target changes and other session lifecycle events | audit trail for each physical plug-in |
 | `tariff_rates`       | every 30 minutes when a tariff is enabled | durable tariff windows used for actual cost |
-| `charging_intervals` | when a session finishes and reconciles | measured session Wh and integer-minor-unit cost by tariff interval |
+| `charging_intervals` | when a session finishes and reconciles | telemetry-reconstructed Wh and integer-minor-unit cost by tariff interval; counter-priced Intelligent Go totals remain identified separately by `charge_sessions.cost_method` |
 | `ingestion_cursors`  | after a successful external-data upsert | resumable source progress and last-ingestion metadata |
 
 Schema changes are versioned with Alembic and applied automatically at backend

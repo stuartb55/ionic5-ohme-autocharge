@@ -1101,7 +1101,9 @@ async def test_get_unpriced_session_counters_returns_measured_backlog(fake_pool)
     ]
     sql, params = conn.executed[0]
     assert "actual_cost_minor IS NULL" in sql
-    assert "ORDER BY updated_at" in sql
+    assert "event.event_type IN" in sql
+    assert "'reconciliation_skipped', 'session_reconciled'" in sql
+    assert "cs.updated_at" in sql
     assert params == (25,)
 
 
@@ -1231,12 +1233,12 @@ async def test_counter_priced_intelligent_session_tolerates_attribution_gap(fake
         cost_minor=251,
         coverage=1.0,
         energy_wh=15_000,
-        cost_method="actual_intelligent_go",
+        cost_method="actual_intelligent_go_counter",
         counter_priced=True,
     )
     await db.record_session_reconciliation(42, priced, counter_energy_wh=31_372)
     _, params = conn.executed[-1]
-    assert params[0:3] == (251, "GBP", "actual_intelligent_go")
+    assert params[0:3] == (251, "GBP", "actual_intelligent_go_counter")
     assert params[6] == "reconciled"
 
 

@@ -239,7 +239,10 @@ def price_energy_buckets(
     actual total only when every delivered Wh is covered exactly once. For an
     Intelligent Go session that remained under Ohme's smart control, the final
     charger counter is authoritative: all energy is billed at the cheap rate,
-    even when sparse telemetry assigns a delta to a neighbouring half-hour.
+    even when sparse telemetry assigns a delta to a neighbouring half-hour. The
+    interval energy remains the telemetry reconstruction; the distinct counter
+    cost method and interval quality preserve that provenance without inventing
+    a per-slot allocation for energy observed only by the final counter.
     """
     intelligent_go = is_intelligent_go()
     result = PricedEnergy(
@@ -338,7 +341,10 @@ def price_energy_buckets(
             )
         )
         result.coverage = 1.0
+        result.cost_method = "actual_intelligent_go_counter"
         result.counter_priced = True
+        for interval in result.intervals:
+            interval["quality"] = "counter_reconstructed"
     return result
 
 

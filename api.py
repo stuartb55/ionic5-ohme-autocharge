@@ -584,12 +584,17 @@ async def _reconcile_session(
     )
 
 
+_SESSION_REPAIR_BATCH_SIZE = 10
+
+
 async def _repair_unpriced_session_costs() -> None:
     """Retry completed measured sessions after tariff evidence is refreshed."""
     if not db.is_available() or not octopus.is_enabled():
         return
-    sessions = await db.get_unpriced_session_counters()
-    for session_id, counter_energy_wh in sessions or []:
+    sessions = await db.get_unpriced_session_counters(limit=_SESSION_REPAIR_BATCH_SIZE)
+    # Keep the poll loop responsive even if a faulty helper returns more rows
+    # than requested. The database orders attempts fairly across later passes.
+    for session_id, counter_energy_wh in (sessions or [])[:_SESSION_REPAIR_BATCH_SIZE]:
         await _reconcile_session(
             session_id, counter_energy_wh, trigger="background_repair"
         )

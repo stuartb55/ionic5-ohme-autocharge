@@ -1466,7 +1466,7 @@ async def test_reconcile_intelligent_go_uses_ohme_slots_and_surrounding_rates(
     boost.assert_awaited_once_with(42)
     priced = record.call_args.args[1]
     assert priced.cost_minor == 8
-    assert priced.cost_method == "actual_intelligent_go"
+    assert priced.cost_method == "actual_intelligent_go_counter"
     assert priced.counter_priced is True
 
 
@@ -1487,19 +1487,22 @@ async def test_reconcile_zero_energy_session_as_zero_cost_without_telemetry():
     assert event.call_args.args[2]["costMinor"] == 0
 
 
-async def test_background_repair_reconciles_every_unpriced_measured_session():
-    sessions = [(1, 31_372), (2, 0)]
+async def test_background_repair_is_explicitly_bounded():
+    sessions = [(session_id, 31_372) for session_id in range(1, 13)]
     with (
         patch("db.is_available", return_value=True),
         patch("octopus.is_enabled", return_value=True),
-        patch("db.get_unpriced_session_counters", new=AsyncMock(return_value=sessions)),
+        patch(
+            "db.get_unpriced_session_counters", new=AsyncMock(return_value=sessions)
+        ) as backlog,
         patch("api._reconcile_session", new=AsyncMock()) as reconcile,
     ):
         await api._repair_unpriced_session_costs()
 
+    backlog.assert_awaited_once_with(limit=api._SESSION_REPAIR_BATCH_SIZE)
     assert reconcile.await_args_list == [
-        call(1, 31_372, trigger="background_repair"),
-        call(2, 0, trigger="background_repair"),
+        call(session_id, 31_372, trigger="background_repair")
+        for session_id in range(1, api._SESSION_REPAIR_BATCH_SIZE + 1)
     ]
 
 
