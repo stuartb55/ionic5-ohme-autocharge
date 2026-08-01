@@ -84,21 +84,13 @@ export function DataQualitySection({
   const sessions = data.sessions;
   const completed = sessions?.completed ?? 0;
   const energyMissing = sessions?.missingActualEnergy ?? 0;
-  const costMissing = data.actualCostExpected
-    ? (sessions?.missingActualCost ?? 0)
-    : 0;
   const unlinked = data.telemetry?.unlinkedLast24h ?? 0;
   const uncertain = data.consumptionConfigured
     ? (data.consumption?.uncertainLast30d ?? 0)
     : 0;
   const issueCount = dataQualityIssueCount(data);
-  const sessionIssueTotal = energyMissing + costMissing;
-  const sessionReviewFilter: SessionReviewFilter =
-    energyMissing > 0 && costMissing > 0
-      ? 'any'
-      : energyMissing > 0
-        ? 'missing_energy'
-        : 'missing_cost';
+  const sessionIssueTotal = energyMissing;
+  const sessionReviewFilter: SessionReviewFilter = 'missing_energy';
 
   const checks: QualityCheck[] = [
     {
@@ -114,31 +106,6 @@ export function DataQualitySection({
           : completed > 0
             ? `All ${countLabel(completed, 'completed session')} have measured energy.`
             : 'No completed charging sessions are available to check yet.',
-    },
-    {
-      key: 'actual-cost',
-      title: 'Actual charging cost',
-      state: !data.actualCostExpected
-        ? 'neutral'
-        : costMissing > 0
-          ? 'attention'
-          : completed > 0
-            ? 'ok'
-            : 'neutral',
-      status: !data.actualCostExpected
-        ? 'Not set up'
-        : costMissing > 0
-          ? 'Needs review'
-          : completed > 0
-            ? 'Good'
-            : 'Waiting for data',
-      description: !data.actualCostExpected
-        ? 'Actual tariff cost checks will appear after Agile pricing is configured.'
-        : costMissing > 0
-          ? `${countLabel(costMissing, 'measured session')} could not be priced, so actual-cost totals may be incomplete.`
-          : completed > 0
-            ? 'All measured completed sessions have a reconciled tariff cost.'
-            : 'No completed charging sessions are available to price yet.',
     },
     {
       key: 'charger-readings',
@@ -200,7 +167,7 @@ export function DataQualitySection({
           <p>
             {issueCount > 0
               ? `${dataQualityStatusLabel(data)}. Charging and target automation are unaffected.`
-              : 'Configured history, cost and energy checks are clear.'}
+              : 'Configured history and energy checks are clear.'}
           </p>
         </div>
         {sessionIssueTotal > 0 && (

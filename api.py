@@ -514,36 +514,63 @@ async def _reconcile_session(
     """Price one durable session when telemetry and tariff coverage agree."""
     if session_id is None:
         return
-    rows = await db.get_session_attribution_rows(session_id)
-    if not rows:
-        await db.record_session_event(
-            session_id,
-            "reconciliation_skipped",
-            {"reason": "no_telemetry", "trigger": trigger},
+    counter_wh = max(0, round(counter_energy_wh))
+    attribution_issues = 0
+    if counter_wh == 0:
+        # A measured zero-energy session has an exact zero cost and needs no
+        # tariff or telemetry evidence. Leaving this as NULL creates a permanent
+        # false-positive in the data-quality report.
+        priced = octopus.PricedEnergy(
+            cost_minor=0,
+            coverage=1.0,
+            energy_wh=0,
+            cost_method=(
+                "actual_intelligent_go"
+                if octopus.is_intelligent_go()
+                else "actual_agile"
+            ),
         )
-        return
-    attribution = energy.attribute_car_kwh(
-        rows, max_gap_seconds=max(config.POLL_INTERVAL * 3, 15 * 60)
-    )
-    start = rows[0][0]
-    end = rows[-1][0] + datetime.timedelta(minutes=30)
-    # A daytime Intelligent Go slot still needs the tariff's overnight price as
-    # evidence, so include the surrounding day when loading persisted rates.
-    rate_start = (
-        start - datetime.timedelta(days=1) if octopus.is_intelligent_go() else start
-    )
-    rate_end = end + datetime.timedelta(days=1) if octopus.is_intelligent_go() else end
-    rates = await db.get_tariff_rates(rate_start, rate_end)
-    if not rates:
-        rates = store.agile_rates
-    smart_slots = (
-        await db.get_session_schedule_slots(session_id)
-        if octopus.is_intelligent_go()
-        else None
-    )
-    priced = octopus.price_energy_buckets(
-        attribution.car_by_slot, rates, smart_slots=smart_slots
-    )
+    else:
+        rows = await db.get_session_attribution_rows(session_id)
+        if not rows:
+            await db.record_session_event(
+                session_id,
+                "reconciliation_skipped",
+                {"reason": "no_telemetry", "trigger": trigger},
+            )
+            return
+        attribution = energy.attribute_car_kwh(
+            rows, max_gap_seconds=max(config.POLL_INTERVAL * 3, 15 * 60)
+        )
+        attribution_issues = attribution.issue_count
+        start = rows[0][0]
+        end = rows[-1][0] + datetime.timedelta(minutes=30)
+        # A daytime Intelligent Go slot still needs the tariff's overnight price as
+        # evidence, so include the surrounding day when loading persisted rates.
+        rate_start = (
+            start - datetime.timedelta(days=1) if octopus.is_intelligent_go() else start
+        )
+        rate_end = (
+            end + datetime.timedelta(days=1) if octopus.is_intelligent_go() else end
+        )
+        rates = await db.get_tariff_rates(rate_start, rate_end)
+        if not rates:
+            rates = store.agile_rates
+        smart_slots = (
+            await db.get_session_schedule_slots(session_id)
+            if octopus.is_intelligent_go()
+            else None
+        )
+        used_max_charge = (
+            await db.session_used_max_charge(session_id) if smart_slots else None
+        )
+        priced = octopus.price_energy_buckets(
+            attribution.car_by_slot,
+            rates,
+            smart_slots=smart_slots,
+            managed_session=bool(smart_slots) and used_max_charge is False,
+            session_energy_wh=counter_wh,
+        )
     await db.record_session_reconciliation(
         session_id, priced, counter_energy_wh=counter_energy_wh
     )
@@ -555,10 +582,26 @@ async def _reconcile_session(
             "reconstructedEnergyWh": priced.energy_wh,
             "tariffCoverage": priced.coverage,
             "costMinor": priced.cost_minor,
-            "attributionIssues": attribution.issue_count,
+            "attributionIssues": attribution_issues,
             "trigger": trigger,
         },
     )
+
+
+_SESSION_REPAIR_BATCH_SIZE = 10
+
+
+async def _repair_unpriced_session_costs() -> None:
+    """Retry completed measured sessions after tariff evidence is refreshed."""
+    if not db.is_available() or not octopus.is_enabled():
+        return
+    sessions = await db.get_unpriced_session_counters(limit=_SESSION_REPAIR_BATCH_SIZE)
+    # Keep the poll loop responsive even if a faulty helper returns more rows
+    # than requested. The database orders attempts fairly across later passes.
+    for session_id, counter_energy_wh in (sessions or [])[:_SESSION_REPAIR_BATCH_SIZE]:
+        await _reconcile_session(
+            session_id, counter_energy_wh, trigger="background_repair"
+        )
 
 
 async def _reconcile_finished_session(snap: StatusSnapshot) -> None:
@@ -685,6 +728,7 @@ async def poll_loop() -> None:
                     and now_mono - last_tariff_sync >= _TARIFF_CACHE_TTL
                 ):
                     await _refresh_tariff_rates()
+                    await _repair_unpriced_session_costs()
                     last_tariff_sync = now_mono
 
                 # Refresh Ohme's daily totals into Postgres on a slow cadence so
@@ -1362,7 +1406,6 @@ async def get_data_quality() -> DataQualityResponseModel:
         )
     needs_attention = (
         summary["sessions"]["missingActualEnergy"] > 0
-        or (octopus.is_enabled() and summary["sessions"]["missingActualCost"] > 0)
         or summary["telemetry"]["unlinkedLast24h"] > 0
         or (consumption_configured and summary["consumption"]["uncertainLast30d"] > 0)
     )

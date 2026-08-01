@@ -10,6 +10,20 @@ const label = (value: string) =>
     .replace(/[_-]+/g, ' ')
     .replace(/^./, (character) => character.toUpperCase());
 
+const COST_METHOD_LABELS: Record<string, string> = {
+  actual_agile: 'Agile tariff intervals',
+  actual_intelligent_go: 'Intelligent Go tariff intervals',
+  actual_intelligent_go_counter: 'Intelligent Go charger counter',
+};
+
+const costMethodLabel = (value: string) => COST_METHOD_LABELS[value] ?? label(value);
+
+const INTERVAL_QUALITY_LABELS: Record<string, string> = {
+  counter_reconstructed: 'Telemetry reconstruction',
+};
+
+const intervalQualityLabel = (value: string) => INTERVAL_QUALITY_LABELS[value] ?? label(value);
+
 const EVENT_LABELS: Record<string, string> = {
   charge_control: 'Charging control requested',
   charging_finished: 'Charging finished',
@@ -114,6 +128,7 @@ export function SessionAudit({ sessionId }: { sessionId: number }) {
       <div className="audit-summary" aria-label="Session measurement summary">
         <div><span>Measured energy</span><strong>{session.actualEnergyWh == null ? '—' : `${(session.actualEnergyWh / 1000).toFixed(2)} kWh`}</strong></div>
         <div><span>Actual cost</span><strong>{session.actualCostMinor == null ? '—' : formatMoney(session.actualCostMinor / 100, currency)}</strong></div>
+        <div><span>Cost basis</span><strong>{session.costMethod == null ? '—' : costMethodLabel(session.costMethod)}</strong></div>
         <div><span>Data quality</span><strong>{label(session.quality)}</strong></div>
         <div><span>Tariff coverage</span><strong>{session.tariffCoverage == null ? '—' : `${Math.round(session.tariffCoverage * 100)}%`}</strong></div>
         <div><span>Reconstructed</span><strong>{session.reconstructedEnergyWh == null ? '—' : `${(session.reconstructedEnergyWh / 1000).toFixed(2)} kWh`}</strong></div>
@@ -159,8 +174,8 @@ export function SessionAudit({ sessionId }: { sessionId: number }) {
       </div>
 
       <div className="audit-section">
-        <h3>Priced charging intervals</h3>
-        {intervals.length === 0 ? <p className="empty">No priced intervals were recorded.</p> : (
+        <h3>Reconstructed tariff intervals</h3>
+        {intervals.length === 0 ? <p className="empty">No reconstructed intervals were recorded.</p> : (
           <div className="audit-table-wrap">
             <table className="audit-table">
               <thead><tr><th>Time</th><th>Energy</th><th>Rate</th><th>Cost</th><th>Quality</th></tr></thead>
@@ -171,7 +186,7 @@ export function SessionAudit({ sessionId }: { sessionId: number }) {
                     <td>{(interval.energyWh / 1000).toFixed(2)} kWh</td>
                     <td>{interval.rateMinorPerKwh == null ? '—' : `${interval.rateMinorPerKwh.toFixed(2)}${interval.currency === 'GBP' ? 'p' : ` ${interval.currency ?? ''}`}/kWh`}</td>
                     <td>{interval.costMinor == null ? '—' : formatMoney(interval.costMinor / 100, interval.currency)}</td>
-                    <td>{label(interval.quality)}</td>
+                    <td>{intervalQualityLabel(interval.quality)}</td>
                   </tr>
                 ))}
               </tbody>
