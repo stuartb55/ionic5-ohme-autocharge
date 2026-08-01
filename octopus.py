@@ -43,6 +43,7 @@ class PricedEnergy:
     coverage: float = 0.0
     energy_wh: int = 0
     cost_method: str = "actual_agile"
+    counter_priced: bool = False
 
 
 def is_enabled() -> bool:
@@ -228,12 +229,17 @@ def price_energy_buckets(
     rates: list[dict] | None,
     *,
     smart_slots: list | None = None,
+    managed_session: bool = False,
+    session_energy_wh: int | None = None,
 ) -> PricedEnergy:
     """Price measured half-hour energy buckets against tariff windows.
 
     Monetary arithmetic is Decimal throughout and converted to integer minor
     units (pence for GBP) only at the persistence boundary. A session gets an
-    actual total only when every delivered Wh is covered exactly once.
+    actual total only when every delivered Wh is covered exactly once. For an
+    Intelligent Go session that remained under Ohme's smart control, the final
+    charger counter is authoritative: all energy is billed at the cheap rate,
+    even when sparse telemetry assigns a delta to a neighbouring half-hour.
     """
     intelligent_go = is_intelligent_go()
     result = PricedEnergy(
@@ -249,6 +255,9 @@ def price_energy_buckets(
     windows.sort(key=lambda window: window[0])
     cheap_rate = min((window[2] for window in windows), default=None)
     intelligent_slots = _slot_windows(smart_slots) if intelligent_go else []
+    whole_session_is_smart = (
+        intelligent_go and managed_session and bool(intelligent_slots)
+    )
 
     covered_wh = 0
     exact_cost_minor = Decimal(0)
@@ -265,7 +274,7 @@ def price_energy_buckets(
         covered_seconds = Decimal(0)
         bucket_cost = Decimal(0)
         weighted_rate = Decimal(0)
-        is_smart_charge = any(
+        is_smart_charge = whole_session_is_smart or any(
             min(end, slot_end) > max(start, slot_start)
             for slot_start, slot_end in intelligent_slots
         )
@@ -314,6 +323,22 @@ def price_energy_buckets(
         result.cost_minor = int(
             exact_cost_minor.quantize(Decimal(1), rounding=ROUND_HALF_UP)
         )
+    if (
+        whole_session_is_smart
+        and cheap_rate is not None
+        and session_energy_wh is not None
+    ):
+        # The final Ohme counter is more accurate than assigning poll-to-poll
+        # deltas to tariff buckets. In a non-boosted managed session every Wh is
+        # an Ohme dispatch and therefore receives Intelligent Go's cheap rate.
+        authoritative_wh = max(0, round(session_energy_wh))
+        result.cost_minor = int(
+            (Decimal(authoritative_wh) / Decimal(1000) * cheap_rate).quantize(
+                Decimal(1), rounding=ROUND_HALF_UP
+            )
+        )
+        result.coverage = 1.0
+        result.counter_priced = True
     return result
 
 

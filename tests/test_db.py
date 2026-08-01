@@ -1091,6 +1091,30 @@ async def test_get_session_attribution_rows_filters_by_session(fake_pool):
     assert conn.executed[0][1] == (42,)
 
 
+async def test_get_unpriced_session_counters_returns_measured_backlog(fake_pool):
+    conn, cursor = fake_pool
+    cursor.rows = [(1, 31_372), (2, 0)]
+
+    assert await db.get_unpriced_session_counters(limit=25) == [
+        (1, 31_372),
+        (2, 0),
+    ]
+    sql, params = conn.executed[0]
+    assert "actual_cost_minor IS NULL" in sql
+    assert "ORDER BY updated_at" in sql
+    assert params == (25,)
+
+
+async def test_session_used_max_charge_reads_audit_event(fake_pool):
+    conn, cursor = fake_pool
+    cursor._row = (True,)
+
+    assert await db.session_used_max_charge(42) is True
+    sql, params = conn.executed[0]
+    assert "details->>'action' = 'enable max charge'" in sql
+    assert params == (42,)
+
+
 async def test_get_session_schedule_slots_flattens_and_deduplicates(fake_pool):
     conn, cursor = fake_pool
     first = {"start": "2026-06-01T00:00:00Z", "end": "2026-06-01T00:30:00Z"}
@@ -1197,6 +1221,23 @@ async def test_reconciliation_with_energy_mismatch_withholds_actual_cost(fake_po
     _, params = conn.executed[-1]
     assert params[0:3] == (None, None, None)
     assert params[6] == "energy_mismatch"
+
+
+async def test_counter_priced_intelligent_session_tolerates_attribution_gap(fake_pool):
+    import octopus
+
+    conn, _ = fake_pool
+    priced = octopus.PricedEnergy(
+        cost_minor=251,
+        coverage=1.0,
+        energy_wh=15_000,
+        cost_method="actual_intelligent_go",
+        counter_priced=True,
+    )
+    await db.record_session_reconciliation(42, priced, counter_energy_wh=31_372)
+    _, params = conn.executed[-1]
+    assert params[0:3] == (251, "GBP", "actual_intelligent_go")
+    assert params[6] == "reconciled"
 
 
 async def test_upsert_grid_consumption_inserts_dated_rows(fake_pool):

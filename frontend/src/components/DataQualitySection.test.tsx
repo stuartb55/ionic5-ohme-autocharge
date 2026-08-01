@@ -35,6 +35,7 @@ describe('DataQualitySection', () => {
     expect(screen.getByText('No reporting gaps found')).toBeInTheDocument();
     expect(screen.getByText('Completeness checks')).toBeInTheDocument();
     expect(screen.getByText('All 10 completed sessions have measured energy.')).toBeInTheDocument();
+    expect(screen.queryByText('Actual charging cost')).not.toBeInTheDocument();
     expect(screen.getByText('Data freshness')).toBeInTheDocument();
     expect(screen.getByText('Updated less than a minute ago')).toBeInTheDocument();
     expect(dataQualityStatusLabel(quality)).toBe('No issues found');
@@ -53,11 +54,11 @@ describe('DataQualitySection', () => {
 
     expect(screen.getByText('Some reporting data needs attention')).toBeInTheDocument();
     expect(screen.getByText(/2 completed sessions are missing measured energy/i)).toBeInTheDocument();
-    expect(screen.getByText(/1 measured session could not be priced/i)).toBeInTheDocument();
-    expect(dataQualityStatusLabel(attention)).toBe('2 checks need attention');
+    expect(screen.queryByText(/could not be priced/i)).not.toBeInTheDocument();
+    expect(dataQualityStatusLabel(attention)).toBe('1 check needs attention');
 
-    await userEvent.click(screen.getByRole('button', { name: /review 3 affected sessions/i }));
-    expect(onReviewSessions).toHaveBeenCalledWith('any');
+    await userEvent.click(screen.getByRole('button', { name: /review 2 affected sessions/i }));
+    expect(onReviewSessions).toHaveBeenCalledWith('missing_energy');
   });
 
   it('treats optional integrations as neutral when they are not configured', () => {
@@ -73,11 +74,8 @@ describe('DataQualitySection', () => {
       />,
     );
 
-    const costCheck = screen.getByText('Actual charging cost').closest('li');
     const energyCheck = screen.getByText('Car vs home energy').closest('li');
-    expect(costCheck).not.toBeNull();
     expect(energyCheck).not.toBeNull();
-    expect(within(costCheck!).getByText('Not set up')).toBeInTheDocument();
     expect(within(energyCheck!).getByText('Not set up')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /affected session/i })).not.toBeInTheDocument();
   });

@@ -8,7 +8,7 @@ statistics endpoint by mocking the client's ``async_get_charge_summary``.
 import datetime as dt
 import logging
 import os
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -377,6 +377,29 @@ def test_data_quality_ignores_consumption_gaps_when_integration_is_disabled(clie
 
     assert body["status"] == "ok"
     assert body["consumptionConfigured"] is False
+
+
+def test_data_quality_does_not_alert_for_costs_repaired_in_background(client):
+    summary = {
+        "sessions": {
+            "total": 3,
+            "completed": 3,
+            "missingActualEnergy": 0,
+            "missingActualCost": 2,
+        },
+        "telemetry": {"unlinkedLast24h": 0},
+        "consumption": {"uncertainLast30d": 0, "ingestedThrough": None},
+        "daily": {"completeThrough": dt.date(2026, 7, 9)},
+    }
+    with (
+        patch("db.get_data_quality_summary", new=AsyncMock(return_value=summary)),
+        patch("octopus.is_enabled", return_value=True),
+        patch("octopus.consumption_is_enabled", return_value=True),
+    ):
+        body = client.get("/api/data-quality").json()
+
+    assert body["status"] == "ok"
+    assert body["sessions"]["missingActualCost"] == 2
 
 
 def test_status_reflects_snapshot(client):
@@ -1429,6 +1452,7 @@ async def test_reconcile_intelligent_go_uses_ohme_slots_and_surrounding_rates(
         patch(
             "db.get_session_schedule_slots", new=AsyncMock(return_value=slots)
         ) as get_slots,
+        patch("db.session_used_max_charge", new=AsyncMock(return_value=False)) as boost,
         patch("db.record_session_reconciliation", new=AsyncMock()) as record,
         patch("db.record_session_event", new=AsyncMock()),
     ):
@@ -1439,9 +1463,44 @@ async def test_reconcile_intelligent_go_uses_ohme_slots_and_surrounding_rates(
         t0 + dt.timedelta(minutes=35, days=1),
     )
     get_slots.assert_awaited_once_with(42)
+    boost.assert_awaited_once_with(42)
     priced = record.call_args.args[1]
     assert priced.cost_minor == 8
     assert priced.cost_method == "actual_intelligent_go"
+    assert priced.counter_priced is True
+
+
+async def test_reconcile_zero_energy_session_as_zero_cost_without_telemetry():
+    with (
+        patch("db.get_session_attribution_rows", new=AsyncMock()) as telemetry,
+        patch("db.record_session_reconciliation", new=AsyncMock()) as record,
+        patch("db.record_session_event", new=AsyncMock()) as event,
+    ):
+        await api._reconcile_session(42, 0.0, trigger="background_repair")
+
+    telemetry.assert_not_awaited()
+    priced = record.call_args.args[1]
+    assert priced.cost_minor == 0
+    assert priced.coverage == 1.0
+    assert priced.energy_wh == 0
+    event.assert_awaited_once()
+    assert event.call_args.args[2]["costMinor"] == 0
+
+
+async def test_background_repair_reconciles_every_unpriced_measured_session():
+    sessions = [(1, 31_372), (2, 0)]
+    with (
+        patch("db.is_available", return_value=True),
+        patch("octopus.is_enabled", return_value=True),
+        patch("db.get_unpriced_session_counters", new=AsyncMock(return_value=sessions)),
+        patch("api._reconcile_session", new=AsyncMock()) as reconcile,
+    ):
+        await api._repair_unpriced_session_costs()
+
+    assert reconcile.await_args_list == [
+        call(1, 31_372, trigger="background_repair"),
+        call(2, 0, trigger="background_repair"),
+    ]
 
 
 async def test_unplug_reconciliation_resolves_durable_session_after_restart():
