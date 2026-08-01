@@ -9,15 +9,6 @@ import { scheduleFixture, sessionsFixture, statisticsFixture, statusFixture } fr
 describe('Dashboard integration', () => {
   it('opens affected session records from diagnostics and moves focus to history', async () => {
     let filteredRequests = 0;
-    const missingCost = {
-      ...sessionsFixture.sessions[0]!,
-      id: 21,
-      actualCost: null,
-      costCurrency: null,
-      costMethod: null,
-      tariffCoverage: null,
-      reviewIssues: ['missing_cost' as const],
-    };
     const missingEnergy = {
       ...sessionsFixture.sessions[0]!,
       id: 22,
@@ -51,12 +42,12 @@ describe('Dashboard integration', () => {
       ),
       http.get('*/api/sessions', ({ request }) => {
         const review = new URL(request.url).searchParams.get('review');
-        if (review === 'any') {
+        if (review === 'missing_energy') {
           filteredRequests += 1;
           return HttpResponse.json({
             enabled: true,
-            review: 'any',
-            sessions: [missingCost, missingEnergy],
+            review: 'missing_energy',
+            sessions: [missingEnergy],
           });
         }
         return HttpResponse.json(sessionsFixture);
@@ -65,7 +56,7 @@ describe('Dashboard integration', () => {
 
     render(<Dashboard />);
     const reviewButton = await screen.findByRole('button', {
-      name: /review 2 affected sessions/i,
+      name: /review 1 affected session/i,
     });
 
     await userEvent.click(reviewButton);
@@ -82,7 +73,7 @@ describe('Dashboard integration', () => {
       }),
     ).toBeInTheDocument();
     expect(screen.getByText('Energy unavailable')).toBeInTheDocument();
-    expect(screen.getByText('Cost unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('Cost unavailable')).not.toBeInTheDocument();
     expect(window.location.hash).toBe('#history');
     expect(document.activeElement).toBe(document.getElementById('history'));
   });

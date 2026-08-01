@@ -11,6 +11,7 @@ describe('SessionAudit', () => {
 
     expect(await screen.findByText('18.50 kWh')).toBeInTheDocument();
     expect(screen.getByText('£1.23')).toBeInTheDocument();
+    expect(screen.getByText('Agile tariff intervals')).toBeInTheDocument();
     expect(screen.getByText('100%')).toBeInTheDocument();
     expect(screen.getByText('Vehicle plugged in')).toBeInTheDocument();
     expect(screen.getByText(/revision 1/i)).toBeInTheDocument();
@@ -29,7 +30,34 @@ describe('SessionAudit', () => {
 
     expect(await screen.findByText(/no charging events/i)).toBeInTheDocument();
     expect(screen.getByText(/no schedule snapshots/i)).toBeInTheDocument();
-    expect(screen.getByText(/no priced intervals/i)).toBeInTheDocument();
+    expect(screen.getByText(/no reconstructed intervals/i)).toBeInTheDocument();
+  });
+
+  it('distinguishes a counter-priced total from reconstructed intervals', async () => {
+    server.use(
+      http.get('*/api/sessions/11/audit', () =>
+        HttpResponse.json({
+          ...sessionAuditFixture,
+          session: {
+            ...sessionAuditFixture.session,
+            actualEnergyWh: 31372,
+            reconstructedEnergyWh: 15000,
+            costMethod: 'actual_intelligent_go_counter',
+          },
+          intervals: sessionAuditFixture.intervals.map((interval) => ({
+            ...interval,
+            quality: 'counter_reconstructed',
+          })),
+        }),
+      ),
+    );
+    render(<SessionAudit sessionId={11} />);
+
+    expect(await screen.findByText('Intelligent Go charger counter')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Reconstructed tariff intervals' })).toBeInTheDocument();
+    expect(screen.getByText('Telemetry reconstruction')).toBeInTheDocument();
+    expect(screen.getByText('31.37 kWh')).toBeInTheDocument();
+    expect(screen.getByText('15.00 kWh')).toBeInTheDocument();
   });
 
   it('uses plain-English timeline labels and formats stored units', async () => {

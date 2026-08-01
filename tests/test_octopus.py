@@ -363,6 +363,48 @@ def test_intelligent_go_prices_measured_ohme_slot_at_cheaper_rate(monkeypatch):
     assert priced.cost_method == "actual_intelligent_go"
 
 
+def test_intelligent_go_managed_session_prices_authoritative_counter(monkeypatch):
+    monkeypatch.setattr(config, "OCTOPUS_PRODUCT_CODE", "INTELLI-VAR-24-10-29")
+    base = _dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc)
+    daytime = base + _dt.timedelta(hours=12)
+    rates = [
+        {
+            "from": base.isoformat(),
+            "to": (base + _dt.timedelta(minutes=30)).isoformat(),
+            "pricePerKwh": 0.069,
+        },
+        {
+            "from": daytime.isoformat(),
+            "to": (daytime + _dt.timedelta(minutes=30)).isoformat(),
+            "pricePerKwh": 0.30,
+        },
+    ]
+    slots = [
+        {
+            "start": daytime.isoformat(),
+            "end": (daytime + _dt.timedelta(minutes=30)).isoformat(),
+        }
+    ]
+    # Sparse polling assigned only part of the measured energy to the following
+    # bucket, just outside the exact dispatch boundary.
+    following_bucket = daytime + _dt.timedelta(minutes=30)
+    priced = octopus.price_energy_buckets(
+        {following_bucket.isoformat(): 15.0},
+        rates,
+        smart_slots=slots,
+        managed_session=True,
+        session_energy_wh=31_372,
+    )
+
+    assert priced.cost_minor == 216  # live example: 31.372 kWh at 6.9p/kWh
+    assert priced.coverage == 1.0
+    assert priced.cost_method == "actual_intelligent_go_counter"
+    assert priced.counter_priced is True
+    assert priced.energy_wh == 15_000
+    assert priced.intervals[0]["rateMinorPerKwh"] == 6.9
+    assert priced.intervals[0]["quality"] == "counter_reconstructed"
+
+
 def test_intelligent_go_uses_peak_rate_outside_ohme_slot(monkeypatch):
     monkeypatch.setattr(config, "OCTOPUS_PRODUCT_CODE", "INTELLI-VAR-24-10-29")
     base = _dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc)

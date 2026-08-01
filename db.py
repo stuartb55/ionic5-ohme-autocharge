@@ -1106,6 +1106,61 @@ async def get_session_attribution_rows(session_id: int) -> list[tuple] | None:
         return None
 
 
+async def get_unpriced_session_counters(
+    limit: int = 100,
+) -> list[tuple[int, int]] | None:
+    """Completed measured sessions whose actual cost still needs reconciliation.
+
+    Sessions with the oldest attempt (or no attempt yet) are returned first.
+    Both skipped and completed reconciliation events advance the ordering, so
+    repeated bounded passes rotate fairly even when a session has no telemetry.
+    """
+    if _pool is None:
+        return None
+    try:
+        async with _pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT cs.id, cs.actual_energy_wh FROM charge_sessions cs "
+                "WHERE cs.completed_at IS NOT NULL "
+                "AND cs.action = 'configured' "
+                "AND cs.actual_energy_wh IS NOT NULL "
+                "AND cs.actual_cost_minor IS NULL "
+                "ORDER BY COALESCE((SELECT MAX(event.occurred_at) "
+                "FROM session_events event WHERE event.session_id = cs.id "
+                "AND event.event_type IN "
+                "('reconciliation_skipped', 'session_reconciled')), "
+                "cs.updated_at), cs.id LIMIT %s",
+                (limit,),
+            )
+            return [(int(row[0]), int(row[1])) for row in await cur.fetchall()]
+    except Exception:
+        logger.warning("Failed to read unpriced charge sessions", exc_info=True)
+        return None
+
+
+async def session_used_max_charge(session_id: int) -> bool | None:
+    """Whether the dashboard enabled full-rate boost during this session.
+
+    ``None`` means the audit trail could not be read. Callers fail safe in that
+    case and do not assume the whole session received smart-slot pricing.
+    """
+    if _pool is None:
+        return None
+    try:
+        async with _pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT EXISTS (SELECT 1 FROM session_events "
+                "WHERE session_id = %s AND event_type = 'charge_control' "
+                "AND details->>'action' = 'enable max charge')",
+                (session_id,),
+            )
+            row = await cur.fetchone()
+        return bool(row[0]) if row else False
+    except Exception:
+        logger.warning("Failed to read session charge controls", exc_info=True)
+        return None
+
+
 async def get_session_schedule_slots(session_id: int) -> list[dict[str, Any]] | None:
     """All distinct Ohme slots recorded for a durable charging session."""
     if _pool is None:
@@ -1213,7 +1268,7 @@ async def record_session_reconciliation(
     tolerance_wh = max(100, round(counter_wh * 0.02))
     if priced.coverage < 1:
         quality = "tariff_incomplete"
-    elif abs(delta_wh) > tolerance_wh:
+    elif abs(delta_wh) > tolerance_wh and not priced.counter_priced:
         quality = "energy_mismatch"
     else:
         quality = "reconciled"
