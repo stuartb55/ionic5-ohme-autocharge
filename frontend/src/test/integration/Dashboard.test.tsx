@@ -87,7 +87,7 @@ describe('Dashboard integration', () => {
     expect(document.activeElement).toBe(document.getElementById('history'));
   });
 
-  it('does not fetch fleet data for the single-vehicle dashboard', async () => {
+  it('loads fleet data but keeps the picker hidden for a single vehicle', async () => {
     let vehicleListHits = 0;
     server.use(
       http.get('*/api/vehicles', () => {
@@ -98,7 +98,34 @@ describe('Dashboard integration', () => {
 
     render(<Dashboard />);
     await screen.findByText('Hyundai IONIQ 5');
-    expect(vehicleListHits).toBe(0);
+    await waitFor(() => expect(vehicleListHits).toBe(1));
+    expect(screen.queryByLabelText('Vehicle')).not.toBeInTheDocument();
+  });
+
+  it('wires multi-vehicle selection and profiles into charge preferences', async () => {
+    let selected: string | null = 'car-1';
+    server.use(
+      http.get('*/api/vehicles', () => HttpResponse.json({
+        vehicles: [
+          { id: 'car-1', name: 'IONIQ 5', model: 'IONIQ 5' },
+          { id: 'car-2', name: 'Kona', model: 'Kona' },
+        ],
+        selected,
+      })),
+      http.put('*/api/settings/vehicle', async ({ request }) => {
+        selected = ((await request.json()) as { vehicleId: string }).vehicleId;
+        return HttpResponse.json({
+          vehicleId: selected, persistenceStatus: 'saved', applyStatus: 'not_connected',
+        });
+      }),
+    );
+
+    render(<Dashboard />);
+    const picker = await screen.findByLabelText('Vehicle');
+    await userEvent.selectOptions(picker, 'car-2');
+    await waitFor(() => expect(selected).toBe('car-2'));
+    await userEvent.click(screen.getByText('More options'));
+    expect(await screen.findByText('Kona profile')).toBeInTheDocument();
   });
 
   it('renders all three sections wired to the API', async () => {
@@ -120,6 +147,9 @@ describe('Dashboard integration', () => {
     expect(await screen.findByText('Saved vs standard')).toBeInTheDocument();
     expect(screen.getByText('42.0 kWh')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: /daily energy bar chart/i })).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: /dashboard sections/i })).toBeInTheDocument();
+    expect(screen.getByText('Integration health')).toBeInTheDocument();
+    expect(screen.getByText(/active: 80% · default plan/i)).toBeInTheDocument();
   });
 
   it('refetches statistics when the time range changes', async () => {

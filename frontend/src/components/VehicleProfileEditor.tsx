@@ -5,6 +5,7 @@ export function VehicleProfileEditor({
   vehicleId,
   vehicleName,
   value,
+  defaultTarget = 80,
   min,
   max,
   onSave,
@@ -12,6 +13,7 @@ export function VehicleProfileEditor({
   vehicleId: string;
   vehicleName: string;
   value: { targetPercent: number; readyBy: string | null } | null;
+  defaultTarget?: number;
   min: number;
   max: number;
   onSave: (
@@ -19,7 +21,7 @@ export function VehicleProfileEditor({
   ) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
-  const [targetDraft, setTargetDraft] = useState(String(value?.targetPercent ?? 80));
+  const [targetDraft, setTargetDraft] = useState(String(value?.targetPercent ?? defaultTarget));
   const [readyBy, setReadyBy] = useState(value?.readyBy ?? '');
   const { saving, error, saved, run, reset } = useSaveAction();
   const target = Number(targetDraft);

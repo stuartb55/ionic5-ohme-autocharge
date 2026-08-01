@@ -72,6 +72,14 @@ export interface StatusResponse {
     readyBy: string | null;
     /** True when readyBy is our stored override rather than Ohme's own time. */
     readyByIsManual: boolean;
+    /** Target currently applied after resolving every override. */
+    effectiveTarget: number;
+    /** Departure currently applied after resolving every override. */
+    effectiveReadyBy: string | null;
+    /** Which rule currently supplies the displayed target. */
+    effectiveTargetSource: 'trip' | 'tomorrow' | 'vehicle_profile' | 'weekday' | 'default';
+    /** Which rule currently supplies the displayed departure time. */
+    effectiveReadyBySource: 'trip' | 'tomorrow' | 'vehicle_profile' | 'default' | 'ohme' | 'none';
     /**
      * Per-weekday target overrides keyed by weekday ("0"=Mon … "6"=Sun). Empty
      * when none set. charger.targetPercent reflects today's effective target.
@@ -80,6 +88,13 @@ export interface StatusResponse {
     /** One-session target/departure override, consumed when the car unplugs. */
     tripMode: {
       enabled: boolean;
+      targetPercent: number | null;
+      readyBy: string | null;
+    };
+    /** Dated temporary plan created with the tomorrow shortcut. */
+    tomorrowOverride: {
+      enabled: boolean;
+      date: string | null;
       targetPercent: number | null;
       readyBy: string | null;
     };
@@ -144,6 +159,13 @@ export interface TripModeUpdateResponse extends MutationOutcome {
   readyBy: string | null;
 }
 
+export interface TomorrowOverrideUpdateResponse extends MutationOutcome {
+  enabled: boolean;
+  date: string | null;
+  targetPercent: number | null;
+  readyBy: string | null;
+}
+
 export interface NotificationPreferences {
   plugIn: boolean;
   chargeComplete: boolean;
@@ -170,6 +192,20 @@ export interface VehiclesResponse {
   vehicles: Vehicle[];
   /** The selected vehicle id, or null when using the first. */
   selected: string | null;
+}
+
+export type IntegrationStatus = 'healthy' | 'configured' | 'attention' | 'disabled';
+
+export interface IntegrationHealth {
+  id: 'ohme' | 'bluelink' | 'history' | 'tariff' | 'energy' | 'notifications';
+  name: string;
+  configured: boolean;
+  status: IntegrationStatus;
+  detail: string;
+}
+
+export interface IntegrationsResponse {
+  integrations: IntegrationHealth[];
 }
 
 export interface VehicleUpdateResponse extends MutationOutcome {

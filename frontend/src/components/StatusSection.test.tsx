@@ -55,16 +55,24 @@ describe('StatusSection trip mode', () => {
       charger: { ...statusFixture.charger, targetPercent: 100 },
       config: {
         ...statusFixture.config,
+        effectiveTarget: 100,
+        effectiveReadyBy: '05:45',
+        effectiveTargetSource: 'trip',
+        effectiveReadyBySource: 'trip',
         tripMode: { enabled: true, targetPercent: 100, readyBy: '05:45' },
       },
     };
     render(
       <ChargeSettingsSection
         status={status}
+        vehicles={null}
         onSetTarget={vi.fn()}
         onSetReadyBy={vi.fn()}
         onSetDayTargets={vi.fn()}
         onSetTripMode={vi.fn()}
+        onSetTomorrowOverride={vi.fn()}
+        onSetVehicle={vi.fn()}
+        onSetVehicleProfile={vi.fn()}
         onSetNotifications={vi.fn()}
       />,
     );
@@ -101,6 +109,27 @@ describe('StatusSection projected cost', () => {
   it('flags an Intelligent Go smart-slot cost', () => {
     render(<StatusSection status={withCharger({ projectedCost: 0.80, projectedCostMethod: 'intelligent_go' })} />);
     expect(screen.getByText('Estimated cost · Intelligent Go')).toBeInTheDocument();
+  });
+});
+
+describe('StatusSection tomorrow plan', () => {
+  it('shows the dated override in the live summary', () => {
+    const status: StatusResponse = {
+      ...statusFixture,
+      config: {
+        ...statusFixture.config,
+        effectiveTarget: 95,
+        effectiveTargetSource: 'tomorrow',
+        tomorrowOverride: {
+          enabled: true,
+          date: '2026-06-03',
+          targetPercent: 95,
+          readyBy: null,
+        },
+      },
+    };
+    render(<StatusSection status={status} />);
+    expect(screen.getByText('Tomorrow plan active')).toBeInTheDocument();
   });
 });
 

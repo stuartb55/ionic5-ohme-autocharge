@@ -49,6 +49,19 @@ def load_persisted_settings() -> None:
     if trip_mode is not None:
         store.set_trip_mode(*trip_mode)
         logger.info("Loaded pending trip mode: target=%s%% ready_by=%s", *trip_mode)
+    date_override = settings.load_date_override()
+    if date_override is not None:
+        store.set_date_override(date_override)
+        if store.expire_date_override():
+            settings.clear_date_override()
+            logger.info("Cleared expired dated charging override")
+        else:
+            logger.info(
+                "Loaded dated charging override: date=%s target=%s%% ready_by=%s",
+                date_override.date,
+                date_override.target_percent,
+                date_override.ready_by,
+            )
     store.set_notification_preferences(settings.load_notification_preferences())
     store.set_vehicle_profiles(settings.load_vehicle_profiles())
     vehicle_id = settings.load_vehicle_id()
@@ -319,9 +332,11 @@ async def handle_plugin_event(
     store.record_vehicle_state(vehicle)
     soc = vehicle.soc
 
-    # effective_target applies today's per-weekday override (if any), else the base.
+    # Resolve the full precedence chain once so the target and its audit source
+    # describe the same decision even if the clock crosses a day boundary later.
     target = store.effective_target_for(vehicle.vehicle_id)
     ready_by = store.effective_ready_by_for(vehicle.vehicle_id)
+    target_source = store.effective_target_source_for(vehicle.vehicle_id)
 
     if soc >= target:
         logger.info(
@@ -352,6 +367,7 @@ async def handle_plugin_event(
                 "soc": soc,
                 "target": target,
                 "tripMode": store.trip_mode_enabled,
+                "targetSource": target_source,
             },
         )
         await ensure_pending_sessions(active_session_key=session_key)
@@ -408,6 +424,7 @@ async def handle_plugin_event(
                 "soc": soc,
                 "target": target,
                 "tripMode": store.trip_mode_enabled,
+                "targetSource": target_source,
             },
             initial_schedule={
                 "slots": _slot_payloads(slots),
@@ -423,6 +440,8 @@ async def handle_plugin_event(
             lines.append(f"Ready by {ready_by}")
         if store.trip_mode_enabled:
             lines.append("One-time trip charge")
+        elif target_source == "tomorrow":
+            lines.append("Tomorrow-only plan")
         schedule = ", ".join(str(s) for s in slots)
         if schedule:
             lines.append(f"Schedule: {schedule}")
@@ -524,6 +543,10 @@ class PlugInDetector:
 
         Returns whether the car is currently connected.
         """
+        if store.expire_date_override():
+            settings.clear_date_override()
+            logger.info("Dated charging override expired")
+
         now_connected = ohme_client.is_connected(status)
 
         if now_connected and not self.was_connected:

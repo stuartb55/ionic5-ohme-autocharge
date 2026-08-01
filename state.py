@@ -17,7 +17,15 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import config
-from settings import NotificationPreferences, VehicleProfile
+from settings import DateOverride, NotificationPreferences, VehicleProfile
+
+
+def _today_local_date() -> datetime.date:
+    """Current calendar date in the configured home timezone."""
+    try:
+        return datetime.datetime.now(ZoneInfo(config.TIMEZONE)).date()
+    except Exception:  # noqa: BLE001 - bad TIMEZONE; fall back to host-local
+        return datetime.datetime.now().date()  # noqa: DTZ005 - host-local fallback
 
 
 def _today_weekday() -> int:
@@ -26,10 +34,7 @@ def _today_weekday() -> int:
     Plug-in time decides which day's target applies, and Ohme's day boundaries
     are local, so use config.TIMEZONE rather than the host (UTC in containers).
     """
-    try:
-        return datetime.datetime.now(ZoneInfo(config.TIMEZONE)).weekday()
-    except Exception:  # noqa: BLE001 - bad TIMEZONE; fall back to host-local
-        return datetime.datetime.now().weekday()  # noqa: DTZ005 - host-local fallback
+    return _today_local_date().weekday()
 
 
 @dataclass
@@ -147,6 +152,11 @@ class AppState:
         # precedence over permanent/day targets and is cleared on unplug.
         self.trip_target: int | None = None
         self.trip_ready_by: str | None = None
+        # A dated temporary plan created from the dashboard's "tomorrow"
+        # shortcut. It is effective immediately (so an overnight charge starts
+        # with the right plan), stays valid through its departure date, then
+        # expires without changing the permanent routine.
+        self.date_override: DateOverride | None = None
         self.notification_preferences = NotificationPreferences()
         self.vehicle_profiles: dict[str, VehicleProfile] = {}
         # Runtime-selected Hyundai vehicle id (when the account has more than
@@ -229,6 +239,29 @@ class AppState:
         self.trip_target = None
         self.trip_ready_by = None
 
+    def set_date_override(self, value: DateOverride) -> None:
+        self.date_override = value
+
+    def clear_date_override(self) -> None:
+        self.date_override = None
+
+    @property
+    def date_override_enabled(self) -> bool:
+        return (
+            self.date_override is not None
+            and self.date_override.date >= _today_local_date()
+        )
+
+    def expire_date_override(self) -> bool:
+        """Clear an elapsed override and report whether state changed."""
+        if (
+            self.date_override is not None
+            and self.date_override.date < _today_local_date()
+        ):
+            self.date_override = None
+            return True
+        return False
+
     def set_notification_preferences(self, value: NotificationPreferences) -> None:
         self.notification_preferences = value
 
@@ -258,12 +291,26 @@ class AppState:
         )
 
     def effective_target_for(self, vehicle_id: str | None) -> int:
-        """Trip override, vehicle profile, weekday override, then global base."""
+        """Trip, dated plan, vehicle profile, weekday override, then base."""
         if self.trip_target is not None:
             return self.trip_target
+        if self.date_override_enabled:
+            return self.date_override.target_percent
         if vehicle_id and vehicle_id in self.vehicle_profiles:
             return self.vehicle_profiles[vehicle_id].target_percent
         return self.day_targets.get(_today_weekday(), self.charge_target)
+
+    def effective_target_source_for(self, vehicle_id: str | None) -> str:
+        """Stable user-facing provenance for the currently effective target."""
+        if self.trip_target is not None:
+            return "trip"
+        if self.date_override_enabled:
+            return "tomorrow"
+        if vehicle_id and vehicle_id in self.vehicle_profiles:
+            return "vehicle_profile"
+        if _today_weekday() in self.day_targets:
+            return "weekday"
+        return "default"
 
     @property
     def effective_ready_by(self) -> str | None:
@@ -275,9 +322,21 @@ class AppState:
         """Trip departure, vehicle profile departure, then permanent departure."""
         if self.trip_target is not None:
             return self.trip_ready_by
+        if self.date_override_enabled:
+            return self.date_override.ready_by
         if vehicle_id and vehicle_id in self.vehicle_profiles:
             return self.vehicle_profiles[vehicle_id].ready_by
         return self.ready_by
+
+    def effective_ready_by_source_for(self, vehicle_id: str | None) -> str:
+        """Stable user-facing provenance for the effective departure time."""
+        if self.trip_target is not None:
+            return "trip"
+        if self.date_override_enabled:
+            return "tomorrow"
+        if vehicle_id and vehicle_id in self.vehicle_profiles:
+            return "vehicle_profile"
+        return "default" if self.ready_by is not None else "none"
 
     @property
     def ready_by_tuple(self) -> tuple[int, int] | None:

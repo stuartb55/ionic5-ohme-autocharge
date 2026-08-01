@@ -11,6 +11,7 @@ avoid clobbering the others.
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 import os
@@ -67,6 +68,22 @@ class VehicleProfile:
 
     def to_json(self) -> dict:
         return {"targetPercent": self.target_percent, "readyBy": self.ready_by}
+
+
+@dataclass(frozen=True)
+class DateOverride:
+    """Temporary charging defaults tied to one local departure date."""
+
+    date: datetime.date
+    target_percent: int
+    ready_by: str | None = None
+
+    def to_json(self) -> dict:
+        return {
+            "date": self.date.isoformat(),
+            "targetPercent": self.target_percent,
+            "readyBy": self.ready_by,
+        }
 
 
 def parse_hhmm(value: object) -> tuple[int, int] | None:
@@ -218,6 +235,42 @@ def clear_trip_mode() -> bool:
     """Consume or cancel the pending trip override."""
     data = _load()
     data.pop("tripMode", None)
+    return _save(data)
+
+
+def load_date_override() -> DateOverride | None:
+    """Return the dated temporary override, or None when absent or malformed."""
+    raw = _load().get("dateOverride")
+    if not isinstance(raw, dict):
+        return None
+    try:
+        date = datetime.date.fromisoformat(raw["date"])
+        target = int(raw["targetPercent"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    ready_by = raw.get("readyBy")
+    if not TARGET_MIN <= target <= TARGET_MAX:
+        logger.warning("Persisted date-override target %s out of range — ignoring", target)
+        return None
+    if ready_by is not None and parse_hhmm(ready_by) is None:
+        logger.warning(
+            "Persisted date-override readyBy %r invalid — ignoring", ready_by
+        )
+        return None
+    return DateOverride(date=date, target_percent=target, ready_by=ready_by)
+
+
+def save_date_override(value: DateOverride) -> bool:
+    """Persist a dated temporary override, preserving all other settings."""
+    data = _load()
+    data["dateOverride"] = value.to_json()
+    return _save(data)
+
+
+def clear_date_override() -> bool:
+    """Cancel or expire the dated temporary override."""
+    data = _load()
+    data.pop("dateOverride", None)
     return _save(data)
 
 

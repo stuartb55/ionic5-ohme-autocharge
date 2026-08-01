@@ -11,32 +11,39 @@ interface Props {
 /** Account vehicle selector — rendered by the dashboard only when >1 vehicle. */
 export function VehiclePicker({ vehicles, selected, onSelect }: Props) {
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(false);
   const current = selected ?? vehicles[0]?.id ?? '';
 
   const handle = async (id: string) => {
     setSaving(true);
+    setError(false);
     try {
       await onSelect(id);
+    } catch {
+      setError(true);
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <label className="vehicle-picker">
-      <span>Vehicle</span>
-      <select
-        value={current}
-        disabled={saving}
-        onChange={(e) => void handle(e.target.value)}
-        aria-label="Vehicle"
-      >
-        {vehicles.map((v) => (
-          <option key={v.id} value={v.id}>
-            {v.name ?? v.model ?? v.id}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className="vehicle-picker-wrap">
+      <label className="vehicle-picker">
+        <span>Vehicle</span>
+        <select
+          value={current}
+          disabled={saving}
+          onChange={(e) => void handle(e.target.value)}
+          aria-label="Vehicle"
+        >
+          {vehicles.map((v) => (
+            <option key={v.id} value={v.id}>
+              {v.name ?? v.model ?? v.id}
+            </option>
+          ))}
+        </select>
+      </label>
+      {error && <span className="target-error" role="alert">Couldn’t switch vehicle.</span>}
+    </div>
   );
 }

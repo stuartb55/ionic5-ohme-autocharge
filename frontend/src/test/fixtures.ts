@@ -45,8 +45,13 @@ export const statusFixture: StatusResponse = {
     targetMax: 100,
     readyBy: null,
     readyByIsManual: false,
+    effectiveTarget: 80,
+    effectiveReadyBy: null,
+    effectiveTargetSource: 'default',
+    effectiveReadyBySource: 'none',
     dayTargets: {},
     tripMode: { enabled: false, targetPercent: null, readyBy: null },
+    tomorrowOverride: { enabled: false, date: null, targetPercent: null, readyBy: null },
     notifications: {
       plugIn: true,
       chargeComplete: true,

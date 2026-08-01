@@ -58,6 +58,7 @@ def reset_state():
     store.day_targets = {}
     store.trip_target = None
     store.trip_ready_by = None
+    store.date_override = None
     store.notification_preferences = settings.NotificationPreferences()
     store.vehicle_profiles = {}
     store.vehicle_id_override = None
@@ -129,6 +130,30 @@ def test_version_reports_app_version(client, monkeypatch):
 def test_version_defaults_to_dev(client, monkeypatch):
     monkeypatch.setattr(config, "APP_VERSION", "")
     assert client.get("/api/version").json() == {"version": "dev"}
+
+
+def test_integrations_report_configured_optional_services_without_secrets(
+    client, monkeypatch
+):
+    monkeypatch.setattr(config, "NTFY_TOPIC", "alerts")
+    store.client = MagicMock()
+    store.ready = True
+    store.last_vehicle_id = "car-1"
+    store.agile_rates = [{"value": 7.5}]
+    with (
+        patch("db.is_enabled", return_value=True),
+        patch("db.is_available", return_value=True),
+        patch("octopus.is_enabled", return_value=True),
+        patch("octopus.consumption_is_enabled", return_value=True),
+    ):
+        body = client.get("/api/integrations").json()
+    by_id = {item["id"]: item for item in body["integrations"]}
+    assert by_id["ohme"]["status"] == "healthy"
+    assert by_id["bluelink"]["status"] == "healthy"
+    assert by_id["history"]["status"] == "healthy"
+    assert by_id["tariff"]["status"] == "healthy"
+    assert by_id["notifications"]["status"] == "configured"
+    assert "alerts" not in str(body)
 
 
 def test_health_503_when_poll_task_dead(client):
@@ -2381,6 +2406,63 @@ def test_trip_mode_cancel_stops_higher_schedule_when_normal_target_reached(clien
     set_target.assert_awaited_once_with(
         store.client, current_soc=90, target_percent=80, target_time=None
     )
+
+
+# --- tomorrow-only dated override -----------------------------------------
+
+
+def test_tomorrow_override_persists_and_is_reflected_in_status(client):
+    response = client.put(
+        "/api/settings/tomorrow-override",
+        json={"enabled": True, "targetPercent": 95, "readyBy": "06:30"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["enabled"] is True
+    assert body["targetPercent"] == 95
+    assert body["readyBy"] == "06:30"
+    persisted = settings.load_date_override()
+    assert persisted is not None
+    assert persisted.date.isoformat() == body["date"]
+    assert client.get("/api/status").json()["config"]["tomorrowOverride"] == {
+        "enabled": True,
+        "date": body["date"],
+        "targetPercent": 95,
+        "readyBy": "06:30",
+    }
+    assert client.get("/api/status").json()["config"]["effectiveTargetSource"] == "tomorrow"
+
+
+def test_tomorrow_override_applies_immediately_to_overnight_charge(client):
+    _populate_snapshot()
+    store.client = MagicMock(slots=[], next_slot_start=None, next_slot_end=None)
+    with (
+        patch("bluelink.get_vehicle_state", return_value=_vstate(55)),
+        patch("ohme_client.set_target", new=AsyncMock()) as set_target,
+    ):
+        body = client.put(
+            "/api/settings/tomorrow-override",
+            json={"enabled": True, "targetPercent": 95, "readyBy": "06:15"},
+        ).json()
+    assert body["applyStatus"] == "applied"
+    set_target.assert_awaited_once_with(
+        store.client, current_soc=55, target_percent=95, target_time=(6, 15)
+    )
+
+
+def test_tomorrow_override_cancel_restores_normal_settings(client):
+    store.set_charge_target(80)
+    client.put(
+        "/api/settings/tomorrow-override",
+        json={"enabled": True, "targetPercent": 95, "readyBy": None},
+    )
+    response = client.put(
+        "/api/settings/tomorrow-override",
+        json={"enabled": False, "targetPercent": 95, "readyBy": None},
+    )
+    assert response.json()["enabled"] is False
+    assert settings.load_date_override() is None
+    assert store.effective_target == 80
 
 
 @pytest.mark.parametrize("target", [0, 101])

@@ -44,20 +44,24 @@ def _reset_session_state():
     marker; keep tests independent."""
     store.clear_soc()
     store.clear_trip_mode()
+    store.clear_date_override()
     store.notification_preferences = settings.NotificationPreferences()
     store.vehicle_profiles = {}
     store.pending_sessions = {}
     settings.clear_trip_mode()
+    settings.clear_date_override()
     settings.save_session_active(False)
     for session_key in settings.load_pending_sessions():
         settings.clear_pending_session(session_key)
     yield
     store.clear_soc()
     store.clear_trip_mode()
+    store.clear_date_override()
     store.notification_preferences = settings.NotificationPreferences()
     store.vehicle_profiles = {}
     store.pending_sessions = {}
     settings.clear_trip_mode()
+    settings.clear_date_override()
     settings.save_session_active(False)
     for session_key in settings.load_pending_sessions():
         settings.clear_pending_session(session_key)
@@ -745,6 +749,23 @@ def test_pending_trip_mode_is_restored_after_restart():
 
     assert store.trip_target == 95
     assert store.trip_ready_by == "05:30"
+
+
+def test_dated_override_is_restored_and_expired_safely_after_restart():
+    today = dt.date(2026, 8, 1)
+    active = settings.DateOverride(today + dt.timedelta(days=1), 95, "06:15")
+    settings.save_date_override(active)
+    with patch("state._today_local_date", return_value=today):
+        load_persisted_settings()
+    assert store.date_override == active
+
+    expired = settings.DateOverride(today - dt.timedelta(days=1), 90, None)
+    settings.save_date_override(expired)
+    store.clear_date_override()
+    with patch("state._today_local_date", return_value=today):
+        load_persisted_settings()
+    assert store.date_override is None
+    assert settings.load_date_override() is None
 
 
 # --- persisted session marker ---

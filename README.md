@@ -17,8 +17,9 @@ When the car is plugged in, the app reads the real battery state-of-charge from 
 - **Ready-by time** — finish charging by a chosen time (auto-populates from Ohme's own configured time).
 - **Per-weekday targets** — e.g. 80% on weekdays, 100% before the weekend, applied automatically at plug-in.
 - **One-time trip charge** — temporarily raise the target and optionally set a departure time for the current or next session; the override survives restarts and clears automatically on unplug.
+- **Tomorrow-only plan** — set a temporary target and departure time for an overnight charge without changing the normal routine; it survives restarts and expires after tomorrow.
 - **Live SOC while charging** — the ring climbs through the session (re-reads Bluelink on a slow cadence; never wakes the car).
-- **Single-vehicle focus** — one clear vehicle dashboard, without fleet selection or duplicate per-vehicle settings.
+- **Multi-vehicle profiles** — accounts with more than one Hyundai can switch the tracked car and give each vehicle its own target and departure defaults.
 - **Vehicle health** — read-only 12V auxiliary battery level plus the car's own tyre-pressure, washer-fluid and key-fob-battery warnings and anything left open (door/bonnet/boot), shown on the dashboard with an optional ntfy when a warning first appears.
 - **Configurable notifications** — optional [ntfy](https://ntfy.sh) alerts with dashboard controls for plug-in, completion, problems/recovery, vehicle health and weekly summaries; tune failure, minimum-energy and optional 12V-battery thresholds.
 - **Octopus Agile / Intelligent Go** *(optional)* — upcoming prices and cheapest windows, plus tariff-accurate session costs. Agile uses each slot's clock-time price; Intelligent Go prices every Ohme smart-charge slot at the cheaper rate, including daytime slots.
@@ -26,6 +27,7 @@ When the car is plugged in, the app reads the real battery state-of-charge from 
 - **House vs car energy** *(optional, needs Postgres)* — splits Octopus import into car, household and explicitly unattributed energy; telemetry gaps and inconsistencies remain visible instead of being silently forced into a plausible split.
 - **History & Grafana** *(optional)* — per-session and telemetry data persisted to Postgres.
 - **Data-quality dashboard** *(needs Postgres)* — shows missing measured energy/cost, session-linkage problems, uncertain attribution, ingestion freshness and statistics-cache age, with a direct path to session records needing review.
+- **Integration health** — a privacy-safe setup checklist shows whether Ohme, Bluelink, Postgres, Octopus and ntfy are healthy, configured, optional or need attention.
 - **Session audit view** *(needs Postgres)* — expands each history row into measured energy/cost, reconciliation quality, lifecycle events, schedule revisions, priced tariff intervals and the charge curve.
 - **Monthly evidence reports** *(needs Postgres)* — download JSON or spreadsheet-friendly CSV for any local calendar month, keeping account totals and measured home-session figures separate with explicit coverage and missing-data counts.
 - **Battery health trend** *(needs Postgres)* — a state-of-health sparkline on the dashboard showing degradation over time, not just the current figure.
@@ -159,8 +161,8 @@ uvicorn api:app --host 0.0.0.0 --port 8000   # web API + poll loop (docs at /doc
 
 A React + TypeScript single-page app (in `frontend/`) served by a hardened, non-root nginx image. It polls the backend and renders:
 
-1. **At-a-glance live status** — one state-of-charge view with the active target, expected finish, range, charge speed, energy added, planned energy and estimated cost. Pause/resume and boost controls stay beside the live session.
-2. **Tonight’s plan & preferences** — a home-timezone schedule with start, ready-by time and charging windows, followed by the everyday target and departure time. Weekly targets, trip charge and notifications remain available under one disclosure.
+1. **At-a-glance live status** — one state-of-charge view with the active target, expected finish, range, charge speed, energy added, planned energy and estimated cost. Pause/resume and boost controls stay beside the live session. On mobile, a sticky section navigator jumps directly to Today, Plan, Insights, History or Settings.
+2. **Tonight’s plan & preferences** — a home-timezone schedule with start, ready-by time and charging windows, followed by the everyday target and departure time. The dashboard identifies the exact rule supplying each active setting. Weekly targets, tomorrow-only plans, trip charge, per-vehicle profiles and notifications remain available under one disclosure.
 3. **Costs & energy** — account-wide Ohme cost, savings, energy and average unit price for the last 7/30/90 **complete local calendar days**, plus vehicle-scoped home-energy efficiency and actual home running cost from complete charge-to-next-plug-in intervals. Missing upstream daily buckets stay missing rather than being displayed as zero usage. Daily charts include period-over-period deltas and CSV export; a month picker downloads auditable monthly JSON/CSV reports. DST days follow `TIMEZONE` rather than assuming every day is 24 hours.
 4. **Recent sessions** *(when Postgres is enabled)* — the last plug-ins with SOC, target, top-up and odometer, with a CSV/JSON export of the full history.
    Each row expands into a **session audit**: measured energy/cost and reconciliation, lifecycle events, schedule revisions, tariff-priced intervals, and the SOC/power charge curve. Missing evidence stays explicitly unavailable rather than being estimated.
@@ -190,6 +192,7 @@ npm run build    # type-check + production build to dist/
 | `GET /api/health` | Liveness probe (503 if the poll loop has died) |
 | `GET /api/ready` | Operational readiness (Ohme/poll status plus optional persistence availability) |
 | `GET /api/data-quality` | Read-only persistence completeness counters, ingestion freshness, and statistics-cache age for monitoring |
+| `GET /api/integrations` | Privacy-safe configuration and health summary for required and optional integrations |
 | `GET /api/reports/monthly?month=YYYY-MM&format=json\|csv` | Calendar-month persisted account/day and measured home-session evidence; defaults to the previous month (404 when persistence is off) |
 | `GET /api/version` | Build git SHA (`dev` when unset) |
 | `GET /api/status` | Vehicle/charger data plus independent plug-in automation state (`idle`, `pending`, `configured`, or `error`) |
@@ -210,6 +213,7 @@ npm run build    # type-check + production build to dist/
 | `PUT /api/settings/ready-by` | Set/clear the ready-by time — `{"readyBy": "HH:MM"\|null}` |
 | `PUT /api/settings/day-targets` | Replace per-weekday overrides — `{"dayTargets": {"4": 100}}` |
 | `PUT /api/settings/trip-mode` | Enable/update or cancel the durable one-session override — `{"enabled": true, "targetPercent": 100, "readyBy": "06:30"}` |
+| `PUT /api/settings/tomorrow-override` | Enable/update or cancel a dated plan that is effective for overnight charging and expires after tomorrow |
 | `PUT /api/settings/notifications` | Replace ntfy category choices and validated alert thresholds; persisted in runtime settings |
 | `PUT /api/settings/vehicle` | Select the tracked vehicle — `{"vehicleId": "…"\|null}` |
 | `PUT /api/settings/vehicle-profile` | Create/update or remove target and ready-by defaults for a stable Hyundai vehicle ID |

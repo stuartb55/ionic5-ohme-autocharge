@@ -51,6 +51,7 @@ from api_contracts import (
     DataQualityResponseModel,
     DayTargetsUpdate,
     DayTargetsUpdateResponseModel,
+    IntegrationsResponseModel,
     MaxChargeUpdate,
     MonthlyReportResponseModel,
     NotificationPreferencesUpdate,
@@ -66,6 +67,8 @@ from api_contracts import (
     StatusResponseModel,
     TargetUpdate,
     TargetUpdateResponseModel,
+    TomorrowOverrideUpdate,
+    TomorrowOverrideUpdateResponseModel,
     TripModeUpdate,
     TripModeUpdateResponseModel,
     VehicleProfileUpdate,
@@ -93,6 +96,7 @@ _QUIET_ACCESS_PATHS = frozenset(
         "/api/tariff",
         "/api/energy-usage",
         "/api/data-quality",
+        "/api/integrations",
     }
 )
 
@@ -1213,7 +1217,7 @@ async def _reapply_target_if_connected(
     """Push the current effective target/ready-by to Ohme if the car is plugged in.
 
     Reads the effective target and ready-by so any settings change — base,
-    weekday, trip, or departure time — re-plans the active
+    weekday, vehicle, tomorrow, trip, or departure time — re-plans the active
     session. Returns an explicit result so the UI can distinguish an expected
     disconnected charger from a failed live apply.
     """
@@ -1265,6 +1269,7 @@ async def _reapply_target_if_connected(
                 "target": target,
                 "readyBy": ready_by,
                 "tripMode": store.trip_mode_enabled,
+                "targetSource": store.effective_target_source_for(vehicle_id),
             },
         )
         await db.record_schedule(
@@ -1372,6 +1377,115 @@ async def get_data_quality() -> DataQualityResponseModel:
         consumption=summary["consumption"],
         daily=summary["daily"],
         statisticsCache={"available": cache_available, "ageSeconds": cache_age},
+    )
+
+
+@app.get("/api/integrations", response_model=IntegrationsResponseModel)
+async def get_integrations() -> IntegrationsResponseModel:
+    """Configuration and health summary without exposing credentials or ids."""
+    ohme_healthy = (
+        store.client is not None and store.ready and store.last_poll_error is None
+    )
+    ohme_attention = bool(
+        store.last_poll_error
+        or store.automation_error_code == "ohme_target_failed"
+        or (store.ready and store.client is None)
+    )
+    bluelink_failed = store.automation_error_code == "bluelink_read_failed"
+    bluelink_observed = store.last_vehicle_id is not None or store.last_soc is not None
+    history_configured = db.is_enabled()
+    history_available = db.is_available()
+    tariff_configured = octopus.is_enabled()
+    energy_configured = octopus.consumption_is_enabled()
+    notifications_configured = bool(config.NTFY_TOPIC)
+
+    return IntegrationsResponseModel(
+        integrations=[
+            {
+                "id": "ohme",
+                "name": "Ohme charger",
+                "configured": True,
+                "status": "healthy"
+                if ohme_healthy
+                else "attention"
+                if ohme_attention
+                else "configured",
+                "detail": "Live charger connection is healthy."
+                if ohme_healthy
+                else "The charger connection needs attention."
+                if ohme_attention
+                else "Connecting to the charger.",
+            },
+            {
+                "id": "bluelink",
+                "name": "Hyundai Bluelink",
+                "configured": True,
+                "status": "attention"
+                if bluelink_failed
+                else "healthy"
+                if bluelink_observed
+                else "configured",
+                "detail": "The latest vehicle read failed; Autocharge will retry."
+                if bluelink_failed
+                else "Vehicle data was read successfully."
+                if bluelink_observed
+                else "Ready; vehicle data is checked when a charge needs configuring.",
+            },
+            {
+                "id": "history",
+                "name": "Charging history",
+                "configured": history_configured,
+                "status": "healthy"
+                if history_available
+                else "attention"
+                if history_configured
+                else "disabled",
+                "detail": "Postgres history is available."
+                if history_available
+                else "Postgres is configured but unavailable."
+                if history_configured
+                else "Set DATABASE_URL to enable history and evidence reports.",
+            },
+            {
+                "id": "tariff",
+                "name": "Octopus tariff",
+                "configured": tariff_configured,
+                "status": "healthy"
+                if tariff_configured and store.agile_rates is not None
+                else "configured"
+                if tariff_configured
+                else "disabled",
+                "detail": "Tariff prices are available."
+                if tariff_configured and store.agile_rates is not None
+                else "Configured; waiting for the first price refresh."
+                if tariff_configured
+                else "Set OCTOPUS_PRODUCT_CODE and OCTOPUS_REGION for tariff pricing.",
+            },
+            {
+                "id": "energy",
+                "name": "Household energy",
+                "configured": energy_configured,
+                "status": "attention"
+                if energy_configured and not history_available
+                else "configured"
+                if energy_configured
+                else "disabled",
+                "detail": "Postgres must be available before consumption can be attributed."
+                if energy_configured and not history_available
+                else "Configured; consumption refreshes with daily statistics."
+                if energy_configured
+                else "Set the Octopus account credentials to split house and car energy.",
+            },
+            {
+                "id": "notifications",
+                "name": "Notifications",
+                "configured": notifications_configured,
+                "status": "configured" if notifications_configured else "disabled",
+                "detail": "ntfy delivery is configured."
+                if notifications_configured
+                else "Set NTFY_TOPIC to enable charging alerts.",
+            },
+        ]
     )
 
 
@@ -1530,6 +1644,53 @@ async def set_trip_mode(update: TripModeUpdate) -> JSONResponse:
 
 
 @app.put(
+    "/api/settings/tomorrow-override",
+    dependencies=[Depends(require_csrf_header)],
+    response_model=TomorrowOverrideUpdateResponseModel,
+)
+async def set_tomorrow_override(update: TomorrowOverrideUpdate) -> JSONResponse:
+    """Set or cancel a dated plan valid now through tomorrow's local day."""
+    if update.enabled:
+        tomorrow = datetime.datetime.now(ZoneInfo(config.TIMEZONE)).date() + datetime.timedelta(
+            days=1
+        )
+        override = settings.DateOverride(
+            date=tomorrow,
+            target_percent=update.targetPercent,
+            ready_by=update.readyBy,
+        )
+        store.set_date_override(override)
+        persisted = settings.save_date_override(override)
+    else:
+        store.clear_date_override()
+        persisted = settings.clear_date_override()
+    # The plan is effective immediately so a car plugged in tonight is prepared
+    # for tomorrow's departure. Cancelling similarly restores the normal rule.
+    applied = await _reapply_target_if_connected(allow_zero_topup=not update.enabled)
+    _reflect_effective_target()
+    current = store.date_override
+    logger.info(
+        "Tomorrow override %s (date=%s target=%s%% ready_by=%s persisted=%s applied=%s)",
+        "enabled" if update.enabled else "cancelled",
+        current.date if current else None,
+        current.target_percent if current else None,
+        current.ready_by if current else None,
+        persisted,
+        applied,
+    )
+    return JSONResponse(
+        {
+            "enabled": store.date_override_enabled,
+            "date": current.date.isoformat() if current else None,
+            "targetPercent": current.target_percent if current else None,
+            "readyBy": current.ready_by if current else None,
+            "persistenceStatus": _persistence_status(persisted),
+            "applyStatus": applied,
+        }
+    )
+
+
+@app.put(
     "/api/settings/notifications",
     dependencies=[Depends(require_csrf_header)],
     response_model=NotificationPreferencesUpdateResponseModel,
@@ -1650,6 +1811,13 @@ async def set_vehicle_profile(update: VehicleProfileUpdate) -> JSONResponse:
 
 @app.get("/api/status", response_model=StatusResponseModel)
 async def get_status() -> JSONResponse:
+    active_vehicle_id = store.selected_vehicle_id or store.last_vehicle_id
+    ready_by_source = store.effective_ready_by_source_for(active_vehicle_id)
+    effective_ready_by = store.effective_ready_by_for(active_vehicle_id)
+    if ready_by_source == "none" and store.status.ohme_ready_by is not None:
+        ready_by_source = "ohme"
+        effective_ready_by = store.status.ohme_ready_by
+    date_override = store.date_override if store.date_override_enabled else None
     payload = {
         "vehicle": {
             "name": store.status.vehicle_name,
@@ -1712,6 +1880,12 @@ async def get_status() -> JSONResponse:
             if store.ready_by is not None
             else store.status.ohme_ready_by,
             "readyByIsManual": store.ready_by is not None,
+            "effectiveTarget": store.effective_target_for(active_vehicle_id),
+            "effectiveReadyBy": effective_ready_by,
+            "effectiveTargetSource": store.effective_target_source_for(
+                active_vehicle_id
+            ),
+            "effectiveReadyBySource": ready_by_source,
             # Per-weekday target overrides {"0".."6": percent}; empty when none.
             # charger.targetPercent reflects today's effective target.
             "dayTargets": {str(d): p for d, p in store.day_targets.items()},
@@ -1719,6 +1893,14 @@ async def get_status() -> JSONResponse:
                 "enabled": store.trip_mode_enabled,
                 "targetPercent": store.trip_target,
                 "readyBy": store.trip_ready_by,
+            },
+            "tomorrowOverride": {
+                "enabled": store.date_override_enabled,
+                "date": date_override.date.isoformat() if date_override else None,
+                "targetPercent": date_override.target_percent
+                if date_override
+                else None,
+                "readyBy": date_override.ready_by if date_override else None,
             },
             "notifications": {
                 **store.notification_preferences.to_json(),

@@ -8,7 +8,9 @@ import { ChargeSettingsSection } from './ChargeSettingsSection';
 import { DataQualitySection } from './DataQualitySection';
 import { EnergyUsageSection } from './EnergyUsageSection';
 import { Icon } from './Icon';
+import { IntegrationHealth } from './IntegrationHealth';
 import { ScheduleSection } from './ScheduleSection';
+import { SectionNav } from './SectionNav';
 import { SessionsSection } from './SessionsSection';
 import { SohTrendSection } from './SohTrendSection';
 import { StatisticsSection } from './StatisticsSection';
@@ -31,6 +33,8 @@ const TARIFF_INTERVAL = 1_800_000;
 const ENERGY_INTERVAL = 300_000;
 const QUALITY_INTERVAL = 300_000;
 const SOH_INTERVAL = 1_800_000;
+const INTEGRATIONS_INTERVAL = 300_000;
+const VEHICLES_INTERVAL = 1_800_000;
 
 function outcomeWarning(result: {
   persistenceStatus: PersistenceStatus;
@@ -138,6 +142,8 @@ export function Dashboard() {
   }, []);
 
   const status = usePolling(api.getStatus, STATUS_INTERVAL);
+  const vehicles = usePolling(api.getVehicles, VEHICLES_INTERVAL);
+  const integrations = usePolling(api.getIntegrations, INTEGRATIONS_INTERVAL);
   const schedule = usePolling(api.getSchedule, SCHEDULE_INTERVAL);
   const statsFetcher = useCallback((signal: AbortSignal) => api.getStatistics(days, signal), [days]);
   const stats = usePolling(statsFetcher, STATS_INTERVAL, [days]);
@@ -206,6 +212,8 @@ export function Dashboard() {
   const { refetch: refetchTariff } = tariff;
   const { refetch: refetchSoh } = soh;
   const { refetch: refetchEnergy } = energy;
+  const { refetch: refetchVehicles } = vehicles;
+  const { refetch: refetchIntegrations } = integrations;
 
   const handleSetTarget = useCallback(async (target: number) => {
     const result = await api.setTarget(target);
@@ -228,6 +236,34 @@ export function Dashboard() {
   const handleSetTripMode = useCallback(
     async (enabled: boolean, target: number, readyBy: string | null) => {
       const result = await api.setTripMode(enabled, target, readyBy);
+      setMutationWarning(outcomeWarning(result));
+      refetchStatus();
+      refetchSchedule();
+    },
+    [refetchStatus, refetchSchedule],
+  );
+
+  const handleSetTomorrowOverride = useCallback(
+    async (enabled: boolean, target: number, readyBy: string | null) => {
+      const result = await api.setTomorrowOverride(enabled, target, readyBy);
+      setMutationWarning(outcomeWarning(result));
+      refetchStatus();
+      refetchSchedule();
+    },
+    [refetchStatus, refetchSchedule],
+  );
+
+  const handleSetVehicle = useCallback(async (vehicleId: string) => {
+    const result = await api.setVehicle(vehicleId);
+    setMutationWarning(outcomeWarning(result));
+    refetchVehicles();
+    refetchStatus();
+    refetchSchedule();
+  }, [refetchVehicles, refetchStatus, refetchSchedule]);
+
+  const handleSetVehicleProfile = useCallback(
+    async (vehicleId: string, enabled: boolean, target: number, readyBy: string | null) => {
+      const result = await api.setVehicleProfile(vehicleId, enabled, target, readyBy);
       setMutationWarning(outcomeWarning(result));
       refetchStatus();
       refetchSchedule();
@@ -261,6 +297,8 @@ export function Dashboard() {
         refetchTariff();
         refetchSoh();
         refetchEnergy();
+        refetchVehicles();
+        refetchIntegrations();
       });
   }, [
     refetchStatus,
@@ -271,6 +309,8 @@ export function Dashboard() {
     refetchTariff,
     refetchSoh,
     refetchEnergy,
+    refetchVehicles,
+    refetchIntegrations,
   ]);
 
   const offline = status.error && !status.data;
@@ -324,8 +364,10 @@ export function Dashboard() {
         {mutationWarning && <Banner variant="error">{mutationWarning}</Banner>}
       </div>
 
+      <SectionNav />
+
       <main className="sections" aria-busy={status.loading && !status.data}>
-        <div className="dashboard-overview">
+        <div className="dashboard-overview" id="today">
           {status.data ? (
             <StatusSection status={status.data} onChargeChanged={refetchStatus} />
           ) : status.error ? (
@@ -334,7 +376,7 @@ export function Dashboard() {
             <SectionSkeleton height={500} />
           )}
 
-          <aside className="overview-sidebar" aria-label="Charge plan and preferences">
+          <aside className="overview-sidebar" id="plan" aria-label="Charge plan and preferences">
             {schedule.data ? (
               <div className="data-block">
                 {schedule.error && <CachedNotice>Schedule update failed — showing the previous plan.</CachedNotice>}
@@ -348,12 +390,26 @@ export function Dashboard() {
             {status.data && (
               <ChargeSettingsSection
                 status={status.data}
+                vehicles={vehicles.data ?? null}
                 onSetTarget={handleSetTarget}
                 onSetReadyBy={handleSetReadyBy}
                 onSetDayTargets={handleSetDayTargets}
                 onSetTripMode={handleSetTripMode}
+                onSetTomorrowOverride={handleSetTomorrowOverride}
+                onSetVehicle={handleSetVehicle}
+                onSetVehicleProfile={handleSetVehicleProfile}
                 onSetNotifications={handleSetNotifications}
               />
+            )}
+            {integrations.data ? (
+              <div className="data-block integration-health-block">
+                {integrations.error && <CachedNotice>Connection checks could not refresh.</CachedNotice>}
+                <IntegrationHealth data={integrations.data} />
+              </div>
+            ) : integrations.error ? (
+              <SectionError message="Couldn’t load integration health." onRetry={refetchIntegrations} />
+            ) : (
+              <SectionSkeleton height={120} />
             )}
           </aside>
         </div>

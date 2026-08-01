@@ -53,6 +53,14 @@ class TripModeUpdate(StrictRequestModel):
     readyBy: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
 
 
+class TomorrowOverrideUpdate(StrictRequestModel):
+    enabled: bool
+    targetPercent: int = Field(
+        default=80, ge=settings.TARGET_MIN, le=settings.TARGET_MAX
+    )
+    readyBy: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
+
+
 class NotificationPreferencesUpdate(StrictRequestModel):
     plugIn: bool
     chargeComplete: bool
@@ -122,6 +130,13 @@ class DayTargetsUpdateResponseModel(MutationOutcomeModel):
 
 class TripModeUpdateResponseModel(MutationOutcomeModel):
     enabled: bool
+    targetPercent: int | None
+    readyBy: str | None
+
+
+class TomorrowOverrideUpdateResponseModel(MutationOutcomeModel):
+    enabled: bool
+    date: datetime.date | None
     targetPercent: int | None
     readyBy: str | None
 
@@ -215,6 +230,13 @@ class TripModeModel(ContractModel):
     readyBy: str | None
 
 
+class TomorrowOverrideModel(ContractModel):
+    enabled: bool
+    date: datetime.date | None
+    targetPercent: int | None
+    readyBy: str | None
+
+
 class VehicleProfileModel(ContractModel):
     targetPercent: int
     readyBy: str | None
@@ -228,10 +250,31 @@ class StatusConfigModel(ContractModel):
     targetMax: int
     readyBy: str | None
     readyByIsManual: bool
+    effectiveTarget: int
+    effectiveReadyBy: str | None
+    effectiveTargetSource: Literal[
+        "trip", "tomorrow", "vehicle_profile", "weekday", "default"
+    ]
+    effectiveReadyBySource: Literal[
+        "trip", "tomorrow", "vehicle_profile", "default", "ohme", "none"
+    ]
     dayTargets: dict[str, int]
     tripMode: TripModeModel
+    tomorrowOverride: TomorrowOverrideModel
     notifications: NotificationPreferencesModel
     vehicleProfiles: dict[str, VehicleProfileModel]
+
+
+class IntegrationHealthModel(ContractModel):
+    id: Literal["ohme", "bluelink", "history", "tariff", "energy", "notifications"]
+    name: str
+    configured: bool
+    status: Literal["healthy", "configured", "attention", "disabled"]
+    detail: str
+
+
+class IntegrationsResponseModel(ContractModel):
+    integrations: list[IntegrationHealthModel]
 
 
 class AutomationModel(ContractModel):

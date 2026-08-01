@@ -4,6 +4,7 @@ Each test points ``settings.SETTINGS_PATH`` at a fresh ``tmp_path`` file so the
 read-modify-write helpers operate on a throwaway file with no cross-test bleed.
 """
 
+import datetime
 import glob
 import json
 
@@ -134,6 +135,30 @@ def test_trip_mode_round_trip_and_clear(settings_path):
 def test_load_trip_mode_rejects_invalid_values(settings_path, raw):
     _write_raw(settings_path, {"tripMode": raw})
     assert settings.load_trip_mode() is None
+
+
+# --- dated temporary override ---------------------------------------------
+
+
+def test_date_override_round_trip_and_clear(settings_path):
+    value = settings.DateOverride(datetime.date(2026, 8, 2), 95, "06:30")
+    assert settings.save_date_override(value) is True
+    assert settings.load_date_override() == value
+    assert settings.clear_date_override() is True
+    assert settings.load_date_override() is None
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"date": "not-a-date", "targetPercent": 90, "readyBy": None},
+        {"date": "2026-08-02", "targetPercent": 5, "readyBy": None},
+        {"date": "2026-08-02", "targetPercent": 90, "readyBy": "25:00"},
+    ],
+)
+def test_date_override_rejects_invalid_values(settings_path, raw):
+    _write_raw(settings_path, {"dateOverride": raw})
+    assert settings.load_date_override() is None
 
 
 # --- notification preferences --------------------------------------------
@@ -286,6 +311,9 @@ def test_setters_preserve_other_keys(settings_path):
     settings.save_vehicle_id("v1")
     settings.save_vehicle_profiles({"v1": settings.VehicleProfile(85, None)})
     settings.save_trip_mode(95, None)
+    settings.save_date_override(
+        settings.DateOverride(datetime.date(2026, 8, 2), 90, "06:00")
+    )
     settings.save_notification_preferences(
         settings.NotificationPreferences(weekly_digest=False)
     )
@@ -296,6 +324,9 @@ def test_setters_preserve_other_keys(settings_path):
     assert settings.load_vehicle_id() == "v1"
     assert settings.load_vehicle_profiles() == {"v1": settings.VehicleProfile(85, None)}
     assert settings.load_trip_mode() == (95, None)
+    assert settings.load_date_override() == settings.DateOverride(
+        datetime.date(2026, 8, 2), 90, "06:00"
+    )
     assert settings.load_notification_preferences().weekly_digest is False
     assert settings.load_session_active() is True
 
