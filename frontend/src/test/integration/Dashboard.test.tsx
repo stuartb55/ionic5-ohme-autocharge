@@ -143,6 +143,40 @@ describe('Dashboard integration', () => {
     expect(screen.getByText(/active: 80% · default plan/i)).toBeInTheDocument();
   });
 
+  it('keeps tariff and battery context with the live overview', async () => {
+    const rate = {
+      from: '2026-08-01T22:30:00Z',
+      to: '2026-08-01T23:00:00Z',
+      pricePerKwh: 0.069,
+    };
+    server.use(
+      http.get('*/api/tariff', () => HttpResponse.json({
+        enabled: true,
+        currency: 'GBP',
+        rates: [rate],
+        cheapest: [rate],
+      })),
+      http.get('*/api/soh-history', () => HttpResponse.json({
+        enabled: true,
+        history: [
+          { date: '2026-01-01T12:00:00Z', sohPercent: 99 },
+          { date: '2026-07-01T12:00:00Z', sohPercent: 98 },
+        ],
+      })),
+    );
+
+    render(<Dashboard />);
+
+    const context = await screen.findByRole('region', { name: 'Charging context' });
+    expect(within(context).getByRole('heading', { name: 'Upcoming prices' })).toBeInTheDocument();
+    expect(within(context).getByRole('heading', { name: 'Battery health' })).toBeInTheDocument();
+
+    const history = document.querySelector<HTMLElement>('.dashboard-secondary');
+    expect(history).not.toBeNull();
+    expect(within(history!).queryByRole('heading', { name: 'Upcoming prices' })).not.toBeInTheDocument();
+    expect(within(history!).queryByRole('heading', { name: 'Battery health' })).not.toBeInTheDocument();
+  });
+
   it('refetches statistics when the time range changes', async () => {
     const requested: string[] = [];
     server.use(

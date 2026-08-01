@@ -368,13 +368,34 @@ export function Dashboard() {
 
       <main className="sections" aria-busy={status.loading && !status.data}>
         <div className="dashboard-overview" id="today">
-          {status.data ? (
-            <StatusSection status={status.data} onChargeChanged={refetchStatus} />
-          ) : status.error ? (
-            <SectionError message="Couldn’t load live charging status." onRetry={refetchStatus} />
-          ) : (
-            <SectionSkeleton height={500} />
-          )}
+          <div className="overview-main">
+            {status.data ? (
+              <StatusSection status={status.data} onChargeChanged={refetchStatus} />
+            ) : status.error ? (
+              <SectionError message="Couldn’t load live charging status." onRetry={refetchStatus} />
+            ) : (
+              <SectionSkeleton height={500} />
+            )}
+
+            <section className="overview-supporting" aria-label="Charging context">
+              {tariff.data?.enabled ? (
+                <div className="data-block tariff-block">
+                  {tariff.error && <CachedNotice>Price update failed — showing saved rates.</CachedNotice>}
+                  <TariffSection data={tariff.data} />
+                </div>
+              ) : tariff.error && !tariff.data ? (
+                <SectionError message="Couldn’t load tariff prices." onRetry={refetchTariff} />
+              ) : null}
+              {soh.data?.enabled ? (
+                <div className="data-block soh-block">
+                  {soh.error && <CachedNotice>Battery-health update failed — showing saved data.</CachedNotice>}
+                  <SohTrendSection data={soh.data} />
+                </div>
+              ) : soh.error && !soh.data ? (
+                <SectionError message="Couldn’t load battery health." onRetry={refetchSoh} />
+              ) : null}
+            </section>
+          </div>
 
           <aside className="overview-sidebar" id="plan" aria-label="Charge plan and preferences">
             {schedule.data ? (
@@ -466,22 +487,6 @@ export function Dashboard() {
             </div>
           ) : sessions.error ? (
             <SectionError message="Couldn’t load recent sessions." onRetry={refetchSessions} />
-          ) : null}
-          {soh.data?.enabled ? (
-            <div className="data-block">
-              {soh.error && <CachedNotice>Battery-health update failed — showing saved data.</CachedNotice>}
-              <SohTrendSection data={soh.data} />
-            </div>
-          ) : soh.error && !soh.data ? (
-            <SectionError message="Couldn’t load battery health." onRetry={refetchSoh} />
-          ) : null}
-          {tariff.data?.enabled ? (
-            <div className="data-block">
-              {tariff.error && <CachedNotice>Price update failed — showing saved rates.</CachedNotice>}
-              <TariffSection data={tariff.data} />
-            </div>
-          ) : tariff.error && !tariff.data ? (
-            <SectionError message="Couldn’t load tariff prices." onRetry={refetchTariff} />
           ) : null}
           {energy.data?.enabled ? (
             <div className="data-block energy-block">
