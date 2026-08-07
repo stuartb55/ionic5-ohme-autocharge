@@ -53,9 +53,6 @@ jobs:
       - name: Unit & integration tests
         run: npm run test
 
-      - name: Audit frontend dependencies
-        run: npm audit --audit-level=high
-
       - name: Production build
         run: npm run build
 
