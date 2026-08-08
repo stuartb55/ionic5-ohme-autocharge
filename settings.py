@@ -250,7 +250,9 @@ def load_date_override() -> DateOverride | None:
         return None
     ready_by = raw.get("readyBy")
     if not TARGET_MIN <= target <= TARGET_MAX:
-        logger.warning("Persisted date-override target %s out of range — ignoring", target)
+        logger.warning(
+            "Persisted date-override target %s out of range — ignoring", target
+        )
         return None
     if ready_by is not None and parse_hhmm(ready_by) is None:
         logger.warning(

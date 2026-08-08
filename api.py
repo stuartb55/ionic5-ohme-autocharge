@@ -1694,9 +1694,8 @@ async def set_trip_mode(update: TripModeUpdate) -> JSONResponse:
 async def set_tomorrow_override(update: TomorrowOverrideUpdate) -> JSONResponse:
     """Set or cancel a dated plan valid now through tomorrow's local day."""
     if update.enabled:
-        tomorrow = datetime.datetime.now(ZoneInfo(config.TIMEZONE)).date() + datetime.timedelta(
-            days=1
-        )
+        today_local = datetime.datetime.now(ZoneInfo(config.TIMEZONE)).date()
+        tomorrow = today_local + datetime.timedelta(days=1)
         override = settings.DateOverride(
             date=tomorrow,
             target_percent=update.targetPercent,

@@ -103,7 +103,9 @@ def test_tomorrow_override_is_immediate_but_trip_still_wins(monkeypatch):
     today = datetime.date(2026, 8, 1)
     s = AppState()
     s.set_vehicle_profiles({"car-2": settings.VehicleProfile(85, "07:00")})
-    s.set_date_override(settings.DateOverride(today + datetime.timedelta(days=1), 95, "06:15"))
+    s.set_date_override(
+        settings.DateOverride(today + datetime.timedelta(days=1), 95, "06:15")
+    )
     with patch("state._today_local_date", return_value=today):
         assert s.effective_target_for("car-2") == 95
         assert s.effective_ready_by_for("car-2") == "06:15"

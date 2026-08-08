@@ -2066,10 +2066,8 @@ async def test_telemetry_resolves_durable_session_after_restart():
 # --- weekly digest --------------------------------------------------------------
 
 
-import datetime as _dt
-
 # 2026-06-01 is a Monday (weekday 0).
-_MONDAY_8AM = _dt.datetime(2026, 6, 1, 8, 0, tzinfo=_dt.timezone.utc)
+_MONDAY_8AM = dt.datetime(2026, 6, 1, 8, 0, tzinfo=dt.timezone.utc)
 
 
 def test_format_digest_gbp():
@@ -2492,7 +2490,10 @@ def test_tomorrow_override_persists_and_is_reflected_in_status(client):
         "targetPercent": 95,
         "readyBy": "06:30",
     }
-    assert client.get("/api/status").json()["config"]["effectiveTargetSource"] == "tomorrow"
+    assert (
+        client.get("/api/status").json()["config"]["effectiveTargetSource"]
+        == "tomorrow"
+    )
 
 
 def test_tomorrow_override_applies_immediately_to_overnight_charge(client):
