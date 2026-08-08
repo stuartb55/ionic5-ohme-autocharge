@@ -404,6 +404,91 @@ def test_data_quality_ignores_consumption_gaps_when_integration_is_disabled(clie
     assert body["consumptionConfigured"] is False
 
 
+def _consumption_summary(consumption: dict) -> dict:
+    return {
+        "sessions": {
+            "total": 3,
+            "completed": 3,
+            "missingActualEnergy": 0,
+            "missingActualCost": 0,
+        },
+        "telemetry": {"unlinkedLast24h": 0},
+        "consumption": consumption,
+        "daily": {"completeThrough": dt.date(2026, 7, 9)},
+    }
+
+
+def test_data_quality_treats_a_few_unsplit_intervals_as_normal(client):
+    summary = _consumption_summary(
+        {
+            "uncertainLast30d": 11,
+            "ingestedThrough": None,
+            "totalLast30d": 1440,
+            "importKwhLast30d": 812.0,
+            "unattributedKwhLast30d": 2.4,
+            "lastUncertainAt": dt.datetime(2026, 7, 8, 22, 30, tzinfo=dt.timezone.utc),
+        }
+    )
+    with (
+        patch("db.get_data_quality_summary", new=AsyncMock(return_value=summary)),
+        patch("octopus.is_enabled", return_value=True),
+        patch("octopus.consumption_is_enabled", return_value=True),
+    ):
+        body = client.get("/api/data-quality").json()
+
+    # 0.3% of the window's import: reported, but not an alert to chase.
+    assert body["status"] == "ok"
+    assert body["consumption"]["needsAttention"] is False
+    assert body["consumption"]["uncertainLast30d"] == 11
+    assert body["consumption"]["unattributedKwhLast30d"] == 2.4
+    assert body["consumption"]["lastUncertainDate"] == "2026-07-08"
+
+
+def test_data_quality_alerts_when_unsplit_energy_is_material(client):
+    summary = _consumption_summary(
+        {
+            "uncertainLast30d": 120,
+            "ingestedThrough": None,
+            "totalLast30d": 1440,
+            "importKwhLast30d": 800.0,
+            "unattributedKwhLast30d": 96.0,
+            "lastUncertainAt": dt.datetime(2026, 7, 9, 6, 0, tzinfo=dt.timezone.utc),
+        }
+    )
+    with (
+        patch("db.get_data_quality_summary", new=AsyncMock(return_value=summary)),
+        patch("octopus.is_enabled", return_value=True),
+        patch("octopus.consumption_is_enabled", return_value=True),
+    ):
+        body = client.get("/api/data-quality").json()
+
+    assert body["status"] == "attention"
+    assert body["consumption"]["needsAttention"] is True
+    assert body["consumption"]["lastUncertainDate"] == "2026-07-09"
+
+
+def test_data_quality_grades_unsplit_intervals_by_count_without_metered_energy(client):
+    summary = _consumption_summary(
+        {
+            "uncertainLast30d": 40,
+            "ingestedThrough": None,
+            "totalLast30d": 48,
+            "importKwhLast30d": 0.0,
+            "unattributedKwhLast30d": 0.0,
+            "lastUncertainAt": None,
+        }
+    )
+    with (
+        patch("db.get_data_quality_summary", new=AsyncMock(return_value=summary)),
+        patch("octopus.is_enabled", return_value=True),
+        patch("octopus.consumption_is_enabled", return_value=True),
+    ):
+        body = client.get("/api/data-quality").json()
+
+    assert body["status"] == "attention"
+    assert body["consumption"]["lastUncertainDate"] is None
+
+
 def test_data_quality_does_not_alert_for_costs_repaired_in_background(client):
     summary = {
         "sessions": {
@@ -2066,10 +2151,8 @@ async def test_telemetry_resolves_durable_session_after_restart():
 # --- weekly digest --------------------------------------------------------------
 
 
-import datetime as _dt
-
 # 2026-06-01 is a Monday (weekday 0).
-_MONDAY_8AM = _dt.datetime(2026, 6, 1, 8, 0, tzinfo=_dt.timezone.utc)
+_MONDAY_8AM = dt.datetime(2026, 6, 1, 8, 0, tzinfo=dt.timezone.utc)
 
 
 def test_format_digest_gbp():
@@ -2492,7 +2575,10 @@ def test_tomorrow_override_persists_and_is_reflected_in_status(client):
         "targetPercent": 95,
         "readyBy": "06:30",
     }
-    assert client.get("/api/status").json()["config"]["effectiveTargetSource"] == "tomorrow"
+    assert (
+        client.get("/api/status").json()["config"]["effectiveTargetSource"]
+        == "tomorrow"
+    )
 
 
 def test_tomorrow_override_applies_immediately_to_overnight_charge(client):

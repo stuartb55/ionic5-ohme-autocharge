@@ -5,7 +5,7 @@ export function dataQualityIssueCount(data: DataQualityResponse) {
   return [
     (data.sessions?.missingActualEnergy ?? 0) > 0,
     (data.telemetry?.unlinkedLast24h ?? 0) > 0,
-    data.consumptionConfigured && (data.consumption?.uncertainLast30d ?? 0) > 0,
+    data.consumptionConfigured && (data.consumption?.needsAttention ?? false),
   ].filter(Boolean).length;
 }
 

@@ -1760,6 +1760,27 @@ body {
   font-size: 0.78rem;
   line-height: 1.45;
 }
+.quality-check-action {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  gap: 0.35rem;
+  justify-self: start;
+  min-height: 44px;
+  padding: 0;
+  text-align: left;
+}
+.quality-check-action:hover { text-decoration: underline; }
+.quality-check-action:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 3px;
+}
 .quality-check-state {
   align-self: start;
   border-radius: 999px;

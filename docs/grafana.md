@@ -42,6 +42,10 @@ startup. `charge_sessions.session_key` is the durable idempotency key for a
 physical plug-in; new telemetry and event rows reference `charge_sessions.id`.
 `GET /api/data-quality` exposes non-sensitive aggregate completeness counters
 and cursor/cache freshness for a Grafana JSON/API datasource or external monitor.
+Alert on `consumption.needsAttention` rather than `consumption.uncertainLast30d`:
+a handful of half-hours that can't be split between the car and the house is
+normal (the charger just missed a few readings), and the flag is only set once
+that unsplit energy is a material share of the window's grid import.
 The same exact-unit evidence powers `GET /api/reports/monthly?month=YYYY-MM`:
 account-wide `daily_stats` totals remain separate from measured home-session
 totals, with explicit coverage and missing-data counts in JSON or CSV.

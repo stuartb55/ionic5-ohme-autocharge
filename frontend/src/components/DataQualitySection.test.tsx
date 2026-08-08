@@ -13,7 +13,15 @@ const quality: DataQualityResponse = {
   consumptionConfigured: true,
   sessions: { total: 12, completed: 10, missingActualEnergy: 0, missingActualCost: 0 },
   telemetry: { unlinkedLast24h: 0 },
-  consumption: { uncertainLast30d: 0, ingestedThrough: '2026-07-10T23:30:00Z' },
+  consumption: {
+    uncertainLast30d: 0,
+    ingestedThrough: '2026-07-10T23:30:00Z',
+    totalLast30d: 1440,
+    importKwhLast30d: 812,
+    unattributedKwhLast30d: 0,
+    lastUncertainDate: null,
+    needsAttention: false,
+  },
   daily: { completeThrough: '2026-07-10' },
   statisticsCache: { available: true, ageSeconds: 45 },
 };
@@ -24,13 +32,14 @@ describe('DataQualitySection', () => {
       <DataQualitySection
         data={{ ...quality, persistenceAvailable: false }}
         onReviewSessions={vi.fn()}
+        onViewEnergyDay={vi.fn()}
       />,
     );
     expect(container).toBeEmptyDOMElement();
   });
 
   it('explains clear checks and separates freshness metadata', () => {
-    render(<DataQualitySection data={quality} onReviewSessions={vi.fn()} />);
+    render(<DataQualitySection data={quality} onReviewSessions={vi.fn()} onViewEnergyDay={vi.fn()} />);
 
     expect(screen.getByText('No reporting gaps found')).toBeInTheDocument();
     expect(screen.getByText('Completeness checks')).toBeInTheDocument();
@@ -49,7 +58,7 @@ describe('DataQualitySection', () => {
       sessions: { ...quality.sessions!, missingActualEnergy: 2, missingActualCost: 1 },
     };
     render(
-      <DataQualitySection data={attention} onReviewSessions={onReviewSessions} />,
+      <DataQualitySection data={attention} onReviewSessions={onReviewSessions} onViewEnergyDay={vi.fn()} />,
     );
 
     expect(screen.getByText('Some reporting data needs attention')).toBeInTheDocument();
@@ -59,6 +68,67 @@ describe('DataQualitySection', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /review 2 affected sessions/i }));
     expect(onReviewSessions).toHaveBeenCalledWith('missing_energy');
+  });
+
+  it('reports small unsplit energy gaps without demanding attention', async () => {
+    const onViewEnergyDay = vi.fn();
+    const minorGaps = {
+      ...quality,
+      consumption: {
+        ...quality.consumption!,
+        uncertainLast30d: 11,
+        unattributedKwhLast30d: 2.4,
+        lastUncertainDate: '2026-07-08',
+        needsAttention: false,
+      },
+    };
+    render(
+      <DataQualitySection
+        data={minorGaps}
+        onReviewSessions={vi.fn()}
+        onViewEnergyDay={onViewEnergyDay}
+      />,
+    );
+
+    expect(screen.getByText('No reporting gaps found')).toBeInTheDocument();
+    expect(dataQualityStatusLabel(minorGaps)).toBe('No issues found');
+    const energyCheck = screen.getByText('Car vs home energy').closest('li');
+    expect(within(energyCheck!).getByText('Good')).toBeInTheDocument();
+    expect(within(energyCheck!).getByText(/2\.4 kWh of the 812 kWh/)).toBeInTheDocument();
+    expect(within(energyCheck!).getByText(/11 of 1,440 half-hours/)).toBeInTheDocument();
+
+    await userEvent.click(within(energyCheck!).getByRole('button', { name: /on the chart/i }));
+    expect(onViewEnergyDay).toHaveBeenCalledWith('2026-07-08');
+  });
+
+  it('explains what to do when unsplit energy is material', () => {
+    const attention = {
+      ...quality,
+      status: 'attention' as const,
+      consumption: {
+        ...quality.consumption!,
+        uncertainLast30d: 120,
+        importKwhLast30d: 800,
+        unattributedKwhLast30d: 96,
+        lastUncertainDate: '2026-07-09',
+        needsAttention: true,
+      },
+    };
+    render(
+      <DataQualitySection
+        data={attention}
+        onReviewSessions={vi.fn()}
+        onViewEnergyDay={vi.fn()}
+      />,
+    );
+
+    const energyCheck = screen.getByText('Car vs home energy').closest('li');
+    expect(within(energyCheck!).getByText('Needs attention')).toBeInTheDocument();
+    expect(within(energyCheck!).getByText(/charger stopped reporting/i)).toBeInTheDocument();
+    expect(within(energyCheck!).getByRole('button', { name: /on the chart/i })).toBeInTheDocument();
+    expect(dataQualityStatusLabel(attention)).toBe('1 check needs attention');
+    // Nothing to review in session history, so that button stays away.
+    expect(screen.queryByRole('button', { name: /affected session/i })).not.toBeInTheDocument();
   });
 
   it('treats optional integrations as neutral when they are not configured', () => {
@@ -71,6 +141,7 @@ describe('DataQualitySection', () => {
           consumption: null,
         }}
         onReviewSessions={vi.fn()}
+        onViewEnergyDay={vi.fn()}
       />,
     );
 
@@ -92,6 +163,7 @@ describe('DataQualitySection', () => {
           daily: null,
         }}
         onReviewSessions={vi.fn()}
+        onViewEnergyDay={vi.fn()}
       />,
     );
 

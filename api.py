@@ -1381,6 +1381,42 @@ async def ready() -> JSONResponse:
     )
 
 
+#: Share of the 30-day grid import that must be unsplit before the car-vs-home
+#: check is worth surfacing. A few unsplit half-hours per month is normal — the
+#: charger is sampled every ``POLL_INTERVAL`` and any restart or missed sample
+#: leaves an interval that :func:`energy.merge_usage` refuses to guess at. Only a
+#: material share means the House vs car split is actually misleading.
+_UNCERTAIN_ENERGY_ATTENTION_SHARE = 0.05
+
+
+def _grade_consumption_quality(consumption: dict[str, Any]) -> dict[str, Any]:
+    """Add severity and a drill-down day to the raw unsplit-interval counters."""
+    graded = dict(consumption)
+    uncertain = graded.get("uncertainLast30d") or 0
+    import_kwh = graded.get("importKwhLast30d") or 0.0
+    unattributed_kwh = graded.get("unattributedKwhLast30d") or 0.0
+    total = graded.get("totalLast30d") or 0
+    if uncertain <= 0:
+        share = 0.0
+    elif import_kwh > 0:
+        share = unattributed_kwh / import_kwh
+    else:
+        # No metered energy to weigh the gaps against (e.g. the whole window
+        # failed to price), so fall back to the share of intervals affected.
+        share = uncertain / total if total > 0 else 1.0
+    graded["needsAttention"] = share >= _UNCERTAIN_ENERGY_ATTENTION_SHARE
+    last_uncertain = graded.pop("lastUncertainAt", None)
+    if isinstance(last_uncertain, datetime.datetime):
+        if last_uncertain.tzinfo is None:
+            last_uncertain = last_uncertain.replace(tzinfo=datetime.timezone.utc)
+        graded["lastUncertainDate"] = last_uncertain.astimezone(
+            _STATS_TZ or datetime.timezone.utc
+        ).date()
+    else:
+        graded["lastUncertainDate"] = None
+    return graded
+
+
 @app.get("/api/data-quality", response_model=DataQualityResponseModel)
 async def get_data_quality() -> DataQualityResponseModel:
     """Read-only completeness counters for operations and alerting."""
@@ -1404,10 +1440,11 @@ async def get_data_quality() -> DataQualityResponseModel:
             daily=None,
             statisticsCache={"available": cache_available, "ageSeconds": cache_age},
         )
+    consumption = _grade_consumption_quality(summary["consumption"])
     needs_attention = (
         summary["sessions"]["missingActualEnergy"] > 0
         or summary["telemetry"]["unlinkedLast24h"] > 0
-        or (consumption_configured and summary["consumption"]["uncertainLast30d"] > 0)
+        or (consumption_configured and consumption["needsAttention"])
     )
     return DataQualityResponseModel(
         status="attention" if needs_attention else "ok",
@@ -1417,7 +1454,7 @@ async def get_data_quality() -> DataQualityResponseModel:
         consumptionConfigured=consumption_configured,
         sessions=summary["sessions"],
         telemetry=summary["telemetry"],
-        consumption=summary["consumption"],
+        consumption=consumption,
         daily=summary["daily"],
         statisticsCache={"available": cache_available, "ageSeconds": cache_age},
     )
@@ -1694,9 +1731,8 @@ async def set_trip_mode(update: TripModeUpdate) -> JSONResponse:
 async def set_tomorrow_override(update: TomorrowOverrideUpdate) -> JSONResponse:
     """Set or cancel a dated plan valid now through tomorrow's local day."""
     if update.enabled:
-        tomorrow = datetime.datetime.now(ZoneInfo(config.TIMEZONE)).date() + datetime.timedelta(
-            days=1
-        )
+        today_local = datetime.datetime.now(ZoneInfo(config.TIMEZONE)).date()
+        tomorrow = today_local + datetime.timedelta(days=1)
         override = settings.DateOverride(
             date=tomorrow,
             target_percent=update.targetPercent,

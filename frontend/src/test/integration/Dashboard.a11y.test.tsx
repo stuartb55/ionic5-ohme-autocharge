@@ -35,7 +35,7 @@ describe('Dashboard accessibility', () => {
             missingActualCost: 1,
           },
           telemetry: { unlinkedLast24h: 0 },
-          consumption: { uncertainLast30d: 0, ingestedThrough: '2026-07-10T23:30:00Z' },
+          consumption: { uncertainLast30d: 0, ingestedThrough: '2026-07-10T23:30:00Z', totalLast30d: 0, importKwhLast30d: 0, unattributedKwhLast30d: 0, lastUncertainDate: null, needsAttention: false },
           daily: { completeThrough: '2026-07-10' },
           statisticsCache: { available: true, ageSeconds: 45 },
         }),

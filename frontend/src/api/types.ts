@@ -502,7 +502,20 @@ export interface DataQualityResponse {
     missingActualCost: number;
   } | null;
   telemetry: { unlinkedLast24h: number } | null;
-  consumption: { uncertainLast30d: number; ingestedThrough: string | null } | null;
+  consumption: {
+    /** Half-hour meter intervals the car/house split could not be trusted for. */
+    uncertainLast30d: number;
+    ingestedThrough: string | null;
+    /** Imported half-hour intervals in the same 30-day window. */
+    totalLast30d: number;
+    importKwhLast30d: number;
+    /** Metered energy left unsplit, i.e. the size of the reporting gap. */
+    unattributedKwhLast30d: number;
+    /** Local YYYY-MM-DD of the most recent unsplit interval, for the drill-down. */
+    lastUncertainDate: string | null;
+    /** Graded server-side: true only when the unsplit share is material. */
+    needsAttention: boolean;
+  } | null;
   daily: { completeThrough: string | null } | null;
   statisticsCache: { available: boolean; ageSeconds: number | null };
 }

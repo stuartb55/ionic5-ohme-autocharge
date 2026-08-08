@@ -971,7 +971,16 @@ async def get_data_quality_summary() -> dict[str, Any] | None:
                       AND quality_status NOT IN ('good', 'timing_adjusted')),
                   (SELECT MAX(stat_date) FROM daily_stats WHERE is_complete),
                   (SELECT MAX(cursor_at) FROM ingestion_cursors
-                    WHERE source = 'octopus_consumption')
+                    WHERE source = 'octopus_consumption'),
+                  (SELECT COUNT(*) FROM grid_consumption
+                    WHERE interval_start >= now() - interval '30 days'),
+                  (SELECT COALESCE(SUM(import_kwh), 0) FROM grid_consumption
+                    WHERE interval_start >= now() - interval '30 days'),
+                  (SELECT COALESCE(SUM(unattributed_kwh), 0) FROM grid_consumption
+                    WHERE interval_start >= now() - interval '30 days'),
+                  (SELECT MAX(interval_start) FROM grid_consumption
+                    WHERE interval_start >= now() - interval '30 days'
+                      AND quality_status NOT IN ('good', 'timing_adjusted'))
                 """
             )
             row = await cur.fetchone()
@@ -985,7 +994,18 @@ async def get_data_quality_summary() -> dict[str, Any] | None:
                 "missingActualCost": row[3],
             },
             "telemetry": {"unlinkedLast24h": row[4]},
-            "consumption": {"uncertainLast30d": row[5], "ingestedThrough": row[7]},
+            # Counts alone can't say whether the split is materially wrong, so the
+            # window's totals and the last affected interval travel with them: the
+            # API grades severity from the share of energy involved and the
+            # dashboard links straight to the affected day.
+            "consumption": {
+                "uncertainLast30d": row[5],
+                "ingestedThrough": row[7],
+                "totalLast30d": row[8],
+                "importKwhLast30d": float(row[9] or 0),
+                "unattributedKwhLast30d": float(row[10] or 0),
+                "lastUncertainAt": row[11],
+            },
             "daily": {"completeThrough": row[6]},
         }
     except Exception:
