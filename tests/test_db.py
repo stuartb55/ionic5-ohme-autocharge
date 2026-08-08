@@ -741,6 +741,10 @@ async def test_data_quality_summary_maps_aggregate_counts():
         4,
         dt.date(2026, 7, 8),
         dt.datetime(2026, 7, 9, tzinfo=dt.timezone.utc),
+        1440,
+        812.5,
+        2.25,
+        dt.datetime(2026, 7, 7, 19, 30, tzinfo=dt.timezone.utc),
     )
     conn = _FakeConn(_FakeCursor(row=row))
     db._pool = _FakePool(conn)
@@ -755,7 +759,16 @@ async def test_data_quality_summary_maps_aggregate_counts():
         "missingActualCost": 2,
     }
     assert result["telemetry"]["unlinkedLast24h"] == 3
-    assert result["consumption"]["uncertainLast30d"] == 4
+    # The unsplit intervals carry the window totals needed to weigh them, plus
+    # the last affected interval for the dashboard drill-down.
+    assert result["consumption"] == {
+        "uncertainLast30d": 4,
+        "ingestedThrough": dt.datetime(2026, 7, 9, tzinfo=dt.timezone.utc),
+        "totalLast30d": 1440,
+        "importKwhLast30d": 812.5,
+        "unattributedKwhLast30d": 2.25,
+        "lastUncertainAt": dt.datetime(2026, 7, 7, 19, 30, tzinfo=dt.timezone.utc),
+    }
 
 
 async def test_vehicle_driving_metrics_pairs_only_valid_complete_intervals():

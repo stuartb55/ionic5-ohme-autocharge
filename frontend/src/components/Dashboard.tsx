@@ -129,6 +129,7 @@ export function Dashboard() {
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const diagnosticsAutoOpened = useRef(false);
   const historyRef = useRef<HTMLDivElement>(null);
+  const energyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -175,8 +176,7 @@ export function Dashboard() {
     }
   }, [quality.data?.persistenceAvailable, quality.data?.status]);
 
-  const scrollToHistory = useCallback((moveFocus: boolean) => {
-    const target = historyRef.current;
+  const scrollToElement = useCallback((target: HTMLElement | null, moveFocus: boolean) => {
     if (!target) return;
     const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     target.scrollIntoView?.({
@@ -186,6 +186,11 @@ export function Dashboard() {
     if (moveFocus) target.focus({ preventScroll: true });
   }, []);
 
+  const scrollToHistory = useCallback(
+    (moveFocus: boolean) => scrollToElement(historyRef.current, moveFocus),
+    [scrollToElement],
+  );
+
   const handleReviewSessions = useCallback(
     (filter: SessionReviewFilter) => {
       setSessionReview(filter);
@@ -193,6 +198,15 @@ export function Dashboard() {
       window.requestAnimationFrame(() => scrollToHistory(true));
     },
     [scrollToHistory],
+  );
+
+  /** Open the House vs car chart on a day a data check flagged. */
+  const handleViewEnergyDay = useCallback(
+    (date: string) => {
+      setEnergyDate(date);
+      window.requestAnimationFrame(() => scrollToElement(energyRef.current, true));
+    },
+    [scrollToElement],
   );
 
   useEffect(() => {
@@ -489,7 +503,7 @@ export function Dashboard() {
             <SectionError message="Couldn’t load recent sessions." onRetry={refetchSessions} />
           ) : null}
           {energy.data?.enabled ? (
-            <div className="data-block energy-block">
+            <div className="data-block energy-block" ref={energyRef} tabIndex={-1}>
               {energy.error && <CachedNotice>Energy update failed — showing saved usage.</CachedNotice>}
               <EnergyUsageSection data={energy.data} onDateChange={setEnergyDate} />
             </div>
@@ -520,6 +534,7 @@ export function Dashboard() {
             <DataQualitySection
               data={quality.data}
               onReviewSessions={handleReviewSessions}
+              onViewEnergyDay={handleViewEnergyDay}
             />
           </details>
         )}

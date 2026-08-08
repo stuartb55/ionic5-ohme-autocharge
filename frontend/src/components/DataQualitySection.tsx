@@ -6,6 +6,7 @@ import {
   dataQualityIssueCount,
   dataQualityStatusLabel,
 } from '../utils/dataQuality';
+import { formatKwh } from '../utils/format';
 
 type CheckState = 'attention' | 'ok' | 'neutral';
 
@@ -15,6 +16,8 @@ interface QualityCheck {
   state: CheckState;
   status: string;
   description: string;
+  /** Optional drill-down that takes the reader to the affected data. */
+  action?: { label: string; onClick: () => void };
 }
 
 function countLabel(value: number, singular: string, plural = `${singular}s`) {
@@ -66,18 +69,94 @@ function CheckRow({ check }: { check: QualityCheck }) {
       <span className="quality-check-copy">
         <strong>{check.title}</strong>
         <span>{check.description}</span>
+        {check.action && (
+          <button type="button" className="quality-check-action" onClick={check.action.onClick}>
+            {check.action.label}
+            <span aria-hidden="true">→</span>
+          </button>
+        )}
       </span>
       <span className={`quality-check-state ${check.state}`}>{check.status}</span>
     </li>
   );
 }
 
+/**
+ * The car/house split of a metered half-hour is dropped rather than guessed when
+ * the charger's readings don't cover it (see ``energy.merge_usage``). A few such
+ * intervals a month are normal, so this only asks for attention when the backend
+ * grades the unsplit energy as a material share — otherwise it says what the
+ * small gap is and offers to show it on the chart.
+ */
+function homeEnergyCheck(
+  consumption: DataQualityResponse['consumption'],
+  onViewEnergyDay: (date: string) => void,
+): QualityCheck {
+  const base = { key: 'home-energy', title: 'Car vs home energy' } as const;
+  if (!consumption) {
+    return {
+      ...base,
+      state: 'neutral',
+      status: 'Not set up',
+      description:
+        'Household energy checks will appear after Octopus consumption is configured.',
+    };
+  }
+  const uncertain = consumption.uncertainLast30d ?? 0;
+  if (uncertain <= 0) {
+    return {
+      ...base,
+      state: 'ok',
+      status: 'Good',
+      description:
+        'Every imported half-hour of the last 30 days was split between the car and the rest of the house.',
+    };
+  }
+
+  const unattributed = formatKwh(consumption.unattributedKwhLast30d ?? 0);
+  const imported = formatKwh(consumption.importKwhLast30d ?? 0);
+  const total = consumption.totalLast30d ?? 0;
+  const periods = total > 0
+    ? `${uncertain} of ${total.toLocaleString()} half-hours`
+    : countLabel(uncertain, 'half-hour');
+  const affectedDay = consumption.lastUncertainDate;
+  const action = affectedDay
+    ? {
+        label: `See ${dateLabel(affectedDay)} on the chart`,
+        onClick: () => onViewEnergyDay(affectedDay),
+      }
+    : undefined;
+
+  if (!consumption.needsAttention) {
+    return {
+      ...base,
+      state: 'ok',
+      status: 'Good',
+      description:
+        `${unattributed} of the ${imported} imported in the last 30 days (${periods}) isn’t split between the car and the house, `
+        + 'because the charger didn’t report over those minutes. It’s shown as “unattributed” on the House vs car chart rather than guessed, and it’s too small to skew the split.',
+      action,
+    };
+  }
+  return {
+    ...base,
+    state: 'attention',
+    status: 'Needs attention',
+    description:
+      `${unattributed} of the ${imported} imported in the last 30 days (${periods}) couldn’t be split between the car and the house, `
+      + 'so the House vs car chart shows that much as “unattributed”. The charger stopped reporting while it was plugged in — check it stays online (its readings are the “Charger readings” check above) and avoid restarting the app mid-charge. Past gaps can’t be recovered; new charges will split correctly once readings are continuous.',
+    action,
+  };
+}
+
 export function DataQualitySection({
   data,
   onReviewSessions,
+  onViewEnergyDay,
 }: {
   data: DataQualityResponse;
   onReviewSessions: (filter: SessionReviewFilter) => void;
+  onViewEnergyDay: (date: string) => void;
 }) {
   if (!data.persistenceAvailable) return null;
 
@@ -85,9 +164,7 @@ export function DataQualitySection({
   const completed = sessions?.completed ?? 0;
   const energyMissing = sessions?.missingActualEnergy ?? 0;
   const unlinked = data.telemetry?.unlinkedLast24h ?? 0;
-  const uncertain = data.consumptionConfigured
-    ? (data.consumption?.uncertainLast30d ?? 0)
-    : 0;
+  const consumption = data.consumptionConfigured ? data.consumption : null;
   const issueCount = dataQualityIssueCount(data);
   const sessionIssueTotal = energyMissing;
   const sessionReviewFilter: SessionReviewFilter = 'missing_energy';
@@ -119,25 +196,7 @@ export function DataQualitySection({
             } not attached to a session in the last 24 hours.`
           : 'All connected charger readings were attached to a session in the last 24 hours.',
     },
-    {
-      key: 'home-energy',
-      title: 'Car vs home energy',
-      state: !data.consumptionConfigured
-        ? 'neutral'
-        : uncertain > 0
-          ? 'attention'
-          : 'ok',
-      status: !data.consumptionConfigured
-        ? 'Not set up'
-        : uncertain > 0
-          ? 'Needs attention'
-          : 'Good',
-      description: !data.consumptionConfigured
-        ? 'Household energy checks will appear after Octopus consumption is configured.'
-        : uncertain > 0
-          ? `${countLabel(uncertain, 'half-hour period')} could not be confidently split between the car and home in the last 30 days.`
-          : 'Every imported half-hour period was confidently split between the car and home.',
-    },
+    homeEnergyCheck(consumption, onViewEnergyDay),
   ];
   const attentionChecks = checks.filter((check) => check.state === 'attention');
   const remainingChecks = checks.filter((check) => check.state !== 'attention');

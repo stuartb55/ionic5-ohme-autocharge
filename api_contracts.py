@@ -455,6 +455,15 @@ class TelemetryQualityModel(BaseModel):
 class ConsumptionQualityModel(BaseModel):
     uncertainLast30d: int
     ingestedThrough: datetime.datetime | None
+    totalLast30d: int = 0
+    importKwhLast30d: float = 0.0
+    unattributedKwhLast30d: float = 0.0
+    #: Local (``config.TIMEZONE``) day of the most recent unsplit interval, so the
+    #: dashboard can open the House vs car chart on a day that shows the gap.
+    lastUncertainDate: datetime.date | None = None
+    #: True only when the unsplit energy is a material share of the window's
+    #: import. A handful of intervals is expected and is not a fault to fix.
+    needsAttention: bool = False
 
 
 class DailyQualityModel(BaseModel):

@@ -80,7 +80,7 @@ function demoApi(): Plugin {
               total: 12, completed: 10, missingActualEnergy: 1, missingActualCost: 1,
             },
             telemetry: { unlinkedLast24h: 0 },
-            consumption: { uncertainLast30d: 0, ingestedThrough: null },
+            consumption: { uncertainLast30d: 0, ingestedThrough: null, totalLast30d: 0, importKwhLast30d: 0, unattributedKwhLast30d: 0, lastUncertainDate: null, needsAttention: false },
             daily: { completeThrough: new Date(now - 86_400_000).toISOString().slice(0, 10) },
             statisticsCache: { available: true, ageSeconds: 30 },
           },
