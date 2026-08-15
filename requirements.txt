@@ -1,13 +1,13 @@
 # Direct dependencies are pinned exactly so their upgrades are reviewed through
 # Renovate. Transitive resolution is still handled by pip; the built container
 # image remains the immutable deployment artifact.
-hyundai-kia-connect-api==4.26.1
+hyundai-kia-connect-api==4.26.3
 ohme==1.9.1
 aiohttp==3.14.3
 python-dotenv==1.2.2
 fastapi==0.141.1
-uvicorn[standard]==0.52.1
+uvicorn[standard]==0.52.3
 psycopg[binary]==3.3.4
 psycopg-pool==3.3.1
 alembic==1.19.1
-SQLAlchemy==2.0.51
+SQLAlchemy==2.0.52
