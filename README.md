@@ -206,7 +206,7 @@ npm run build    # type-check + production build to dist/
 | `GET /api/tariff` | Upcoming Octopus rates + cheapest slots (`enabled: false` when unconfigured) |
 | `GET /api/energy-usage?date=YYYY-MM-DD` | A day's half-hourly whole-house import split into car vs rest-of-house + totals (default yesterday; `enabled: false` when unconfigured) |
 | `GET /api/vehicles` | Vehicles on the Hyundai account, with the selected one flagged |
-| `POST /api/refresh` | Force a live re-read from Ohme (rate-limited) |
+| `POST /api/refresh` | Force a live re-read from Ohme and Bluelink (rate-limited); `vehicle` reports the car read separately |
 | `POST /api/charge/pause` · `POST /api/charge/resume` | Pause / resume the active charge session |
 | `PUT /api/charge/max-charge` | Toggle max-charge ("boost") — `{"enabled": true\|false}` |
 | `PUT /api/settings/target` | Set the charge target — `{"targetPercent": N}` |

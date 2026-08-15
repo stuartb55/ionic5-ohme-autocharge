@@ -299,6 +299,16 @@ export function Dashboard() {
     setMutationWarning(null);
     void api
       .refresh()
+      .then((result) => {
+        // The charger read succeeded but the car did not answer — say so, so a
+        // refresh that leaves the vehicle readings untouched doesn't look like
+        // it worked.
+        if (result.vehicle === 'failed') {
+          setMutationWarning(
+            'Refreshed the charger, but the car could not be reached. Vehicle readings are unchanged.',
+          );
+        }
+      })
       .catch(() => {
         setMutationWarning('The live charger refresh failed. Showing the latest cached readings.');
       })

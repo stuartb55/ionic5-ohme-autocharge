@@ -129,10 +129,13 @@ export interface RefreshResponse {
   ok: boolean;
   updatedAt: string | null;
   ready: boolean;
+  /** Outcome of the Bluelink re-read; 'failed' means charger-only data. */
+  vehicle: VehicleReadStatus;
 }
 
 export type PersistenceStatus = 'saved' | 'memory_only';
 export type ApplyStatus = 'applied' | 'not_connected' | 'already_at_target' | 'failed';
+export type VehicleReadStatus = 'ok' | 'failed';
 
 export interface MutationOutcome {
   persistenceStatus: PersistenceStatus;

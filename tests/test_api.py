@@ -1021,7 +1021,8 @@ def test_refresh_rebuilds_snapshot_and_clears_stats_cache(client):
     # Seed a stale stats cache to prove refresh invalidates it.
     api._summary_cache.update(key="days=7", value={"stale": True}, at=9e9)
 
-    resp = client.post("/api/refresh")
+    with patch.object(bluelink, "get_vehicle_state", return_value=_vstate(41)):
+        resp = client.post("/api/refresh")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -1041,13 +1042,105 @@ def test_refresh_rate_limited_within_min_interval(client):
     mock_client._charge_session = {"mode": "SMART_CHARGE"}
     store.client = mock_client
 
-    assert client.post("/api/refresh").status_code == 200
-    resp = client.post("/api/refresh")
+    with patch.object(bluelink, "get_vehicle_state", return_value=_vstate(41)) as read:
+        assert client.post("/api/refresh").status_code == 200
+        resp = client.post("/api/refresh")
 
     assert resp.status_code == 429
     assert int(resp.headers["Retry-After"]) >= 1
-    # Only the first call reached Ohme.
+    # Only the first call reached either upstream.
     assert mock_client.async_get_charge_session.await_count == 1
+    assert read.call_count == 1
+
+
+def test_refresh_rereads_vehicle_from_bluelink(client):
+    """The manual refresh must re-read the car, not just the charger."""
+    mock_client = _charging_client()
+    mock_client.async_get_charge_session = AsyncMock()
+    store.client = mock_client
+    store.last_soc = None
+
+    with patch.object(
+        bluelink, "get_vehicle_state", return_value=_vstate(36, range_miles=114)
+    ) as read:
+        resp = client.post("/api/refresh")
+
+    assert resp.status_code == 200
+    assert resp.json()["vehicle"] == "ok"
+    read.assert_called_once()
+    assert store.last_soc == 36
+    assert store.last_range_miles == 114
+
+
+def test_refresh_reports_vehicle_failure_without_failing_the_charger_read(client):
+    """An unreachable car must not discard a good charger reading."""
+    mock_client = _charging_client()
+    mock_client.async_get_charge_session = AsyncMock()
+    store.client = mock_client
+    store.record_vehicle_state(_vstate(52))
+
+    with patch.object(
+        bluelink, "get_vehicle_state", side_effect=RuntimeError("asleep")
+    ):
+        resp = client.post("/api/refresh")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["vehicle"] == "failed"
+    # The charger snapshot still refreshed, and the last good SOC is kept.
+    assert store.status.charger_status == "charging"
+    assert store.last_soc == 52
+
+
+def test_refresh_clears_a_blocked_automation_when_the_vehicle_answers(client):
+    """A recovered read moves the banner off the stale boot-time failure."""
+    mock_client = _charging_client()
+    mock_client.async_get_charge_session = AsyncMock()
+    store.client = mock_client
+    store.record_automation_attempt("error", "bluelink_read_failed")
+    failed_at = store.automation_last_attempt_at
+
+    with patch.object(bluelink, "get_vehicle_state", return_value=_vstate(36)):
+        assert client.post("/api/refresh").json()["vehicle"] == "ok"
+
+    # "pending", not "configured": the blocker is gone, but nothing has been
+    # written to Ohme — the poll loop still owns configuring the session.
+    assert store.automation_state == "pending"
+    assert store.automation_error_code is None
+    assert store.automation_last_attempt_at != failed_at
+
+
+def test_refresh_advances_last_attempt_when_the_retry_also_fails(client):
+    """A failed retry must read as fresh, not as the untouched original error."""
+    mock_client = _charging_client()
+    mock_client.async_get_charge_session = AsyncMock()
+    store.client = mock_client
+    store.record_automation_attempt("error", "bluelink_read_failed")
+    failed_at = store.automation_last_attempt_at
+
+    with patch.object(
+        bluelink, "get_vehicle_state", side_effect=RuntimeError("still stale")
+    ):
+        assert client.post("/api/refresh").json()["vehicle"] == "failed"
+
+    assert store.automation_state == "error"
+    assert store.automation_error_code == "bluelink_read_failed"
+    assert store.automation_last_attempt_at != failed_at
+
+
+def test_refresh_does_not_flip_a_configured_session_to_error(client):
+    """A transient display-read blip must not raise a false alarm."""
+    mock_client = _charging_client()
+    mock_client.async_get_charge_session = AsyncMock()
+    store.client = mock_client
+    store.record_automation_attempt("configured")
+
+    with patch.object(bluelink, "get_vehicle_state", side_effect=RuntimeError("blip")):
+        assert client.post("/api/refresh").json()["vehicle"] == "failed"
+
+    assert store.automation_state == "configured"
+    assert store.automation_error_code is None
 
 
 def test_refresh_502_on_upstream_error(client):
