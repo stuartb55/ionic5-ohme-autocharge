@@ -73,6 +73,7 @@ from api_contracts import (
     TripModeUpdateResponseModel,
     VehicleProfileUpdate,
     VehicleProfileUpdateResponseModel,
+    VehicleReadStatus,
     VehiclesResponseModel,
     VehicleUpdate,
     VehicleUpdateResponseModel,
@@ -2762,19 +2763,66 @@ async def set_max_charge(update: MaxChargeUpdate) -> JSONResponse:
     )
 
 
+async def _refresh_vehicle_state() -> VehicleReadStatus:
+    """Re-read the vehicle from Bluelink on behalf of a manual refresh.
+
+    Deliberately runs outside ``client_lock``: that lock guards the Ohme client,
+    the Bluelink read has its own single-flight guard, and holding both would let
+    a slow car read block the poll loop's charger read.
+
+    This is a *display* refresh — it never writes a target to Ohme, which stays
+    the poll loop's job. It does move the automation attempt when the automation
+    is currently blocked on this exact read, so the dashboard's error banner
+    reflects the retry the user just asked for instead of a stale boot-time
+    failure:
+
+    * succeeds while blocked → ``pending`` (connected) or ``idle`` (not): the
+      blocker is gone and the next poll can configure. Deliberately *not*
+      ``configured`` — nothing has been sent to Ohme yet.
+    * fails while blocked → re-record the same error so ``lastAttemptAt``
+      advances and the banner reads as a fresh, failed retry rather than an
+      untouched old one.
+
+    A healthy automation state is never flipped to error by a failed display
+    read: that session's target is already set, and a transient Bluelink blip
+    must not raise a false alarm about it.
+    """
+    blocked = store.automation_error_code == "bluelink_read_failed"
+    try:
+        vehicle = await bluelink.get_vehicle_state_async(store.selected_vehicle_id)
+    except Exception:
+        logger.warning(
+            "Manual refresh could not read the vehicle from Bluelink", exc_info=True
+        )
+        if blocked:
+            store.record_automation_attempt("error", "bluelink_read_failed")
+        return "failed"
+    store.record_vehicle_state(vehicle)
+    if blocked:
+        store.record_automation_attempt("pending" if store.status.connected else "idle")
+    return "ok"
+
+
 @app.post(
     "/api/refresh",
     dependencies=[Depends(require_csrf_header)],
     response_model=RefreshResponseModel,
 )
 async def refresh() -> JSONResponse:
-    """Force an immediate live re-read from Ohme and rebuild the cached snapshot.
+    """Force an immediate live re-read from Ohme and Bluelink, rebuilding the
+    cached snapshot.
 
     The read endpoints (``/api/status``, ``/api/schedule``) serve a snapshot that
     the background loop only refreshes every ``POLL_INTERVAL`` seconds. This lets
     the UI pull a fresh reading on demand. It re-queries the charge session under
     ``client_lock`` (so it never races the poll loop) and invalidates the
     statistics cache so the next ``/api/statistics`` call also re-fetches.
+
+    The two upstreams fail independently, so the vehicle read is reported
+    separately in ``vehicle`` rather than folded into ``ok``: an unreachable car
+    must not discard a good charger reading, and a charger-only refresh must not
+    present itself as having refreshed everything. A failed Ohme read is still a
+    502 — without it there is no new snapshot at all.
 
     Plug-in detection stays the responsibility of the background loop; this only
     refreshes the displayed snapshot, it does not (re)configure the charge target.
@@ -2805,9 +2853,18 @@ async def refresh() -> JSONResponse:
             status_code=502, detail="Could not refresh from Ohme"
         ) from exc
 
+    # The snapshot is now current, so store.status.connected reflects this poll
+    # when the vehicle read decides how to report a blocked automation.
+    vehicle = await _refresh_vehicle_state()
+
     # Drop the statistics cache so the next request re-fetches from Ohme.
     _summary_cache.update(key=None, value=None, at=0.0)
 
     return JSONResponse(
-        {"ok": True, "updatedAt": store.status.updated_at, "ready": store.ready}
+        {
+            "ok": True,
+            "updatedAt": store.status.updated_at,
+            "ready": store.ready,
+            "vehicle": vehicle,
+        }
     )

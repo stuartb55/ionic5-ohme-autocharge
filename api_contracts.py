@@ -109,6 +109,10 @@ class ContractModel(BaseModel):
 
 PersistenceStatus = Literal["saved", "memory_only"]
 ApplyStatus = Literal["applied", "not_connected", "already_at_target", "failed"]
+# Outcome of the Bluelink re-read a manual refresh performs alongside the Ohme
+# one. Reported separately because the two upstreams fail independently: the
+# charger reading can be fresh while the car is unreachable.
+VehicleReadStatus = Literal["ok", "failed"]
 
 
 class MutationOutcomeModel(ContractModel):
@@ -345,6 +349,8 @@ class RefreshResponseModel(ContractModel):
     ok: bool
     updatedAt: str | None
     ready: bool
+    # "ok" is a successful Bluelink re-read, "failed" a charger-only refresh.
+    vehicle: VehicleReadStatus
 
 
 class StatisticsWindowModel(BaseModel):
