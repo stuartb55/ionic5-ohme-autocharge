@@ -5,8 +5,8 @@
     "semantic_hash": ""
   },
   "api.py": {
-    "mtime": 1786211487.5162208,
-    "ast_hash": "af842e125e63dab1256163f51310b4cb",
+    "mtime": 1787592371.1550524,
+    "ast_hash": "9289f14282655843d8bc0000431ef887",
     "semantic_hash": ""
   },
   "bluelink.py": {
@@ -40,7 +40,7 @@
     "semantic_hash": ""
   },
   "frontend/package.json": {
-    "mtime": 1786821900.1248138,
+    "mtime": 1786822889.585919,
     "ast_hash": "e7aa4d325ce83f334f4f65c590c2eac6",
     "semantic_hash": ""
   },
@@ -60,8 +60,8 @@
     "semantic_hash": ""
   },
   "frontend/src/api/types.ts": {
-    "mtime": 1786211487.5266886,
-    "ast_hash": "875aa412c81119a74823768a703b7377",
+    "mtime": 1787592371.1634398,
+    "ast_hash": "e6260c7a2ebdd3f8701b88bd1b3a3690",
     "semantic_hash": ""
   },
   "frontend/src/api/usePolling.test.ts": {
@@ -110,8 +110,8 @@
     "semantic_hash": "a30e5e37c3677e6450591e8fd1fd4011"
   },
   "frontend/src/components/Dashboard.tsx": {
-    "mtime": 1786211487.5274806,
-    "ast_hash": "cf4613f58dc8159049dbfc8c2610af6f",
+    "mtime": 1787592371.163949,
+    "ast_hash": "af1f017a20751dfed783adff31cd46b6",
     "semantic_hash": ""
   },
   "frontend/src/components/DayTargetsEditor.test.tsx": {
@@ -385,8 +385,8 @@
     "semantic_hash": ""
   },
   "tests/test_api.py": {
-    "mtime": 1786211487.5474715,
-    "ast_hash": "3252fbc054c7da843141ea6c3a3768d9",
+    "mtime": 1787592371.1679068,
+    "ast_hash": "4fa35754799379940dfb54d8be75c771",
     "semantic_hash": ""
   },
   "tests/test_bluelink.py": {
@@ -430,8 +430,8 @@
     "semantic_hash": ""
   },
   ".github/workflows/docker.yml": {
-    "mtime": 1786114072.4863896,
-    "ast_hash": "92c0aecf07d10875d2e64a8b5e8a4227",
+    "mtime": 1787592371.153506,
+    "ast_hash": "e53476756fb0a8167ef370fe9c19013a",
     "semantic_hash": ""
   },
   "CLAUDE.md": {
@@ -440,18 +440,18 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1786113539.651834,
-    "ast_hash": "97b1ae476aab1ac5399311c3ceab1cdc",
+    "mtime": 1787592371.1546645,
+    "ast_hash": "0a2e3d17138a35e2c1641c77ff74614b",
     "semantic_hash": ""
   },
   "docker-compose.prod.yml": {
-    "mtime": 1786822147.1369984,
-    "ast_hash": "a2a4d92b497607f5d5de01ed5ba83986",
+    "mtime": 1786881910.8548992,
+    "ast_hash": "c0d40c6b36e303dd9f94bd65e72dea6a",
     "semantic_hash": ""
   },
   "docker-compose.yml": {
-    "mtime": 1786822147.1339998,
-    "ast_hash": "926ca0d7fa487d442e74b932a6d85453",
+    "mtime": 1786881910.8550744,
+    "ast_hash": "66e693d049dc92bb69f50369c93ee9b8",
     "semantic_hash": ""
   },
   "docs/grafana.md": {
@@ -470,13 +470,13 @@
     "semantic_hash": ""
   },
   "requirements-dev.txt": {
-    "mtime": 1786821692.5660586,
-    "ast_hash": "c15db5a12f2c40ca1889fefde160c24f",
+    "mtime": 1787592371.1644106,
+    "ast_hash": "140e166ad11fb057d665fb15b8145433",
     "semantic_hash": ""
   },
   "requirements.txt": {
-    "mtime": 1786821689.8651114,
-    "ast_hash": "d943b468a28d598584718624e2877e4e",
+    "mtime": 1787592371.1648467,
+    "ast_hash": "77e50895e43f10df063967d3db9840a0",
     "semantic_hash": ""
   },
   "frontend/public/apple-touch-icon.png": {
@@ -560,8 +560,8 @@
     "semantic_hash": ""
   },
   "api_contracts.py": {
-    "mtime": 1786211487.5169778,
-    "ast_hash": "52aad1985820cd1858b30069e5a8bbf8",
+    "mtime": 1787592371.1558042,
+    "ast_hash": "be0565fcd106b0ab2f9f3f79eda88d99",
     "semantic_hash": ""
   },
   "frontend/src/components/ChargeSettingsSection.tsx": {
@@ -732,11 +732,6 @@
   "AGENTS.md": {
     "mtime": 1786211487.5036595,
     "ast_hash": "c7cbec6046788056f34677a3d20eb134",
-    "semantic_hash": ""
-  },
-  "frontend/pnpm-workspace.yaml": {
-    "mtime": 1786113539.667123,
-    "ast_hash": "a38b79f7748767cfc0ecf5f681fc252a",
     "semantic_hash": ""
   },
   "frontend/public/icon-maskable.svg": {

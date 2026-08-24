@@ -7,3 +7,4 @@ venv/
 .DS_Store
 .codex-test-venv/
 .pnp-store/
+.claude/worktrees/

@@ -1,16 +1,16 @@
-# Graph Report - ionic5-ohme-autocharge  (2026-08-07)
+# Graph Report - ionic5-ohme-autocharge  (2026-08-24)
 
 ## Corpus Check
-- 134 files · ~119,161 words
+- 134 files · ~119,914 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1704 nodes · 3093 edges · 109 communities (83 shown, 26 thin omitted)
-- Extraction: 96% EXTRACTED · 4% INFERRED · 0% AMBIGUOUS · INFERRED: 112 edges (avg confidence: 0.62)
+- 1717 nodes · 3121 edges · 108 communities (83 shown, 25 thin omitted)
+- Extraction: 96% EXTRACTED · 4% INFERRED · 0% AMBIGUOUS · INFERRED: 115 edges (avg confidence: 0.62)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `42668aac`
+- Built from commit: `7e45ad80`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -114,7 +114,6 @@
 - [[_COMMUNITY_Community 103|Community 103]]
 - [[_COMMUNITY_Community 104|Community 104]]
 - [[_COMMUNITY_Community 105|Community 105]]
-- [[_COMMUNITY_Community 106|Community 106]]
 - [[_COMMUNITY_Community 107|Community 107]]
 
 ## God Nodes (most connected - your core abstractions)
@@ -124,22 +123,22 @@
 4. `_QuietAccessLogFilter` - 32 edges
 5. `handle_plugin_event()` - 31 edges
 6. `_load()` - 28 edges
-7. `ContractModel` - 26 edges
-8. `_mock_ohme_client()` - 23 edges
-9. `_charging_client()` - 22 edges
+7. `_charging_client()` - 27 edges
+8. `ContractModel` - 26 edges
+9. `_mock_ohme_client()` - 23 edges
 10. `_mock_manager()` - 22 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `docker-compose.yml (local dev)` --semantically_similar_to--> `docker-compose.prod.yml (home server)`  [INFERRED] [semantically similar]
   docker-compose.yml → docker-compose.prod.yml
+- `_QuietAccessLogFilter` --uses--> `DataQualityResponseModel`  [INFERRED]
+  api.py → api_contracts.py
 - `_QuietAccessLogFilter` --uses--> `MonthlyReportResponseModel`  [INFERRED]
   api.py → api_contracts.py
 - `_QuietAccessLogFilter` --uses--> `StatisticsResponseModel`  [INFERRED]
   api.py → api_contracts.py
 - `_QuietAccessLogFilter` --uses--> `StatusSnapshot`  [INFERRED]
   api.py → state.py
-- `SecurityHeadersMiddleware` --uses--> `MonthlyReportResponseModel`  [INFERRED]
-  api.py → api_contracts.py
 
 ## Import Cycles
 - None detected.
@@ -149,7 +148,7 @@
 - **Three-service deployment stack** — api, compose_postgres_service, frontend_readme_nginx [INFERRED 0.80]
 - **Postgres charging-history schema** — docs_grafana_telemetry_table, docs_grafana_charge_sessions_table, docs_grafana_schedule_snapshots_table, docs_grafana_daily_stats_table, docs_grafana_grid_consumption_table [EXTRACTED 0.90]
 
-## Communities (109 total, 26 thin omitted)
+## Communities (108 total, 25 thin omitted)
 
 ### Community 0 - "Poll Loop & Plug-in Detection"
 Cohesion: 0.05
@@ -180,16 +179,16 @@ Cohesion: 0.08
 Nodes (41): clear_date_override(), clear_pending_session(), clear_session_marker(), clear_trip_mode(), _load(), load_day_targets(), load_pending_sessions(), load_session_active() (+33 more)
 
 ### Community 8 - "Charge Controls UI"
-Cohesion: 0.14
-Nodes (13): StatusResponse, Action, ChargeControls(), Props, ChargeSettingsSection(), scheduleFixture, sessionAuditFixture, sessionsFixture (+5 more)
+Cohesion: 0.19
+Nodes (11): StatisticsResponse, Dashboard(), scheduleFixture, sessionAuditFixture, sessionsFixture, statisticsFixture, statusFixture, handlers (+3 more)
 
 ### Community 9 - "Dashboard & Energy Usage UI"
-Cohesion: 0.36
-Nodes (4): EnergyUsageResponse, EnergyUsageSection(), formatDay(), data
+Cohesion: 0.27
+Nodes (12): DataQualityResponse, ageLabel(), CheckState, countLabel(), DataQualitySection(), dateLabel(), dateTimeLabel(), homeEnergyCheck() (+4 more)
 
 ### Community 10 - "API Charge & Read Endpoints"
-Cohesion: 0.07
-Nodes (39): get_energy_usage(), get_schedule(), get_session_telemetry(), get_sessions(), get_soh_history(), get_status(), get_vehicles(), health() (+31 more)
+Cohesion: 0.06
+Nodes (47): _charge_action(), get_energy_usage(), get_schedule(), get_session_telemetry(), get_sessions(), get_soh_history(), get_status(), get_vehicles() (+39 more)
 
 ### Community 11 - "Energy Attribution Helpers"
 Cohesion: 0.12
@@ -197,19 +196,19 @@ Nodes (30): attribute_car_kwh(), _canon(), EnergyAttribution, merge_usage(), _ov
 
 ### Community 12 - "API Request Models"
 Cohesion: 0.10
-Nodes (46): ChargeActionResponseModel, DataQualityResponseModel, DayTargetsUpdate, DayTargetsUpdateResponseModel, IntegrationsResponseModel, MaxChargeUpdate, MutationOutcomeModel, NotificationPreferencesUpdate (+38 more)
+Nodes (42): ChargeActionResponseModel, DayTargetsUpdate, DayTargetsUpdateResponseModel, IntegrationsResponseModel, MaxChargeUpdate, MutationOutcomeModel, NotificationPreferencesUpdate, NotificationPreferencesUpdateResponseModel (+34 more)
 
 ### Community 13 - "Frontend API Client & Types"
-Cohesion: 0.12
-Nodes (29): ApiError, errorFor(), getJson(), postJson(), putJson(), REQUESTED_WITH, VersionResponse, ChargeActionResponse (+21 more)
+Cohesion: 0.08
+Nodes (38): ApiError, errorFor(), getJson(), postJson(), putJson(), REQUESTED_WITH, VersionResponse, ChargeActionResponse (+30 more)
 
 ### Community 15 - "Snapshot Build Tests"
-Cohesion: 0.10
-Nodes (22): _charging_client(), _slot(), test_build_snapshot_falls_back_to_client_battery_before_first_plugin(), test_build_snapshot_includes_lock_and_location_when_connected(), test_build_snapshot_includes_range_when_connected(), test_build_snapshot_includes_soh_when_connected(), test_build_snapshot_no_cost_when_disconnected(), test_build_snapshot_no_cost_without_price() (+14 more)
+Cohesion: 0.09
+Nodes (24): _charging_client(), The manual refresh must re-read the car, not just the charger., A recovered read moves the banner off the stale boot-time failure., _slot(), test_build_snapshot_falls_back_to_client_battery_before_first_plugin(), test_build_snapshot_includes_lock_and_location_when_connected(), test_build_snapshot_includes_range_when_connected(), test_build_snapshot_includes_soh_when_connected() (+16 more)
 
 ### Community 16 - "Statistics & Charts UI"
-Cohesion: 0.14
-Nodes (18): DailyStat, StatisticsResponse, EnergyBarChart(), METRIC_COLOR, Props, CHART_METRICS, CHART_TITLE, DeltaBadge() (+10 more)
+Cohesion: 0.15
+Nodes (16): DailyStat, EnergyBarChart(), METRIC_COLOR, Props, CHART_METRICS, CHART_TITLE, DeltaBadge(), Props (+8 more)
 
 ### Community 17 - "TypeScript Config"
 Cohesion: 0.10
@@ -221,7 +220,7 @@ Nodes (31): Decimal, _auth_headers(), consumption_is_enabled(), cost_for_slots()
 
 ### Community 19 - "Status UI & Formatters"
 Cohesion: 0.12
-Nodes (28): ChargerStatus, TariffResponse, BatteryRing(), Props, ringColor(), ConnectionBadge(), HeaderMeta(), Icon() (+20 more)
+Nodes (26): ChargerStatus, TariffResponse, BatteryRing(), Props, ringColor(), ConnectionBadge(), ScheduleSection(), dateTime() (+18 more)
 
 ### Community 20 - "Statistics & Weekly Digest"
 Cohesion: 0.08
@@ -232,12 +231,12 @@ Cohesion: 0.15
 Nodes (27): _mock_manager(), _mock_vehicle(), _get_manager should reuse the same VehicleManager instance across calls., A slow SDK read must not hang the caller — wait_for raises TimeoutError., test_calls_refresh_and_update_on_manager(), test_get_vehicle_state_async_returns_state(), test_get_vehicle_state_async_times_out(), test_get_vehicle_state_selects_by_id() (+19 more)
 
 ### Community 22 - "App Shell & Theming"
-Cohesion: 0.09
-Nodes (26): DataQualityResponse, PollingState, usePolling(), App(), Dashboard(), ageLabel(), CheckState, countLabel() (+18 more)
+Cohesion: 0.19
+Nodes (11): App(), OPTIONS, ThemeToggle(), root, registerServiceWorker(), applyTheme(), getStoredTheme(), prefersDark() (+3 more)
 
 ### Community 23 - "Settings Editor UI"
 Cohesion: 0.09
-Nodes (24): Vehicle, VehiclesResponse, Props, DAYS, DayTargetsEditor(), Props, EditablePreferences, NotificationSettings() (+16 more)
+Nodes (25): Vehicle, VehiclesResponse, ChargeSettingsSection(), Props, DAYS, DayTargetsEditor(), Props, EditablePreferences (+17 more)
 
 ### Community 24 - "Snapshot & Notification Tests"
 Cohesion: 0.06
@@ -272,16 +271,16 @@ Cohesion: 0.20
 Nodes (9): compilerOptions, allowSyntheticDefaultImports, module, moduleResolution, noEmit, skipLibCheck, strict, types (+1 more)
 
 ### Community 32 - "Poll & Status Tests"
-Cohesion: 0.09
-Nodes (25): _populate_snapshot(), Restart-mid-session recovery: connected but no held SOC -> fetch once,     even, Build a Bluelink VehicleState for patching bluelink.get_vehicle_state., test_active_vehicle_profile_reapplies_immediately(), test_consecutive_failures_count_and_reset(), test_day_targets_in_status_config(), test_failed_live_apply_is_explicit_and_releases_client_lock(), test_health_reports_last_error() (+17 more)
+Cohesion: 0.08
+Nodes (27): _populate_snapshot(), Restart-mid-session recovery: connected but no held SOC -> fetch once,     even, Build a Bluelink VehicleState for patching bluelink.get_vehicle_state., test_active_vehicle_profile_reapplies_immediately(), test_consecutive_failures_count_and_reset(), test_day_targets_in_status_config(), test_failed_live_apply_is_explicit_and_releases_client_lock(), test_health_reports_last_error() (+19 more)
 
 ### Community 33 - "Ntfy Test Suite"
 Cohesion: 0.22
 Nodes (10): Send a notification via ntfy. No-ops silently if NTFY_TOPIC is not configured., send(), _make_mock_session(), test_logs_warning_on_non_200_but_does_not_raise(), test_no_auth_header_when_token_not_set(), test_no_extra_headers_by_default(), test_sends_bearer_token_when_configured(), test_sends_correct_url_and_body() (+2 more)
 
 ### Community 34 - "Live SOC Refresh Tests"
-Cohesion: 0.23
-Nodes (8): SessionTelemetryPoint, SessionChargeCurve(), points, buildChargeCurve(), ChargeCurve, CurveDims, dims, formatTime()
+Cohesion: 0.50
+Nodes (4): get_data_quality(), _grade_consumption_quality(), Add severity and a drill-down day to the raw unsplit-interval counters., Read-only completeness counters for operations and alerting.
 
 ### Community 35 - "Efficiency & Digest Tests"
 Cohesion: 0.18
@@ -312,8 +311,8 @@ Cohesion: 0.36
 Nodes (8): Startup validation of required environment variables.  config.py is imported onc, Yield a callable that re-imports config; restores the real module after., reimport_config(), test_all_vars_present_imports_cleanly(), test_empty_value_counts_as_missing(), test_invalid_numeric_settings_fail_fast(), test_invalid_timezone_fails_fast(), test_missing_vars_produce_one_clear_message()
 
 ### Community 42 - "Vehicle Picker UI"
-Cohesion: 0.10
-Nodes (16): api, ApplyStatus, ChargeSessionEntry, IntegrationStatus, PersistenceStatus, SessionReviewFilter, SessionReviewIssue, Banner() (+8 more)
+Cohesion: 0.07
+Nodes (19): ApplyStatus, EnergyUsageResponse, IntegrationStatus, PersistenceStatus, PollingState, usePolling(), Banner(), HeaderMeta() (+11 more)
 
 ### Community 43 - "Access Log Filter Tests"
 Cohesion: 0.33
@@ -329,7 +328,7 @@ Nodes (5): Solid blue full-bleed background, EV charging app identity, PWA Maska
 
 ### Community 46 - "Battery Ring UI"
 Cohesion: 0.14
-Nodes (12): load_date_override(), load_ready_by(), load_trip_mode(), load_vehicle_profiles(), parse_hhmm(), Return the persisted ready-by time as ``HH:MM``, or None if unset/invalid., Return the pending one-session trip override, or None when inactive., Return the dated temporary override, or None when absent or malformed. (+4 more)
+Nodes (12): load_ready_by(), load_trip_mode(), load_vehicle_profiles(), parse_hhmm(), Return the persisted ready-by time as ``HH:MM``, or None if unset/invalid., Return the pending one-session trip override, or None when inactive., Return every valid per-vehicle profile; skip malformed entries., Persist the complete vehicle-profile mapping. (+4 more)
 
 ### Community 47 - "Renovate Config"
 Cohesion: 0.40
@@ -337,11 +336,11 @@ Nodes (4): extends, packageRules, platformAutomerge, $schema
 
 ### Community 49 - "Quiet Access Log Filter"
 Cohesion: 0.08
-Nodes (44): AutomationModel, ChargerPowerModel, ChargeSessionEntryModel, ChargeSlotModel, ComparisonModel, ConsumptionQualityModel, ContractModel, DailyQualityModel (+36 more)
+Nodes (45): AutomationModel, ChargerPowerModel, ChargeSessionEntryModel, ChargeSlotModel, ComparisonModel, ConsumptionQualityModel, ContractModel, DailyQualityModel (+37 more)
 
 ### Community 50 - "Security Headers Middleware"
-Cohesion: 0.13
-Nodes (19): SohHistoryResponse, COST_METHOD_LABELS, costMethodLabel(), dateTime(), DETAIL_LABELS, DETAIL_VALUE_LABELS, detailLabel(), detailValue() (+11 more)
+Cohesion: 0.10
+Nodes (23): api, SessionTelemetryPoint, COST_METHOD_LABELS, costMethodLabel(), DETAIL_LABELS, DETAIL_VALUE_LABELS, detailLabel(), detailValue() (+15 more)
 
 ### Community 51 - "App Icon Asset"
 Cohesion: 0.67
@@ -364,8 +363,8 @@ Cohesion: 1.00
 Nodes (3): EV Charging Dashboard App Identity, PWA App Icon (512px), White Lightning Bolt Glyph
 
 ### Community 60 - "Vite Config"
-Cohesion: 0.20
-Nodes (10): RuntimeError, test_charge_control_502_on_upstream_error(), test_get_vehicles_502_on_bluelink_error(), test_live_soc_swallows_bluelink_error_keeps_reading(), test_make_client_with_retry_eventually_succeeds(), test_refresh_502_on_upstream_error(), test_set_target_falls_back_to_plugin_soc_when_bluelink_fails(), test_statistics_502_on_upstream_error() (+2 more)
+Cohesion: 0.12
+Nodes (16): RuntimeError, An unreachable car must not discard a good charger reading., A failed retry must read as fresh, not as the untouched original error., A transient display-read blip must not raise a false alarm., test_charge_control_502_on_upstream_error(), test_get_vehicles_502_on_bluelink_error(), test_live_soc_swallows_bluelink_error_keeps_reading(), test_make_client_with_retry_eventually_succeeds() (+8 more)
 
 ### Community 62 - "Community 62"
 Cohesion: 0.07
@@ -380,8 +379,8 @@ Cohesion: 0.18
 Nodes (9): Architecture, Commands, Configuration, Docker, Git workflow, graphify, Single-worker constraint, Testing (+1 more)
 
 ### Community 65 - "Community 65"
-Cohesion: 0.15
-Nodes (13): build_snapshot(), _charge_action(), _iso(), pause_charge(), Translate the live Ohme client state into a serialisable snapshot.      Assumes, Run an Ohme charge-control call, then refresh the cached snapshot.      ``action, Pause the active charge session., Resume a paused charge session. (+5 more)
+Cohesion: 0.25
+Nodes (8): build_snapshot(), _iso(), Translate the live Ohme client state into a serialisable snapshot.      Assumes, Re-read the vehicle from Bluelink on behalf of a manual refresh.      Deliberate, Force an immediate live re-read from Ohme and Bluelink, rebuilding the     cache, refresh(), _refresh_vehicle_state(), VehicleReadStatus
 
 ### Community 66 - "Community 66"
 Cohesion: 0.67
@@ -396,8 +395,8 @@ Cohesion: 0.33
 Nodes (6): Upgrade the configured database to the repository's latest schema., _run_migrations(), main(), migration_config(), Config, Exercise the real Alembic chain against an isolated CI PostgreSQL service.
 
 ### Community 69 - "Community 69"
-Cohesion: 0.33
-Nodes (5): Health, healthy, VehicleHealth(), WARNINGS, WarnKey
+Cohesion: 0.20
+Nodes (9): StatusResponse, Action, ChargeControls(), Props, Health, healthy, VehicleHealth(), WARNINGS (+1 more)
 
 ### Community 71 - "Community 71"
 Cohesion: 0.29
@@ -421,7 +420,7 @@ Nodes (4): An Ohme client whose summary reports total energy and a total cost., 
 
 ### Community 95 - "Community 95"
 Cohesion: 0.29
-Nodes (6): DateOverride, Persist a dated temporary override, preserving all other settings., Persist the complete vehicle-profile mapping., Temporary charging defaults tied to one local departure date., save_date_override(), save_vehicle_profiles()
+Nodes (6): DateOverride, load_date_override(), Return the dated temporary override, or None when absent or malformed., Persist a dated temporary override, preserving all other settings., Temporary charging defaults tied to one local departure date., save_date_override()
 
 ### Community 96 - "Community 96"
 Cohesion: 0.67
@@ -454,17 +453,17 @@ Nodes (3): _on_poll_task_done(), Task, Log loudly if the poll loop ever exits un
 ## Knowledge Gaps
 - **199 isolated node(s):** `name`, `version`, `private`, `type`, `node` (+194 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **26 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **25 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `StatusSnapshot` connect `Snapshot & Notification Tests` to `Poll & Status Tests`, `Community 65`, `Community 98`, `API Test Suite`, `DB Fake Pool Fixtures`, `Fake DB Cursor Fixture`, `Community 72`, `API Request Models`, `Community 76`, `Battery Ring UI`, `DB Test Suite`, `DB Error-Handling Tests`, `Fake DB Connection Fixture`, `Poll Loop Telemetry & Persistence`, `Vite Config`, `Community 95`, `Community 63`?**
-  _High betweenness centrality (0.128) - this node is a cross-community bridge._
-- **Why does `_reapply_target_if_connected()` connect `API Charge & Read Endpoints` to `Vehicle Picker UI`, `API Request Models`?**
-  _High betweenness centrality (0.032) - this node is a cross-community bridge._
+  _High betweenness centrality (0.129) - this node is a cross-community bridge._
 - **Why does `AppState` connect `Community 63` to `Community 98`, `Community 103`, `Community 72`, `Community 104`, `Community 74`, `Community 107`, `Community 76`, `Battery Ring UI`, `Community 95`?**
-  _High betweenness centrality (0.029) - this node is a cross-community bridge._
+  _High betweenness centrality (0.026) - this node is a cross-community bridge._
+- **Why does `_reapply_target_if_connected()` connect `API Charge & Read Endpoints` to `Vehicle Picker UI`, `API Request Models`?**
+  _High betweenness centrality (0.025) - this node is a cross-community bridge._
 - **Are the 11 inferred relationships involving `StatusSnapshot` (e.g. with `_QuietAccessLogFilter` and `SecurityHeadersMiddleware`) actually correct?**
   _`StatusSnapshot` has 11 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 3 inferred relationships involving `AppState` (e.g. with `DateOverride` and `NotificationPreferences`) actually correct?**
