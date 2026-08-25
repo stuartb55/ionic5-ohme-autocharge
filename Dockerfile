@@ -1,4 +1,4 @@
-FROM python:3.14.7-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4
+FROM python:3.14.7-slim@sha256:83ff1d245a3d57d04152252d3ef9cb361494d0b3395abd65a5ebe91c401c8e83
 
 # Don't write .pyc files (the app dir is root-owned and the process runs as a
 # non-root user) and keep stdout/stderr unbuffered for prompt container logs.
