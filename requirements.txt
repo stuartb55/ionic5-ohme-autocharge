@@ -10,4 +10,4 @@ uvicorn[standard]==0.53.0
 psycopg[binary]==3.3.5
 psycopg-pool==3.3.1
 alembic==1.20.0
-SQLAlchemy==2.0.53
+SQLAlchemy==2.0.54
