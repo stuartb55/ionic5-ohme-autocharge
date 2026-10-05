@@ -13,7 +13,7 @@ COPY . .
 RUN npm run build
 
 # --- Stage 2: serve with a hardened, non-root nginx ---
-FROM nginxinc/nginx-unprivileged:1.31-alpine@sha256:26b0bf6fbf07297983cb341998d79c831508787de26627dd2a112321b9c3a4af AS runtime
+FROM nginxinc/nginx-unprivileged:1.31-alpine@sha256:b9241c6e7b8e9a862f129d8d4199ab64b10390949a78bdd5603379b32c844083 AS runtime
 
 # Runs as uid 101 (nginx) by default — no root.
 COPY --chown=nginx:nginx nginx.conf /etc/nginx/conf.d/default.conf
