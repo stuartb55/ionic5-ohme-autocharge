@@ -3,7 +3,7 @@
 # image remains the immutable deployment artifact.
 hyundai-kia-connect-api==4.35.1
 ohme==1.9.2
-aiohttp==3.14.4
+aiohttp==3.14.5
 python-dotenv==1.2.4
 fastapi==0.143.0
 uvicorn[standard]==0.54.0
