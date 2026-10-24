@@ -1,7 +1,7 @@
 -r requirements.txt
 pytest==9.1.1
 pytest-asyncio==1.4.0
-httpx2==2.14.0
+httpx2==2.16.0
 hypothesis==6.170.9
 ruff==0.16.10
 pip-audit==2.10.1
